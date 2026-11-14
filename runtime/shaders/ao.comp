@@ -8,16 +8,37 @@
 // projected into the slice (horizon-based ambient occlusion, after Jimenez et al. 2016, "Practical Real-Time
 // Strategies for Accurate Indirect Occlusion"). Slice angles and step offsets follow a 4x4 pattern that ao_blur.comp
 // averages out. The pattern stays put from frame to frame, with a temporal upscaler too (vk_ao.c has the measurement).
-// Output: .x visibility (1 open, 0 enclosed), .y the texel's view z (0 sky) for the depth-aware blur and upsampling.
+// Output: .rgb the visibility per colour channel (1 open, 0 enclosed), .a the texel's view z (0 sky) for the
+// depth-aware blur and upsampling.
+//
+// LIT (a specialization constant: the frame's ambient light is known, vk_ao.c frame_light): the light of what hides
+// counts. On each side of a slice the arc between the tangent plane and the horizon is hidden, and the texel sees the
+// surfaces that raised the horizon there instead. The arc's cosine-weighted share (the same closed form, taken
+// between the two angles) is given back in proportion to those surfaces' light over the game's ambient light along
+// the texel's normal, per colour channel and at most whole: next to a lit sign the arc the sign hides keeps its
+// light, and no arc ever counts for more than the open sky it replaced (the light per arc after Mayaux 2018,
+// "Horizon-Based Indirect Lighting"). The light is one read of ao_src.comp's image per side, two thirds of the way to
+// the sample that set the horizon, at the level whose texels span the last two thirds of that way: what stands
+// between the texel and its horizon, without the texel's own light. A read per sample that raises the horizon gave
+// the same picture for 0.16 ms more on a 1472x828 scene (Arc 140T). The light counts from pc.lit.z times the ambient
+// light up (an obstacle lit by the same sky is seen from its lit side here, not from the side the texel faces, and
+// gave back most of every contact) and whole 1 / pc.lit.w later.
+// Without LIT the three channels hold the same visibility, and src_tex and amb_tex are stand-ins.
+layout(constant_id = 0) const bool LIT = false;
 layout(local_size_x = 8, local_size_y = 8) in;
 layout(binding = 0) uniform sampler2D z_tex;
-layout(binding = 1) uniform writeonly image2D ao_out;   // RG16F, or RG32F where RG16F cannot be stored (vk_ao.c)
+layout(binding = 1, rgba16f) uniform writeonly image2D ao_out;
+layout(binding = 2) uniform sampler2D src_tex;     // ao_src.comp's light with its levels, trilinear
+layout(binding = 3) uniform samplerCube amb_tex;   // one coarse level of the game's ambient cube map
 layout(push_constant) uniform P {
     vec4 ndc_to_view;   // x = z * (ndc.x * a + b), y = z * (ndc.y * c + d)
     vec4 size;          // width, height, how many times wider than tall a texel is in view space (1: square), 0
     vec4 radius;        // world radius, pixels per unit at view distance 1, largest radius in pixels,
                         // fade distance
     vec4 steps;         // slices, steps per side, 0, 0
+    vec4 lit;           // the ambient light's factor on amb_tex, src_tex's top level, the light over the ambient light
+                        // from which a hidden arc counts, and 1 / the span up to where it counts whole
+    vec4 world0, world1, world2;   // .xyz: the rows of the view-to-world rotation
 } pc;
 
 const float PI = 3.14159265;
@@ -37,12 +58,24 @@ vec3 nearer(vec3 c, vec3 a, vec3 b) {
     return abs(da.z) < abs(db.z) ? da : db;
 }
 
+// The cosine-weighted share of a slice between the view direction and the angle h from it (n: the normal's angle).
+float arc(float h, float n, float cn, float sn) { return 0.25 * (-cos(2.0 * h - n) + cn + 2.0 * h * sn); }
+
+// The light of what hides an arc, as the share of the arc it gives back: one read of the light sent out two thirds of
+// the way to the sample that set the horizon (far: its offset in texels, .z its length; the image's level 0 holds 2x2
+// texels), over the ambient light.
+vec3 given_back(ivec2 p, vec3 far, vec3 inv_amb) {
+    vec2 uv = (vec2(p) + 0.5 + far.xy * (2.0 / 3.0)) / pc.size.xy;
+    vec3 ratio = textureLod(src_tex, uv, clamp(log2(max(far.z / 3.0, 1.0)), 0.0, pc.lit.y)).rgb * inv_amb;
+    return clamp((ratio - pc.lit.z) * pc.lit.w, 0.0, 1.0);
+}
+
 void main() {
     ivec2 p = ivec2(gl_GlobalInvocationID.xy);
     if (p.x >= int(pc.size.x) || p.y >= int(pc.size.y)) return;
     float z = z_at(p);
     if (z == 0.0) {   // the sky
-        imageStore(ao_out, p, vec4(1.0, 0.0, 0.0, 0.0));
+        imageStore(ao_out, p, vec4(1.0, 1.0, 1.0, 0.0));
         return;
     }
     vec3 P = pos_of(vec2(p) + 0.5, z);
@@ -50,7 +83,7 @@ void main() {
     float fade = clamp(2.0 - 2.0 * dist / pc.radius.w, 0.0, 1.0);   // gone at the fade distance, full at half of it
     float r_px = min(pc.radius.x * pc.radius.y / abs(z), pc.radius.z);
     if (fade <= 0.0 || r_px < 1.0) {
-        imageStore(ao_out, p, vec4(1.0, z, 0.0, 0.0));
+        imageStore(ao_out, p, vec4(1.0, 1.0, 1.0, z));
         return;
     }
     // the normal; window y down is view y up, so the y difference is taken top minus bottom
@@ -66,9 +99,17 @@ void main() {
     float turn = (b + 0.5) / 16.0;
     float jit = fract((b + 0.5) / 16.0 * 7.0);
 
+    // one over the game's ambient light along the normal, the light an open arc stands for
+    vec3 inv_amb = vec3(0.0);
+    if (LIT) {
+        vec3 Nw = vec3(dot(pc.world0.xyz, N), dot(pc.world1.xyz, N), dot(pc.world2.xyz, N));
+        inv_amb = 1.0 / max(pc.lit.x * textureLod(amb_tex, Nw, 0.0).rgb, vec3(1e-4));
+    }
+
     int slices = int(pc.steps.x), steps = int(pc.steps.y);
     float R2 = pc.radius.x * pc.radius.x;
     float vis = 0.0;
+    vec3 back = vec3(0.0);   // the hidden arcs' light given back
     for (int s = 0; s < slices; s++) {
         float phi = (float(s) + turn) * PI / float(slices);
         // The slice's direction is taken in view space; its step in window pixels (y down) is that many times shorter
@@ -83,12 +124,16 @@ void main() {
         if (plen < 1e-4) continue;
         float cn = clamp(dot(pn, V) / plen, -1.0, 1.0);
         float n = sign(dot(pn, ortho)) * acos(cn);
+        float sn = sin(n);
         // lowest horizons: the tangent plane on either side
         float lo1 = cos(n + PI * 0.5), lo0 = cos(n - PI * 0.5);
         float c1 = lo1, c0 = lo0;
+        // per side, the offset of the sample that set the horizon (.xy, in texels) and its length (.z)
+        vec3 far1 = vec3(0.0), far0 = vec3(0.0);
         for (int i = 0; i < steps; i++) {
             float t = (float(i) + jit) / float(steps);
-            vec2 so = o * max(t * t * r_px, 1.0 + float(i));
+            float len = max(t * t * r_px, 1.0 + float(i));
+            vec2 so = o * len;
             for (int side = 0; side < 2; side++) {
                 vec2 win = vec2(p) + 0.5 + (side == 0 ? so : -so);
                 if (win.x < 0.0 || win.y < 0.0 || win.x >= pc.size.x || win.y >= pc.size.y) continue;
@@ -100,16 +145,28 @@ void main() {
                 if (h2 < 1e-8) continue;
                 float ch = dot(H, V) * inversesqrt(h2);
                 float wt = clamp(2.0 - 2.0 * h2 / R2, 0.0, 1.0);   // full within 0.7 R, gone at R
+                if (LIT) {
+                    if (side == 0 && mix(lo1, ch, wt) > c1) far1 = vec3(so, len);
+                    if (side == 1 && mix(lo0, ch, wt) > c0) far0 = vec3(-so, len);
+                }
                 if (side == 0) c1 = max(c1, mix(lo1, ch, wt));
                 else c0 = max(c0, mix(lo0, ch, wt));
             }
         }
         float h1 = n + min(acos(c1) - n, PI * 0.5);
         float h0 = n + max(-acos(c0) - n, -PI * 0.5);
-        float sn = sin(n);
         float a = 0.25 * (-cos(2.0 * h1 - n) + cn + 2.0 * h1 * sn) + 0.25 * (-cos(2.0 * h0 - n) + cn + 2.0 * h0 * sn);
         vis += plen * a;   // a slice's share: an open surface sums to 1 over the turns, whatever its slant
+        if (LIT) {
+            // the arc hidden on each side, from the tangent plane to the horizon, and the light of what hides it
+            float hid1 = arc(n + PI * 0.5, n, cn, sn) - arc(h1, n, cn, sn);
+            float hid0 = arc(n - PI * 0.5, n, cn, sn) - arc(h0, n, cn, sn);
+            vec3 lit = vec3(0.0);
+            if (hid1 > 0.002) lit += hid1 * given_back(p, far1, inv_amb);
+            if (hid0 > 0.002) lit += hid0 * given_back(p, far0, inv_amb);
+            back += plen * lit;
+        }
     }
-    float ao = clamp(vis / float(slices), 0.0, 1.0);
-    imageStore(ao_out, p, vec4(mix(1.0, ao, fade), z, 0.0, 0.0));
+    vec3 v = clamp((vec3(vis) + back) / float(slices), 0.0, 1.0);
+    imageStore(ao_out, p, vec4(mix(vec3(1.0), v, fade), z));
 }

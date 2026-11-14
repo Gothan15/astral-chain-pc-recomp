@@ -1,0 +1,63 @@
+#version 450
+// Ambient occlusion (runtime/vk_ao.c run): the light the surfaces send out, level 0 of the image ao.comp reads where a
+// surface hides part of another's sky. One texel stands for 2x2 occlusion texels: the light target's average over
+// their pixels (one bilinear tap in the middle of each occlusion texel's pixels), with the game's fog taken out
+// (ao_blur.comp has the formula): the fog is light scattered in front of the surface, which the surface does not send
+// to its neighbours. An occlusion texel of sky (view z 0) counts as dark: the sky's light is the ambient light the
+// occlusion takes away, and it must not leak into the roofs' edges. The fog is computed once, at the middle of the
+// texel with the mean view z of its surfaces.
+// The light target holds the opaque surfaces only when the occlusion runs: what the game draws afterwards (transparent
+// signs, neon tubes, LED panels) sends no light here.
+// Out: .rgb the light, .a the texel's mean view z (0 sky).
+layout(local_size_x = 8, local_size_y = 8) in;
+layout(binding = 0) uniform sampler2D z_tex;       // view z at the occlusion's resolution (ao_prep.comp)
+layout(binding = 1, rgba16f) uniform writeonly image2D src_out;
+layout(binding = 2) uniform sampler2D light_tex;   // bilinear
+layout(binding = 4) uniform samplerCube fog_tex;   // the game's fog cube map; a stand-in without fog
+layout(push_constant) uniform P {  // ao_blur.comp's constants
+    vec4 glow;          // x: light-target pixels per occlusion texel; w: 1 with the game's fog known
+    vec4 curve;
+    vec4 ndc_to_view;   // view x = z * (ndc.x * a + b), view y = z * (ndc.y * c + d)
+    vec4 size;          // light target width, height, the fog's luminance threshold, its factor on bright surfaces
+    vec4 world0, world1, world2;   // .xyz: the rows of the view-to-world rotation
+    vec4 fog;           // start, 1 / range, exponent, colour scale
+} pc;
+
+void main() {
+    ivec2 p = ivec2(gl_GlobalInvocationID.xy), sz = imageSize(src_out);
+    if (p.x >= sz.x || p.y >= sz.y) return;
+    ivec2 zs = textureSize(z_tex, 0);
+    vec3 c = vec3(0.0);
+    float zsum = 0.0, n = 0.0;
+    for (int j = 0; j < 2; j++)
+        for (int i = 0; i < 2; i++) {
+            ivec2 t = min(p * 2 + ivec2(i, j), zs - 1);
+            float tz = texelFetch(z_tex, t, 0).r;
+            if (tz == 0.0) continue;
+            c += textureLod(light_tex, (vec2(t) + 0.5) * pc.glow.x / pc.size.xy, 0.0).rgb;
+            zsum += tz;
+            n += 1.0;
+        }
+    if (n == 0.0) {
+        imageStore(src_out, p, vec4(0.0));
+        return;
+    }
+    float z = zsum / n;
+    c /= n;
+    if (pc.glow.w > 0.5) {
+        vec2 win = (vec2(p) * 2.0 + 1.0) * pc.glow.x;   // the middle of the texel, in light-target pixels
+        vec2 ndc = vec2(win.x / pc.size.x * 2.0 - 1.0, 1.0 - win.y / pc.size.y * 2.0);
+        vec3 pv = z * vec3(ndc.x * pc.ndc_to_view.x + pc.ndc_to_view.y, ndc.y * pc.ndc_to_view.z + pc.ndc_to_view.w, 1.0);
+        vec3 dir = vec3(dot(pc.world0.xyz, pv), dot(pc.world1.xyz, pv), dot(pc.world2.xyz, pv));
+        vec4 cube = textureLod(fog_tex, dir, 0.0);
+        vec3 colour = cube.rgb * pc.fog.w;
+        float f = clamp(pow(clamp((length(pv) - pc.fog.x) * pc.fog.y, 0.0, 1.0), pc.fog.z) * cube.a, 0.0, 1.0);
+        if (pc.size.w != 1.0) {
+            vec3 lit = max(c - colour * f, 0.0) / max(1.0 - f, 1e-3);
+            float h = clamp(dot(lit, vec3(0.2989, 0.587, 0.114)) - pc.size.z, 0.0, 1.0);
+            f = clamp(f * (1.0 + h * (pc.size.w - 1.0)), 0.0, 1.0);
+        }
+        c = max(c - colour * f, 0.0);
+    }
+    imageStore(src_out, p, vec4(min(c * (n * 0.25), vec3(4096.0)), z));
+}

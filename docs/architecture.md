@@ -242,13 +242,25 @@ Every guest thread is a host thread. Astral Chain assumes Horizon's scheduler: t
   The first light-target pass with the scene depth after the game's R32F linear-depth pass that writes colour is the
   opaque lighting (in play, every other frame, a pass with its colour writes masked off comes before it); when
   the next pass with other targets begins (or a dispatch or copy comes first), `ao_prep.comp` takes the scene depth to a
-  half-resolution view z, `ao.comp` searches horizons along 2 or 3 directions within 1.5 m and a quarter of the picture's
-  height (GTAO's closed-form integral, a fixed 4x4 pattern), `ao_blur.comp` averages the pattern out at half resolution
-  with depth-aware weights, lets go of what glows (light several times the picture's typical brightness, which
-  `ao_meter.comp` reads: signs, lamps, fires) and turns the visibility into the factor on the light by a fixed curve
-  (visibility from 0.9 up is left alone, the rest squared: `AO_OPEN`, `AO_POWER`), and `ao_apply.frag` scales the
-  factor up and multiplies the light target through a blend. Transparents, bloom, tonemap and HUD come after. The
-  camera is the c3 block of the scene's draws, as for the motion vectors.
+  half-resolution view z, `ao_src.comp` the light target (without the fog) to the light the surfaces send out, at a
+  quarter of the scene's resolution with coarser levels, `ao.comp` searches horizons along 2 or 3 directions within
+  1.5 m and a quarter of the picture's height (GTAO's closed-form integral, a fixed 4x4 pattern), `ao_blur.comp`
+  averages the pattern out at half resolution with depth-aware weights and turns the visibility into the factor on the
+  light by a fixed curve (visibility from 0.9 up is left alone, the rest squared: `AO_OPEN`, `AO_POWER`), and
+  `ao_apply.frag` scales the factor up and multiplies the light target through a blend. Transparents, bloom, tonemap
+  and HUD come after. The camera is the c3 block of the scene's draws, as for the motion vectors.
+  The occlusion takes only what the sky gives. The game's opaque shaders light a surface with `mask x albedo x
+  ambient(N) + local lights + reflections + emission`, `ambient(N)` being the ambient cube map (fragment texture slot
+  5) along the normal times c5 row 1 `.w` over pi; `vk_ao_draw` takes both from the opaque lighting's draws. The
+  factor acts on `min(surface, 0.9 x ambient(N))` of each pixel only, so signs and surfaces under lamps keep the rest,
+  and `ao.comp` gives a hidden arc back in proportion to the light of what hides it over the ambient light, per colour
+  channel, from 1x up and whole at 3x (`AO_CREDIT_LO`, `AO_CREDIT_HI`): what stands above a lit ground line keeps that
+  line's light and colour, and the contact under a car stays. Without those inputs a frame multiplies the whole
+  surface and lets go of what glows (light several times the picture's typical brightness, which `ao_meter.comp`
+  reads). Tried in play and left out: the screen-space sun mask in the bound (it is 0 all over the characters, which
+  then lost all occlusion, and on the ground it took the contact off a car in its own shadow), the previous frame's
+  light target as the light sent out (it holds the holographic HUD, a frame late), and the ambient light read along
+  the open direction (no visible change in Harmony Square).
   The game's fog keeps its light: every opaque fragment shader ends with a distance fog, `mix(surface, cube map colour
   x scale, f)` with `f` from the distance to the camera, and that fog can be most of a pixel with a small `f` (a misty
   street 20 m away: 1.5 from the surface, 16 from the fog). Multiplying such pixels whole dug dark, blurred, shimmering
@@ -260,10 +272,11 @@ Every guest thread is a host thread. Astral Chain assumes Horizon's scheduler: t
   from 0.054 back to 0.030 (0.027 without occlusion). Half resolution and the fixed pattern hold with a temporal
   upscaler too: with FSR 3 a pattern turning per frame made the picture less steady, and the scene's full resolution cost 2.5 ms for no gain. Lengths on screen count
   in heights of the target, so ultrawide targets and `aspect = wide` (an ultrawide view in a 16:9 target) behave alike.
-  At 2560x1440 on an Arc 140T: about 1.45 ms (low) and 1.8 ms (high); the fog step added 0.04 ms to the 0.58 ms of
-  a 1472x828 scene (the factor's image holds three channels and view z). `AC_GPU_PASSES` times each step ("ao"),
-  `AC_AO_DEBUG=1` shows the factor alone, `2` the scene without the fog computed here (a check of that computation),
-  `3` multiplies the fog too.
+  On an Arc 140T, apply included: 0.72 ms (low) and 0.98 ms (high) on a 1472x828 scene (FSR 3 balanced for
+  2560x1440), about 1.85 ms (low) at 2560x1440; occluding only what the sky gives and the light sent out added
+  0.16 ms (low) to the first. `AC_GPU_PASSES` times each step ("ao"),
+  `AC_AO_DEBUG=1` shows the factor alone, `2` the part of the scene the occlusion acts on (without the fog computed
+  here and the light beyond what the sky gives: a check of both), `3` multiplies the fog too.
 - The sun shadow map, one 2048x2048 DEPTH24_STENCIL8 texture on 1.0.1, is made `shadow_scale` times larger on each side
   (`vk_texture.c` `shadow_scale_of`; 2 by default, 1 in the Steam Deck profile): its depth-only pass draws at that
   size and the screen-space sun mask that reads it samples in UV, so edges get finer at the same softness. At x2 it

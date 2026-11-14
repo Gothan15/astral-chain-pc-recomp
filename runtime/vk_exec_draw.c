@@ -581,6 +581,9 @@ VkImageView vk_exec_target_view(const VkTexImage *img, VkFormat format, VkImageV
         VkImageViewUsageCreateInfo use = {.sType = VK_STRUCTURE_TYPE_IMAGE_VIEW_USAGE_CREATE_INFO,
                                           .usage = VK_IMAGE_USAGE_COLOR_ATTACHMENT_BIT};
         if (blocks) ci.pNext = &use;   // not the BC image's sampling and transfer usages
+        // a view of the BC image in its own format, which only a sampler reads (vk_ao.c: the fog's and the ambient
+        // light's cube maps): not the COLOR_ATTACHMENT usage of its block views, which no BC format supports
+        else if (img->block_views) use.usage = VK_IMAGE_USAGE_SAMPLED_BIT, ci.pNext = &use;
         if (vkCreateImageView(vk_ctx()->device, &ci, NULL, &view) != VK_SUCCESS)
             rt_fatal("vk: render target view (format %d) could not be created", (int)format);
         ViewNode *n = malloc(sizeof *n);
