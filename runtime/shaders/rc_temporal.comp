@@ -1,0 +1,100 @@
+#version 450
+// Radiance cascades, history of g (runtime/vk_rc.c vk_rc_run, AC_RC_TEMPORAL): this frame's g at each cascade-0 probe
+// blended with last frame's history read where the probe's surface point was then. The probe's view position (from its
+// texel and view z, as rc_trace.comp) goes through this frame's view-to-last-frame's-view transform and last frame's
+// ndc_to_view to last frame's window. The camera block's matrices carry no jitter (vk_dlaa.c moves the viewport
+// instead), so the point lands up to half a scene pixel off, an eighth of a probe at most: the history is that much
+// softer, which the blend's own averaging dwarfs.
+// The history is read between the 4 probes around that point, each with its bilinear weight when its view z matches the
+// depth the plane through this probe predicts at its place (the reprojected z plus this frame's depth slope, the nearer
+// one-sided difference between probes, times the offset), within 4% + 0.05: on a slanted ground every probe of the
+// surface counts, across a silhouette only the probes of the probe's own surface; the kept weights are renormalised,
+// and the history's share ramps from none at no weight kept to full at a quarter of it (disoccluded, off screen, sky:
+// this frame's g). Probe positions are their own texels, the last one brought back to the image's border, so the edge
+// probes have a history too; the history is read up to one probe spacing past the grid (nearly a whole probe at the
+// right or bottom edge when the last probe was brought back to the border).
+// Nothing non-finite settles in it: what is read and written is bounded.
+// Out: .rgb the history (what ao_blur.comp applies), .a the probe's view z.
+layout(local_size_x = 8, local_size_y = 8) in;
+layout(binding = 0) uniform sampler2D g_tex;                     // rc_resolve.comp: .rgb g, .a probe view z
+layout(binding = 1, rgba16f) uniform writeonly image2D hist_out;
+layout(binding = 2) uniform sampler2D hist_tex;                  // last frame's history: .rgb, .a probe view z
+layout(push_constant) uniform P {
+    vec4 ndc_to_view;   // this frame's, as in ao.comp
+    vec4 prev_n2v;      // last frame's
+    vec4 size;          // occlusion width, height, probe spacing, alpha (the weight of this frame's g; 1: no history)
+    vec4 m0, m1, m2;    // rows of this frame's view to last frame's view (rotation | translation)
+    ivec4 grid;         // probes across and down
+} pc;
+
+const float G_MAX = 16384.0;   // as rc_resolve.comp
+
+vec3 finite(vec3 v) { return any(isnan(v)) || any(isinf(v)) ? vec3(0.0) : clamp(v, vec3(0.0), vec3(G_MAX)); }
+
+// Window position of probe i along an axis of n probes over size texels (rc_trace.comp's, the last at the border).
+float probe_win(int i, int n, float size, int sp) { return min(float(clamp(i, 0, n - 1) * sp + sp / 2), size - 1.0) + 0.5; }
+
+// The probe to the lower side of window position w along that axis (-1 to n - 1) and the fraction towards the next.
+int axis_at(float w, int n, float size, int sp, out float f) {
+    int i0 = clamp(int(floor((w - float(sp / 2) - 0.5) / float(sp))), -1, n - 1);
+    if (i0 + 1 < n && w >= probe_win(i0 + 1, n, size, sp)) i0++;   // past a last probe brought back to the border
+    float lo = i0 < 0 ? probe_win(0, n, size, sp) - float(sp) : probe_win(i0, n, size, sp);
+    float hi = i0 + 1 > n - 1 ? probe_win(n - 1, n, size, sp) + float(sp) : probe_win(i0 + 1, n, size, sp);
+    f = clamp((w - lo) / max(hi - lo, 1e-6), 0.0, 1.0);
+    return i0;
+}
+
+// This frame's depth slope per probe step along d, the nearer one-sided difference (across an edge the far side belongs
+// to another surface); a side past the grid or on the sky does not count. 0 when both sides are jumps of opposite sign
+// (a probe on a thin object, one probe wide): no plane passes through it.
+float slope(ivec2 p, ivec2 d, float z) {
+    ivec2 pa = p - d, pb = p + d;
+    bool ina = all(greaterThanEqual(pa, ivec2(0))) && all(lessThan(pa, pc.grid.xy));
+    bool inb = all(greaterThanEqual(pb, ivec2(0))) && all(lessThan(pb, pc.grid.xy));
+    float a = ina ? texelFetch(g_tex, pa, 0).a : 0.0, b = inb ? texelFetch(g_tex, pb, 0).a : 0.0;
+    float da = a == 0.0 ? 1e30 : z - a, db = b == 0.0 ? 1e30 : b - z;
+    float jump = 0.04 * abs(z) + 0.05;
+    if (abs(da) < 1e29 && abs(db) < 1e29 && abs(da) > jump && abs(db) > jump && da * db < 0.0) return 0.0;
+    float s = abs(da) < abs(db) ? da : db;
+    return abs(s) > 1e29 ? 0.0 : s;
+}
+
+void main() {
+    ivec2 p = ivec2(gl_GlobalInvocationID.xy);
+    if (p.x >= pc.grid.x || p.y >= pc.grid.y) return;
+    vec4 g = texelFetch(g_tex, p, 0);
+    vec3 outc = finite(g.rgb);
+    float alpha = pc.size.w;
+    if (g.a != 0.0 && alpha < 1.0) {
+        int sp = int(pc.size.z);
+        vec2 win = vec2(probe_win(p.x, pc.grid.x, pc.size.x, sp), probe_win(p.y, pc.grid.y, pc.size.y, sp));
+        vec2 ndc = vec2(win.x / pc.size.x * 2.0 - 1.0, 1.0 - win.y / pc.size.y * 2.0);
+        vec3 P = g.a * vec3(ndc.x * pc.ndc_to_view.x + pc.ndc_to_view.y, ndc.y * pc.ndc_to_view.z + pc.ndc_to_view.w, 1.0);
+        vec3 Q = vec3(dot(pc.m0.xyz, P) + pc.m0.w, dot(pc.m1.xyz, P) + pc.m1.w, dot(pc.m2.xyz, P) + pc.m2.w);
+        if (Q.z < 0.0) {   // in front of last frame's camera
+            vec2 qn = vec2((Q.x / Q.z - pc.prev_n2v.y) / pc.prev_n2v.x, (Q.y / Q.z - pc.prev_n2v.w) / pc.prev_n2v.z);
+            vec2 qw = vec2((qn.x + 1.0) * 0.5 * pc.size.x, (1.0 - qn.y) * 0.5 * pc.size.y);
+            if (all(greaterThanEqual(qw, vec2(-float(sp)))) && all(lessThanEqual(qw, pc.size.xy + float(sp)))) {
+                vec2 f;
+                ivec2 i0 = ivec2(axis_at(qw.x, pc.grid.x, pc.size.x, sp, f.x), axis_at(qw.y, pc.grid.y, pc.size.y, sp, f.y));
+                vec2 s = vec2(slope(p, ivec2(1, 0), g.a), slope(p, ivec2(0, 1), g.a));
+                float tol = 0.04 * abs(Q.z) + 0.05, wsum = 0.0;
+                vec3 h = vec3(0.0);
+                for (int y = 0; y < 2; y++)
+                    for (int x = 0; x < 2; x++) {
+                        ivec2 q = i0 + ivec2(x, y);
+                        if (any(lessThan(q, ivec2(0))) || any(greaterThanEqual(q, pc.grid.xy))) continue;
+                        vec4 v = texelFetch(hist_tex, q, 0);
+                        float ze = Q.z + s.x * (float(x) - f.x) + s.y * (float(y) - f.y);
+                        if (v.a == 0.0 || !(abs(v.a - ze) < tol)) continue;   // a NaN is rejected too
+                        float w = (x == 0 ? 1.0 - f.x : f.x) * (y == 0 ? 1.0 - f.y : f.y);
+                        h += finite(v.rgb) * w;
+                        wsum += w;
+                    }
+                // the history's share ramps up with the weight kept, rather than switching on at a threshold
+                if (wsum > 1e-4) outc = mix(outc, mix(h / wsum, outc, alpha), clamp(wsum * 4.0, 0.0, 1.0));
+            }
+        }
+    }
+    imageStore(hist_out, p, vec4(outc, g.a));
+}

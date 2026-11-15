@@ -142,6 +142,9 @@ int probe_cfg(void) {
     CHECK(m && EQ(m->def, "130") && EQ(m->values, "0..300"), "meta: rumble strength 130 in 0..300");
     m = cfg_meta("PERF_OVERLAY");
     CHECK(m && EQ(m->def, "off") && EQ(m->values, "off|fps|full") && m->live, "meta: perf_overlay is live, off by default");
+    // the menu's ambient occlusion row names these four in this order (ui/menu.cpp tab_screen)
+    m = cfg_meta("AO");
+    CHECK(m && EQ(m->def, "off") && EQ(m->values, "off|low|high|gi") && m->live, "meta: ao is live, off by default, up to gi");
     CHECK(cfg_meta("BIND_A") == NULL && cfg_meta("FPS_COUNTER") == NULL && cfg_meta("NO_SUCH") == NULL,
           "meta: keys the menu does not show are NULL");
 

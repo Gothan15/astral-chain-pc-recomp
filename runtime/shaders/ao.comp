@@ -35,7 +35,7 @@ layout(push_constant) uniform P {
     vec4 size;          // width, height, how many times wider than tall a texel is in view space (1: square), 0
     vec4 radius;        // world radius, pixels per unit at view distance 1, largest radius in pixels,
                         // fade distance
-    vec4 steps;         // slices, steps per side, 0, 0
+    vec4 steps;         // slices, steps per side, thin (vk_ao.c AO_THIN), 0
     vec4 lit;           // the ambient light's factor on amb_tex, src_tex's top level, the light over the ambient light
                         // from which a hidden arc counts, and 1 / the span up to where it counts whole
     vec4 world0, world1, world2;   // .xyz: the rows of the view-to-world rotation
@@ -144,7 +144,12 @@ void main() {
                 float h2 = dot(H, H);
                 if (h2 < 1e-8) continue;
                 float ch = dot(H, V) * inversesqrt(h2);
-                float wt = clamp(2.0 - 2.0 * h2 / R2, 0.0, 1.0);   // full within 0.7 R, gone at R
+                // full within 0.7 R, gone at R; "thin" times the square of the offset along the view direction
+                // adds to the squared distance: the depth buffer has no thickness, and a thin shape in front of the surface (bars,
+                // a cage) would otherwise hide its sky like a wall (after the thin-occluder compensation in XeGTAO,
+                // XeGTAO.hlsli, XeGTAO_MainPass, which scales the sample offset's view-space depth; no code copied)
+                float dv = dot(H, V);
+                float wt = clamp(2.0 - 2.0 * (h2 + pc.steps.z * dv * dv) / R2, 0.0, 1.0);
                 if (LIT) {
                     if (side == 0 && mix(lo1, ch, wt) > c1) far1 = vec3(so, len);
                     if (side == 1 && mix(lo0, ch, wt) > c0) far0 = vec3(-so, len);

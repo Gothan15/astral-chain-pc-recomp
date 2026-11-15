@@ -1,0 +1,44 @@
+#version 450
+// Radiance cascades, debug view (runtime/vk_rc.c vk_rc_show): rc_resolve.comp's per-probe output brought to every
+// occlusion texel, into vk_ao.c's factor image, which ao_apply.frag then shows in place of the light with its blend
+// off. Each texel blends the 4 probes around it by distance and by how close their view z is to its own, and takes
+// the probe nearest in depth when none matches. The value is written half a texel before the texel on each axis, where
+// ao_apply.frag expects ao_blur.comp's.
+// Out: .rgb the probe value (ao_apply.frag clamps it to 0..1: 1 is as much light as the ambient one), .a view z.
+layout(local_size_x = 8, local_size_y = 8) in;
+layout(binding = 0) uniform sampler2D z_tex;                       // view z per occlusion texel (ao_prep.comp)
+layout(binding = 1, rgba16f) uniform writeonly image2D view_out;   // vk_ao.c's factor image
+layout(binding = 2) uniform sampler2D g_tex;                       // rc_resolve.comp: .rgb the value, .a probe view z
+layout(push_constant) uniform P {
+    vec4 size;   // occlusion width, height, probe spacing in occlusion texels, 0
+    ivec4 grid;  // probes across and down, 0, 0
+} pc;
+
+void main() {
+    ivec2 p = ivec2(gl_GlobalInvocationID.xy), size = ivec2(pc.size.xy);
+    if (p.x >= size.x || p.y >= size.y) return;
+    float z = texelFetch(z_tex, p, 0).r;
+    if (z == 0.0) {
+        imageStore(view_out, p, vec4(1.0, 1.0, 1.0, 0.0));
+        return;
+    }
+    // probe i stands at occlusion texel i * spacing + spacing / 2 (rc_trace.comp), its centre half a texel further
+    // (a last probe brought back to the border is placed unbounded here: ao_blur.comp bounce_at says how far off)
+    int sp = int(pc.size.z);
+    vec2 u = (vec2(p) - float(sp / 2) - 0.5) / float(sp);
+    ivec2 i0 = ivec2(floor(u));
+    vec2 f = u - vec2(i0);
+    float tol = (0.04 * abs(z) + 0.05) * 2.0, wsum = 0.0, near = 1e30;
+    vec3 sum = vec3(0.0), nearv = vec3(0.0);
+    for (int y = 0; y < 2; y++)
+        for (int x = 0; x < 2; x++) {
+            vec4 g = texelFetch(g_tex, clamp(i0 + ivec2(x, y), ivec2(0), pc.grid.xy - 1), 0);
+            if (g.a == 0.0) continue;
+            float dz = abs(g.a - z);
+            float w = (x == 0 ? 1.0 - f.x : f.x) * (y == 0 ? 1.0 - f.y : f.y) * clamp(2.0 - 2.0 * dz / tol, 0.0, 1.0);
+            sum += g.rgb * w;
+            wsum += w;
+            if (dz < near) near = dz, nearv = g.rgb;
+        }
+    imageStore(view_out, p, vec4(wsum > 1e-3 ? sum / wsum : nearv, z));
+}

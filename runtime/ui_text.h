@@ -48,7 +48,8 @@ typedef enum {
     UI_MENU_HDR, UI_MENU_HDR_DESC, UI_MENU_HDR_PEAK, UI_MENU_HDR_PEAK_DESC, UI_MENU_HDR_GAME, UI_MENU_HDR_GAME_DESC,
     UI_MENU_HDR_UI, UI_MENU_HDR_UI_DESC, UI_MENU_HDR_HUE, UI_MENU_HDR_HUE_DESC,
     UI_MENU_SHADOW_SCALE, UI_MENU_SHADOW_SCALE_DESC,
-    UI_MENU_AO, UI_MENU_AO_DESC, UI_MENU_AO_OFF, UI_MENU_AO_LOW, UI_MENU_AO_HIGH,   // ambient occlusion (vk_ao.c)
+    // ambient occlusion (vk_ao.c); GI is its top level, which adds the bounced light (vk_rc.c)
+    UI_MENU_AO, UI_MENU_AO_DESC, UI_MENU_AO_OFF, UI_MENU_AO_LOW, UI_MENU_AO_HIGH, UI_MENU_AO_GI,
     // the upscaler (vk_dlaa.c), its mode (resolution.c) and the game's anti-aliasing for when none runs
     UI_MENU_UPSCALING, UI_MENU_UPSCALING_DESC, UI_MENU_UPSCALING_DESC_OTHER, UI_MENU_UPSCALING_OFF, UI_MENU_UPSCALING_AUTO,
     UI_MENU_UPSCALING_UNAVAILABLE,

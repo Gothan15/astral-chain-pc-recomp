@@ -1,0 +1,100 @@
+#version 450
+// Radiance cascades, last step (runtime/vk_rc.c vk_rc_run): cascade 0, merged by rc_trace.comp, to the bounce each probe
+// receives, in units of the game's ambient light along the probe's normal. Per screen direction and elevation bin the
+// light is weighted by the cosine to the normal over the part of the bin it covers and the normal's side sees: the
+// cover starts from the bin's far end (rc_trace.comp), and the weight between two angles of a slice has the closed
+// form ao.comp uses for the visibility. A uniform light L over the whole hemisphere gives g = L / ambient.
+// Out: .rgb g, .a the probe's view z (0: none), for the depth-aware blend up to the occlusion's texels.
+// Debug view of the open share (size.z 1): .rgb the cosine-weighted share of the visible hemisphere no bin covers, the
+// same closed form over the covered parts against the whole visible slice: an occlusion of long reach, which shows
+// whether the geometry the cascades see is right independently of the light.
+layout(local_size_x = 8, local_size_y = 8) in;
+layout(binding = 0) uniform sampler2D z_tex;            // view z per occlusion texel (ao_prep.comp)
+layout(binding = 1, rgba16f) uniform writeonly image2D g_out;
+layout(binding = 2) uniform sampler2DArray rc_tex;      // cascade 0, merged
+layout(binding = 3) uniform samplerCube amb_tex;        // one coarse level of the game's ambient cube map
+layout(push_constant) uniform P {
+    vec4 ndc_to_view;   // as in ao.comp
+    vec4 size;          // occlusion width, height, 1 for the open share in place of g, 0
+    vec4 cas;           // probe spacing, directions, the ambient light's factor on amb_tex, 0
+    ivec4 grid;         // probes across and down, tiles across and down
+    vec4 world0, world1, world2;   // .xyz: the rows of the view-to-world rotation
+} pc;
+
+const int K = 4;
+const float G_MAX = 16384.0;   // far above any g measured (the ambient light reaches 770 at most here)
+const float PI = 3.14159265;
+
+vec3 pos_of(vec2 win, float z) {
+    vec2 ndc = vec2(win.x / pc.size.x * 2.0 - 1.0, 1.0 - win.y / pc.size.y * 2.0);
+    return z * vec3(ndc.x * pc.ndc_to_view.x + pc.ndc_to_view.y, ndc.y * pc.ndc_to_view.z + pc.ndc_to_view.w, 1.0);
+}
+
+vec3 pos_at(ivec2 q) {
+    q = clamp(q, ivec2(0), ivec2(pc.size.xy) - 1);
+    return pos_of(vec2(q) + 0.5, texelFetch(z_tex, q, 0).r);
+}
+
+vec3 nearer(vec3 c, vec3 a, vec3 b) {
+    vec3 da = c - a, db = b - c;
+    return abs(da.z) < abs(db.z) ? da : db;
+}
+
+void main() {
+    ivec2 p = ivec2(gl_GlobalInvocationID.xy);
+    if (p.x >= pc.grid.x || p.y >= pc.grid.y) return;
+    int sp = int(pc.cas.x), dirs = int(pc.cas.y);
+    ivec2 tex = min(p * sp + sp / 2, ivec2(pc.size.xy) - 1);
+    float z = texelFetch(z_tex, tex, 0).r;
+    if (z == 0.0) {
+        imageStore(g_out, p, vec4(0.0));
+        return;
+    }
+    vec3 P = pos_of(vec2(tex) + 0.5, z), V = -normalize(P);
+    vec3 dx = nearer(P, pos_at(tex - ivec2(1, 0)), pos_at(tex + ivec2(1, 0)));
+    vec3 dy = nearer(P, pos_at(tex + ivec2(0, 1)), pos_at(tex - ivec2(0, 1)));
+    vec3 N = cross(dx, dy);
+    float nl = length(N);
+    if (nl < 1e-20) {
+        imageStore(g_out, p, vec4(0.0, 0.0, 0.0, z));
+        return;
+    }
+    N /= nl;
+    if (dot(N, V) < 0.0) N = -N;
+    vec3 E = vec3(0.0);
+    float wall = 0.0, wcov = 0.0;   // the open share's view: the visible slices' weight, and what the bins cover of it
+    for (int d = 0; d < dirs; d++) {
+        float phi = (float(d) + 0.5) * 2.0 * PI / float(dirs);
+        vec3 dirV = vec3(cos(phi), -sin(phi), 0.0);
+        vec3 ortho = dirV - dot(dirV, V) * V;
+        float ol = length(ortho);
+        if (ol < 1e-6) continue;
+        ortho /= ol;
+        float nv = dot(N, V), no = dot(N, ortho), plen = length(vec2(nv, no));
+        if (plen < 1e-4) continue;
+        float n = atan(no, nv), sn = sin(n), lim = clamp(n + 0.5 * PI, 0.0, PI);
+        ivec2 org = ivec2(d % pc.grid.z, d / pc.grid.z) * pc.grid.xy;
+        wall += plen * (0.25 * (-cos(2.0 * lim - n) + 2.0 * lim * sn) + 0.25 * cos(n));
+        for (int k = 0; k < K; k++) {
+            vec4 b = texelFetch(rc_tex, ivec3(org + p, k), 0);
+            if (b.a <= 1e-6) continue;
+            float hi = float(k + 1) * PI / float(K), lo = hi - b.a * PI / float(K);
+            hi = min(hi, lim), lo = min(lo, lim);
+            // the cosine-weighted share between two angles of the slice: [0.25 (-cos(2h - n) + 2 h sin n)]
+            float w = 0.25 * (-cos(2.0 * hi - n) + 2.0 * hi * sn) - 0.25 * (-cos(2.0 * lo - n) + 2.0 * lo * sn);
+            E += b.rgb * (max(w, 0.0) * plen / b.a);
+            wcov += max(w, 0.0) * plen;
+        }
+    }
+    if (pc.size.z > 0.5) {
+        imageStore(g_out, p, vec4(vec3(clamp(1.0 - wcov / max(wall, 1e-6), 0.0, 1.0)), z));
+        return;
+    }
+    E *= 2.0 / float(dirs);   // x 2 pi / directions for the irradiance, / pi for the light a white surface sends back
+    vec3 Nw = vec3(dot(pc.world0.xyz, N), dot(pc.world1.xyz, N), dot(pc.world2.xyz, N));
+    vec3 amb = max(pc.cas.z * textureLod(amb_tex, Nw, 0.0).rgb, vec3(1e-4));
+    // bounded before RGBA16F (65504 would store as infinite: a nearly black ambient face against strong light), and
+    // never NaN: ao_blur.comp would carry it into the light target and the upscalers' history
+    vec3 g = clamp(E / amb, vec3(0.0), vec3(G_MAX));
+    imageStore(g_out, p, vec4(any(isnan(g)) ? vec3(0.0) : g, z));
+}

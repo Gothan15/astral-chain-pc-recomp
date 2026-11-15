@@ -230,11 +230,15 @@
 # where an object meets the ground and softer the further its shadow falls. Done in the translated shaders (translator
 # patch 0010), so the shader cache is rebuilt once after an update. Read at start.
 # pcss = 0
-# Ambient occlusion: off (the default), low or high. The game has none of its own; this darkens creases, corners and the
-# ground under characters and objects, where little of the surrounding light reaches. It is computed at half resolution
-# from the depth buffer once the game has lit its opaque world, before the transparent surfaces, the bloom and the HUD.
-# high searches more directions than low for more GPU time; how dark it gets is the same in both. Changes while the game
-# runs take effect at once.
+# Ambient occlusion: off (the default), low, high or gi. The game has none of its own; this darkens creases, corners and
+# the ground under characters and objects, where little of the surrounding light reaches. It is computed at half
+# resolution from the depth buffer once the game has lit its opaque world, before the transparent surfaces, the bloom
+# and the HUD. high searches more directions than low for more GPU time; how dark it gets is the same in both. gi (the
+# menu's "High + bounce light (demanding)") runs the occlusion as high and adds the light the surfaces on screen send
+# back to each other, over long distances (screen-space radiance cascades): a lit wall or floor brightens and tints what
+# faces it. Only what the screen shows gives light. It is demanding: about 0.9 ms more than high per frame for a
+# 1472x828 scene on an Intel Arc 140T, so on a weak graphics card prefer high. Changes while the game runs take effect
+# at once.
 # ao = off
 
 # The 3D scene's temporal upscaler, in place of the game's anti-aliasing: off (the default), auto (DLSS where it can

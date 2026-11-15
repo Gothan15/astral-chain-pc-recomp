@@ -1,0 +1,199 @@
+#version 450
+// Radiance cascades over the depth buffer, one cascade (runtime/vk_rc.c vk_rc_run): the light each probe receives from
+// the surfaces the depth buffer shows at screen distances [start, end) of it, merged with the cascade above.
+//
+// The hierarchy is the screen-space ("flatland") one of Sannikov, "Radiance Cascades: A Novel Approach to Calculating
+// Global Illumination", section "Path of Exile 2 GI": probes on a screen grid (one every `spacing` occlusion texels, at
+// the middle texel of its cell), directions that are screen angles, intervals that are screen distances. From one
+// cascade to the next the spacing doubles, the directions double and the interval doubles in length, so each cascade
+// marches half the rays of the one below.
+// One march serves every elevation: a screen direction gives a half-plane through the probe's view ray (the slice of
+// ao.comp), in which a point is seen from the probe P at the angle theta from V = -P/|P| (0 towards the camera, pi
+// away from it). A depth sample at screen distance t is a surface point S and what lies behind it along its own view
+// ray: it covers the angles from theta(S) to theta of the direction of S (the endless thickness ao.comp assumes too).
+// The angles are cut into NB sectors, a bit each. Marching outwards, the sectors a sample covers that no nearer sample
+// of this interval covered take its light (ao_src.comp's, read at the level whose texels span a step), then count as
+// hidden. The sectors are grouped into K elevation bins, one image layer each: .rgb the light seen in the bin times
+// the share of the bin it covers, .a that share. Samples farther than `reach` from the probe in view space neither
+// light nor hide: the game's ambient light stands for them (its sky dome is geometry, not cleared depth).
+// A sample is a point of its ray, with the depth interpolated between the 4 texels around (depth_at): with the nearest
+// texel's centre in its place, the direction to a sample 1 or 2 texels away is off by tens of degrees and so is its
+// angle (measured on a ground seen at a grazing angle: 63 degrees where the surface runs at 105), which hid whole bins.
+// The merge: the light of the cascade above (already merged with those above it) is seen through what this interval
+// left open. Per bin, the far light is the mean of the two child directions, blended between the 4 probes around by
+// distance and by how close their view z is to this probe's (the nearest in depth alone when none matches), and the
+// part of its cover that this interval's own cover does not hide comes through: both covers start from the bin's far
+// end, the nearer hiding the farther (the "nested" rule; measured against a brute-force reference it kept the open
+// share of the hemisphere closer than the product of the open shares).
+// Which light counts (par.w > 0, vk_rc.c RC_LIGHT above): a surface not hidden by the occlusion already receives the
+// game's ambient light, so a sample sends only what it gives beyond the sky it hides, max(L - sky, 0), the sky being
+// the ambient cube map read along the direction to the sample in world space times its factor. A surface lit by the
+// same sky then changes nothing, and the result never darkens. par.w 0 counts the sample's whole light (from zero).
+// Layout of a cascade in its image: a grid of tiles, one per direction, each holding every probe (direction first), so
+// the probes around one are neighbour texels and the common case is one bilinear read per bin and child.
+layout(local_size_x = 8, local_size_y = 8) in;
+layout(binding = 0) uniform sampler2D z_tex;                          // view z per occlusion texel (ao_prep.comp)
+layout(binding = 1, rgba16f) uniform writeonly image2DArray rc_out;   // this cascade
+layout(binding = 2) uniform sampler2D src_tex;                        // the light sent out, with its levels
+layout(binding = 3) uniform sampler2DArray rc_up;                     // the cascade above, merged; bilinear
+layout(binding = 4) uniform samplerCube amb_tex;                      // one coarse level of the ambient cube map
+layout(push_constant) uniform P {
+    vec4 ndc_to_view;   // view x = z * (ndc.x * a + b), view y = z * (ndc.y * c + d), as in ao.comp
+    vec4 size;          // occlusion width, height, how many times wider than tall a texel is in view space, src_tex's
+                        // top level
+    vec4 cas;           // probe spacing, directions, interval start and end in occlusion texels
+    ivec4 grid;         // probes across and down, tiles across and down
+    ivec4 up;           // the same of the cascade above; probes across 0: none above
+    vec4 par;           // steps, reach in view units, the depth tolerance's factor, the ambient light's factor on
+                        // amb_tex (0: the samples' light counts from zero)
+    vec4 world0, world1;   // .xyz: the first two rows of the view-to-world rotation; world0.w: the sign of its
+                           // determinant (the third row's direction is the cross product of the first two times it)
+} pc;
+
+// K elevation bins of PER sectors each. Measured against a brute-force reference on two captured frames (the error of
+// g over its mean): K 1 0.76 / 0.75, K 2 0.44 / 0.54, K 4 0.39 / 0.48, K 8 0.37 / 0.47; 64 sectors in place of 32
+// gained nothing.
+const int K = 4, NB = 32, PER = NB / K;
+const float PI = 3.14159265;
+
+vec3 pos_of(vec2 win, float z) {
+    vec2 ndc = vec2(win.x / pc.size.x * 2.0 - 1.0, 1.0 - win.y / pc.size.y * 2.0);
+    return z * vec3(ndc.x * pc.ndc_to_view.x + pc.ndc_to_view.y, ndc.y * pc.ndc_to_view.z + pc.ndc_to_view.w, 1.0);
+}
+
+vec3 pos_at(ivec2 q) {
+    q = clamp(q, ivec2(0), ivec2(pc.size.xy) - 1);
+    return pos_of(vec2(q) + 0.5, texelFetch(z_tex, q, 0).r);
+}
+
+// The nearer of two neighbour differences: across an edge the far side belongs to another surface (as in ao.comp).
+vec3 nearer(vec3 c, vec3 a, vec3 b) {
+    vec3 da = c - a, db = b - c;
+    return abs(da.z) < abs(db.z) ? da : db;
+}
+
+// View z at a window position: bilinear between the 4 texels around when they are one surface (within 5% of the
+// nearest texel's z), else the nearest texel's. 0: the sky.
+float depth_at(vec2 win) {
+    ivec2 lim = ivec2(pc.size.xy) - 1;
+    float zn = texelFetch(z_tex, min(ivec2(win), lim), 0).r;
+    if (zn == 0.0) return 0.0;
+    vec2 f = clamp(win - 0.5, vec2(0.0), vec2(lim));
+    ivec2 i0 = ivec2(f), i1 = min(i0 + 1, lim);
+    vec2 a = f - vec2(i0);
+    float z00 = texelFetch(z_tex, i0, 0).r, z10 = texelFetch(z_tex, ivec2(i1.x, i0.y), 0).r,
+          z01 = texelFetch(z_tex, ivec2(i0.x, i1.y), 0).r, z11 = texelFetch(z_tex, i1, 0).r;
+    float tol = 0.05 * abs(zn);
+    vec4 q = vec4(z00, z10, z01, z11);
+    if (any(equal(q, vec4(0.0))) || any(greaterThan(abs(q - zn), vec4(tol)))) return zn;
+    return mix(mix(z00, z10, a.x), mix(z01, z11, a.x), a.y);
+}
+
+void main() {
+    ivec2 t = ivec2(gl_GlobalInvocationID.xy), gp = pc.grid.xy;
+    if (t.x >= gp.x * pc.grid.z || t.y >= gp.y * pc.grid.w) return;
+    ivec2 probe = t % gp;
+    int d = (t.y / gp.y) * pc.grid.z + t.x / gp.x, sp = int(pc.cas.x);
+    ivec2 tex = min(probe * sp + sp / 2, ivec2(pc.size.xy) - 1);
+    float zp = texelFetch(z_tex, tex, 0).r;
+    if (zp == 0.0) {   // the sky: no probe
+        for (int k = 0; k < K; k++) imageStore(rc_out, ivec3(t, k), vec4(0.0));
+        return;
+    }
+    vec3 P = pos_of(vec2(tex) + 0.5, zp), V = -normalize(P);
+    float phi = (float(d) + 0.5) * 2.0 * PI / pc.cas.y;
+    vec2 o = vec2(cos(phi) / pc.size.z, sin(phi));   // the direction's step in window texels (y down)
+    int steps = int(pc.par.x);
+    float len = (pc.cas.w - pc.cas.z) / float(steps), reach2 = pc.par.y * pc.par.y;
+    float lod = clamp(log2(max(len, 1.0)) - 1.0, 0.0, pc.size.w);   // the light's level 0 spans 2 texels
+    uint occ = 0u;
+    vec3 S[K];
+    for (int k = 0; k < K; k++) S[k] = vec3(0.0);
+    for (int j = 0; j < steps; j++) {
+        vec2 s = vec2(tex) + 0.5 + o * (pc.cas.z + (float(j) + 0.5) * len);
+        if (s.x < 0.0 || s.y < 0.0 || s.x >= pc.size.x || s.y >= pc.size.y) break;
+        float zs = depth_at(s);
+        if (zs == 0.0) continue;
+        vec3 Q = pos_of(s, zs), H = Q - P;
+        float h2 = dot(H, H);
+        if (h2 < 1e-8 || h2 > reach2) continue;
+        float thf = acos(clamp(dot(H, V) * inversesqrt(h2), -1.0, 1.0));
+        float thb = acos(clamp(dot(normalize(Q), V), -1.0, 1.0));
+        int k0 = min(int(thf * (float(NB) / PI) + 0.5), NB - 1);
+        int k1 = min(max(int(thb * (float(NB) / PI) + 0.5), k0 + 1), NB);
+        uint m = (k1 - k0 >= 32 ? 0xffffffffu : (1u << uint(k1 - k0)) - 1u) << uint(k0);
+        uint nw = m & ~occ;
+        occ |= m;
+        if (nw == 0u) continue;
+        // A surface seen from behind hides but sends no light: the depth buffer holds its camera side only. Without
+        // this test the bounce doubled in the brute-force reference (foreground objects lit what stands behind them).
+        ivec2 q = ivec2(s);
+        vec3 C = pos_at(q);
+        vec3 Ns = cross(nearer(C, pos_at(q - ivec2(1, 0)), pos_at(q + ivec2(1, 0))),
+                        nearer(C, pos_at(q + ivec2(0, 1)), pos_at(q - ivec2(0, 1))));
+        if (dot(Ns, C) > 0.0) Ns = -Ns;   // towards the camera
+        if (dot(Ns, H) >= 0.0) continue;
+        vec3 L = textureLod(src_tex, s / pc.size.xy, lod).rgb;
+        if (pc.par.w > 0.0) {   // only what the sample gives beyond the sky it hides
+            vec3 w2 = cross(pc.world0.xyz, pc.world1.xyz) * pc.world0.w;
+            vec3 Hw = vec3(dot(pc.world0.xyz, H), dot(pc.world1.xyz, H), dot(w2, H));
+            L = max(L - pc.par.w * textureLod(amb_tex, Hw, 0.0).rgb, vec3(0.0));
+        }
+        L *= clamp(2.0 - 2.0 * h2 / reach2, 0.0, 1.0);
+        for (int k = 0; k < K; k++) S[k] += L * (float(bitCount(nw & (0xffu << uint(8 * k)))) / float(PER));
+    }
+    float c[K];
+    for (int k = 0; k < K; k++) c[k] = float(bitCount(occ & (0xffu << uint(8 * k)))) / float(PER);
+
+    if (pc.up.x > 0) {
+        // the 4 probes of the cascade above around this one, which sits at 0.25 or 0.75 between two of them
+        ivec2 ugp = pc.up.xy, lim = ivec2(pc.size.xy) - 1;
+        // in the above cascade's probe units: this probe stands at texel probe * sp + sp / 2, probe q above at
+        // q * 2sp + sp (for an even spacing, (probe + 0.5) / 2 - 0.5); both unbounded, though a last probe past the
+        // border was traced at the last texel (ao_blur.comp bounce_at gives the limit)
+        vec2 u = (vec2(probe * sp + sp / 2) - float(sp)) / float(2 * sp);
+        ivec2 i0 = ivec2(floor(u));
+        vec2 f = u - vec2(i0);
+        float tol = (0.04 * abs(zp) + 0.05) * pc.par.z, wsum = 0.0, nearest = 1e30;
+        float w[4];
+        ivec2 q[4];
+        int best = -1;
+        bool plain = true;   // the 4 probes are of this probe's surface: a bilinear read does the blend
+        for (int i = 0; i < 4; i++) {
+            q[i] = clamp(i0 + ivec2(i & 1, i >> 1), ivec2(0), ugp - 1);
+            float zu = texelFetch(z_tex, min(q[i] * (2 * sp) + sp, lim), 0).r, dz = abs(zu - zp);
+            float wz = zu == 0.0 ? 0.0 : clamp(2.0 - 2.0 * dz / tol, 0.0, 1.0);
+            w[i] = ((i & 1) != 0 ? f.x : 1.0 - f.x) * ((i >> 1) != 0 ? f.y : 1.0 - f.y) * wz;
+            wsum += w[i];
+            plain = plain && wz == 1.0;
+            if (zu != 0.0 && dz < nearest) nearest = dz, best = i;
+        }
+        if (wsum > 1e-4) {
+            for (int i = 0; i < 4; i++) w[i] /= wsum;
+        } else {
+            for (int i = 0; i < 4; i++) w[i] = i == best ? 1.0 : 0.0;
+            plain = false;
+        }
+        if (best >= 0) {
+            vec2 asz = vec2(textureSize(rc_up, 0).xy);
+            for (int k = 0; k < K; k++) {
+                vec4 far = vec4(0.0);
+                for (int j = 0; j < 2; j++) {
+                    int dc = d * 2 + j;
+                    ivec2 org = ivec2(dc % pc.up.z, dc / pc.up.z) * ugp;
+                    if (plain) {
+                        vec2 uv = (vec2(org) + clamp(u + 0.5, vec2(0.5), vec2(ugp) - 0.5)) / asz;
+                        far += 0.5 * textureLod(rc_up, vec3(uv, float(k)), 0.0);
+                    } else {
+                        for (int i = 0; i < 4; i++)
+                            if (w[i] > 0.0) far += 0.5 * w[i] * texelFetch(rc_up, ivec3(org + q[i], k), 0);
+                    }
+                }
+                float through = max(far.a - c[k], 0.0) / max(far.a, 1e-6);
+                S[k] += through * far.rgb;
+                c[k] = max(c[k], far.a);
+            }
+        }
+    }
+    for (int k = 0; k < K; k++) imageStore(rc_out, ivec3(t, k), vec4(S[k], c[k]));
+}

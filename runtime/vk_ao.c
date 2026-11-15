@@ -1,4 +1,4 @@
-// Screen-space ambient occlusion (AC_AO = off, low or high). Astral Chain renders forward and
+// Screen-space ambient occlusion (AC_AO = off, low, high or gi). Astral Chain renders forward and
 // has no ambient occlusion of its own: every surface takes the same ambient light however enclosed it is. This pass
 // darkens the scene light where the depth buffer shows nearby geometry hiding part of the sky above a surface:
 // creases, corners, the ground under characters and objects.
@@ -28,11 +28,38 @@
 // fixed, 2.5 when the pattern turns every frame, 2.4 and 3.4 for the same two at the scene's full resolution, which
 // also costs 2.5 ms in place of 0.9. The upscaler does not average a turning pattern out, and the blur already does.
 //
-// How dark it gets is fixed (AO_OPEN, AO_POWER), the same for every player: no setting. The measured visibility of a
-// surface in a street is seldom 1 (a wall 20 m away with pipes and ledges within the radius reads about 0.85, and a
-// plain power of it darkened the whole picture by a fifth), so visibilities from AO_OPEN up count as open and stay
-// untouched, and the rest falls off with AO_POWER: contacts and corners go dark, open walls and ground keep the game's
-// light.
+// How dark it gets is fixed (AO_OPEN, AO_POWER, AO_MULTIBOUNCE, AO_THIN), the same for every player: no setting. The
+// measured visibility of a surface in a street is seldom 1 (a wall 20 m away with pipes and ledges within the radius
+// reads about 0.85, and a plain power of it darkened the whole picture by a fifth), so visibilities from AO_OPEN up
+// count as open and stay untouched, and the rest falls off with AO_POWER: contacts and corners go dark, open walls and
+// ground keep the game's light.
+// The darkening was then softened, players finding it too strong where no direct light falls. Measured offline on
+// three captured frames of Harmony Square: 88 to 96% of the pixels whose factor fell under 0.5 hold less light than the
+// ambient bound below explains (a surface in the sun's shadow, where the game's scenery shader has already cut its
+// ambient light by the sun mask, or of dark albedo), so the whole pixel takes the occlusion there, against about a
+// third of it in the sun. Three changes, judged in play in Harmony Square and simulated on captured frames:
+//  - AO_POWER 1.5 in place of 2: closer to the plain cosine-weighted visibility.
+//  - AO_MULTIBOUNCE: ao_blur.comp lifts what is left of the ambient light by the multi-bounce fit of Jimenez et al.
+//    2016 with an albedo of 0.3. The surfaces that hide the sky send some of it back even when they are darker than
+//    the ambient light, which the credit of ao.comp counts as black (55 to 63% of the obstacles at the darkest pixels
+//    were under the ambient light, their median at 0.84 to 0.93 of it). With the power: the pixels under 0.5 went
+//    from 15.2% to 9.6% of the picture at high (9.6% to 5.8% at gi), and contacts kept 76 to 79% of their darkening.
+//  - AO_THIN: ao.comp adds 4 times the square of a sample's offset along the view direction to its squared distance,
+//    so that component counts sqrt(5) times its length, towards or away from the camera (1.5 m of reach become 0.67 m
+//    straight along the view). The depth buffer
+//    holds no thickness, so a thin open shape in front of the ground (the metal cage around a Harmony Square tree)
+//    hid the sky of the grass behind it, within the whole radius, like a wall: a dark halo of 1.5 m, black where the
+//    game's own foliage shadow had left the grass readable. On one captured frame there, that grass kept 89% of its
+//    light at high before, 92% with the power and the multi-bounce, 97% with AO_THIN too (101% at gi), while the
+//    barrier's foot along the walkway kept its darkening within a point and a seated character's contacts 96%. It
+//    also weakens the darkening of a ground 0.25 to 0.75 m from a wall seen face on, by 35 to 45%. Penalising only the
+//    samples on the camera's side gave the same picture (left out).
+// Left out after those measurements: a plain lower strength or a floor on the factor (both took half the contacts'
+// darkening for the same gain), a shorter radius (0.75 m gave the cage's halo nearly the same as AO_THIN but shortens
+// the reach under cars and along walls everywhere), a raised cap on the gi bounce (g passes 1 on 2 to 25% of the
+// pixels within 0.5 m of a strong source and on 4% or fewer beyond 1 m: no visible gain, and the shimmer of the probes
+// gathers near light sources), the light of an obstacle under the ambient light given back to its arc (close to the
+// credit counted from zero, rejected below).
 //
 // The fog keeps its light. The game's opaque fragment shaders end with their distance fog (ao_blur.comp has the
 // formula): a colour read from a small cube map along the view direction, mixed in by the distance to the camera. That
@@ -68,9 +95,10 @@
 // A frame without those inputs (no ambient factor in the c5 block, no ambient cube map a plain view reads) multiplies
 // the whole surface instead and lets go of what glows (ao_meter.comp reads the light target's typical brightness, and
 // light from AO_GLOW_LO times it up loses its occlusion), with a log line, a few times.
-// Measured on an Arc 140T, the compute steps without the apply (0.20 ms low, 0.26 ms high on a 1472x828 scene, as
-// before): 0.52 ms low and 0.72 ms high on a 1472x828 scene (FSR 3 balanced for 2560x1440), 1.45 ms low at 2560x1440,
-// where the whole surface multiplied took 0.36, 0.46 and 1.06; the light sent out is 0.15 ms of it at 1472x828. The
+// Measured on an Arc 140T before AO_POWER 1.5, AO_MULTIBOUNCE and AO_THIN: 0.52 ms low and 0.72 ms high on a 1472x828
+// scene (FSR 3 balanced for 2560x1440), 1.45 ms low at 2560x1440, where the whole surface multiplied took 0.36, 0.46 and
+// 1.06; the light sent out is 0.15 ms of it at 1472x828. Since those three, a single run at 1472x828 under XeSS
+// balanced gave 0.81 ms at high, all steps with the apply. The
 // picture's change from one frame to the next in free play (Harmony Square at rest, FSR 3, three runs each) stays the
 // same, 1.46 and 1.47.
 // Left out after trials in play: the sun mask in the bound (it is 0 all over the game's characters, which shadow
@@ -78,10 +106,18 @@
 // on the ground alone it took the contact off a car in its own shadow); the light target of the frame before as the
 // light sent out (it holds the neon tubes and LED panels the game draws later, but the holographic HUD too, a frame
 // late); the ambient light read along the open direction (0.06 ms for no visible change in Harmony Square).
+//
+// The gi level runs the occlusion as high and, before its blur, the radiance cascades of vk_rc.c on the same view z and
+// light sent out: the light the visible surfaces send each other at long range, g, which ao_blur.comp adds to the factor
+// on the light (it can then exceed 1). Only with the game's ambient light (a frame without it is high alone, with a log
+// line, a few times). vk_rc.c describes the debug views and knobs (AC_RC_LIGHT, AC_RC_APPLY, AC_RC_DEBUG). At gi only,
+// ao_apply.frag also searches the 4x4 texels around a pixel whose four texels all lie on another surface, within the
+// bounce's fade distance (its header says why); the other levels keep its path unchanged.
 #include "vk.h"
 
 #include <math.h>
 #include <stdio.h>
+#include <stdlib.h>
 #include <string.h>
 
 #include "ao_apply_spv.h"
@@ -95,6 +131,7 @@
 #include "host.h"
 #include "nvn_api.h"
 #include "vk_exec.h"
+#include "vk_rc.h"
 
 #define CAM_BYTES 256u        // the c3 camera block: vec4 rows 0-15
 #define Z_FORMAT VK_FORMAT_R32_SFLOAT   // ao_prep.comp: view z (storage support is mandatory)
@@ -104,7 +141,9 @@
 #define AO_GLOW_LO 6.0f       // without the game's ambient light: light this many times the picture's typical
 #define AO_GLOW_HI 24.0f      // brightness starts to lose its occlusion, and this many times has none (ao_blur.comp)
 #define AO_OPEN 0.90f         // visibility from which a surface counts as open: no darkening (ao_apply.frag)
-#define AO_POWER 2.0f         // the remaining visibility to this power is the factor on the light
+#define AO_POWER 1.5f         // the remaining visibility to this power is the factor on the light
+#define AO_MULTIBOUNCE 0.3f   // albedo of the multi-bounce fit on what is left of the ambient light (ao_blur.comp)
+#define AO_THIN 4.0f          // this many times the squared offset along the view adds to a sample's squared distance
 #define AO_FADE 120.0f        // the occlusion fades out between half this view distance and this one
 #define MAX_APPLY 4           // apply pipelines: light target format x debug
 #define N_IM 5                // view z, the occlusion, the factor, the 1x1 brightness, the stand-in cube map
@@ -141,8 +180,11 @@ struct Amb {
 
 static struct {
     // settings
-    int level;                 // 0 off, 1 low, 2 high
+    int level;                 // 0 off, 1 low, 2 high, 3 gi (high and the radiance cascades, vk_rc.c)
     int debug;                 // AC_AO_DEBUG: 1 the factor alone, 2 the surface's share alone, 3 no fog kept
+    int rc_view, rc_cascade;   // AC_RC_DEBUG (RC_VIEW_*), AC_RC_DEBUG_CASCADE (-1: all of them)
+    int rc_light, rc_apply;    // AC_RC_LIGHT (RC_LIGHT_*), AC_RC_APPLY (0: the cascades run, nothing applied)
+    int rc_temporal;           // AC_RC_TEMPORAL: g blended with last frame's (vk_rc.c); on unless set to 0
     unsigned cfg_seen;
     int cfg_read;
     // pipelines
@@ -174,6 +216,7 @@ static struct {
     int logged, no_cam_logs, fmt_logs;
     int fog_state, fog_logs;    // 1 with the fog kept, 2 without: a change is logged, a few times
     int light_state, light_logs;   // 1 with the game's ambient light, 2 without: alike
+    int rc_state, rc_logs;      // at the gi level, 1 with the cascades, 2 high alone (no ambient light): alike
 } A;
 
 // ---------------------------------------------------------------- settings
@@ -182,14 +225,34 @@ static void read_settings(void) {
     if (A.cfg_read && v == A.cfg_seen) return;
     A.cfg_read = 1, A.cfg_seen = v;
     const char *q = cfg_value("AC_AO");
-    int level = !strcmp(q, "high") ? 2 : !strcmp(q, "low") ? 1 : 0;
+    int level = !strcmp(q, "gi") ? 3 : !strcmp(q, "high") ? 2 : !strcmp(q, "low") ? 1 : 0;
     const char *e = cfg_get("AC_AO_DEBUG");   // diagnostic: no settings row
     int debug = e && *e && strcmp(e, "0") ? (!strcmp(e, "2") ? 2 : !strcmp(e, "3") ? 3 : 1) : 0;
-    if (level != A.level || debug != A.debug)
-        rt_log("vk: ambient occlusion %s%s", level == 2 ? "high" : level ? "low" : "off",
+    const char *rv = cfg_get("AC_RC_DEBUG"), *rcas = cfg_get("AC_RC_DEBUG_CASCADE");   // diagnostics: no settings row
+    int rc_view = !rv ? RC_VIEW_NONE : !strcmp(rv, "g") ? RC_VIEW_G : !strcmp(rv, "open") ? RC_VIEW_OPEN : RC_VIEW_NONE;
+    int rc_cascade = rcas && *rcas >= '0' && *rcas <= '9' ? (int)strtol(rcas, NULL, 10) : -1;
+    const char *rl = cfg_get("AC_RC_LIGHT"), *ra = cfg_get("AC_RC_APPLY");   // diagnostics: no settings row
+    // zero stays as a debug knob: validate.py compares that variant (light counted from zero) with the oracle
+    int rc_light = rl && !strcmp(rl, "zero") ? RC_LIGHT_ZERO : RC_LIGHT_ABOVE, rc_apply = !(ra && !strcmp(ra, "0"));
+    if (level == 3 && (level != A.level || rc_light != A.rc_light || rc_apply != A.rc_apply))
+        rt_log("vk: ambient occlusion gi: the bounce %s, the samples' light %s", rc_apply ? "applied" : "not applied",
+               rc_light == RC_LIGHT_ZERO ? "counted from zero" : "above the sky they hide");
+    if (level != 3) A.rc_state = 0;   // a later frame at gi starts its log over
+    const char *rt = cfg_get("AC_RC_TEMPORAL");   // debug switch, no settings row: 0 turns the history off
+    int rc_temporal = !(rt && !strcmp(rt, "0"));
+    if (level == 3 && (level != A.level || rc_temporal != A.rc_temporal))
+        rt_log("vk: ambient occlusion gi: the bounce %s", rc_temporal ? "blended with the last frame's" : "of this frame alone");
+    A.rc_temporal = rc_temporal;
+    if (level != A.level || debug != A.debug || rc_view != A.rc_view || rc_cascade != A.rc_cascade)
+        rt_log("vk: ambient occlusion %s%s%s", level == 3 ? "gi" : level == 2 ? "high" : level ? "low" : "off",
                debug == 3 ? " (the fog multiplied too)" : debug == 2 ? " (debug view: the surface's share)"
-                                                                      : debug ? " (debug view)" : "");
-    A.level = level, A.debug = debug;
+                                                                      : debug ? " (debug view)" : "",
+               level != 3 || !rc_view ? ""
+               : rc_view == RC_VIEW_G ? (rc_cascade >= 0 ? " (debug view: g of one cascade)" : " (debug view: g)")
+               : rc_cascade >= 0      ? " (debug view: the open share of one cascade)"
+                                      : " (debug view: the open share)");
+    A.level = level, A.debug = debug, A.rc_view = rc_view, A.rc_cascade = rc_cascade, A.rc_light = rc_light,
+    A.rc_apply = rc_apply;
 }
 
 // ---------------------------------------------------------------- pipelines
@@ -651,6 +714,16 @@ static void dispatch(VkExec *ex, int n, VkPipeline pipe, const VkWriteDescriptor
     if (n && vk_gpuprof_on()) vk_gpuprof_mark(ex, 6, (uint64_t)n);
 }
 
+// What vk_rc.c borrows (vk_rc.h).
+VkPipeline vk_ao_comp_pipeline(const uint32_t *code, size_t size, VkPipelineLayout lay, int lit) {
+    return comp_pipeline(code, size, lay, lit);
+}
+
+void vk_ao_dispatch(VkExec *ex, int n, VkPipeline pipe, const VkWriteDescriptorSet *w, uint32_t nw, const void *pc,
+                    uint32_t pc_size, uint32_t gx, uint32_t gy) {
+    dispatch(ex, n, pipe, w, nw, pc, pc_size, gx, gy);
+}
+
 static void run(VkExec *ex) {
     A.armed = 0, A.done = 1;
     if (!A.tried && !init()) return;
@@ -668,6 +741,8 @@ static void run(VkExec *ex) {
     uint32_t hw = (w + sc - 1) / sc, hh = (h + sc - 1) / sc, gx = (hw + 7) / 8, gy = (hh + 7) / 8;
     VkPipeline ap = apply_pipeline(t->format, A.debug == 1);
     if (!ap) return;
+    // the cascades' debug views go through the apply with its blend off
+    VkPipeline ap_view = A.level == 3 && A.rc_view ? apply_pipeline(t->format, 1) : VK_NULL_HANDLE;
     vk_exec_barrier(ex);   // ends the open pass; what drew the scene is done, feedback-layout targets back in GENERAL
     VkCommandBuffer cb = ex->cb;
     if (!ensure_images(cb, hw, hh)) {
@@ -709,13 +784,13 @@ static void run(VkExec *ex) {
         {(float)(ws / pj[0]), (float)(-pj[2] / pj[0]), (float)(ws / pj[5]), (float)(-pj[6] / pj[5])},
         {(float)hw, (float)hh, (float)(fabs(pj[5]) * hh / (fabs(pj[0]) * hw)), 0},
         {AO_RADIUS, (float)(fabs(pj[5]) * 0.5 * hh / fabs(ws)), (float)hh / AO_REACH, AO_FADE},
-        {A.level == 2 ? 3.0f : 2.0f, A.level == 2 ? 5.0f : 4.0f, 0, 0},
+        {A.level >= 2 ? 3.0f : 2.0f, A.level >= 2 ? 5.0f : 4.0f, AO_THIN, 0},
         {gm.factor, (float)(A.src_levels - 1), AO_CREDIT_LO, 1.0f / (AO_CREDIT_HI - AO_CREDIT_LO)}};
     for (int r = 0; r < 3; r++)   // the inverse view's rotation: rows 12-14 of the camera block
         for (int k = 0; k < 3; k++) pa.world[r][k] = cam[48 + 4 * r + k];
     // ao_blur.comp's and ao_src.comp's, which leave the game's fog its light (frame_fog)
     BlurPush pb = {.glow = {(float)sc, AO_GLOW_LO, AO_GLOW_HI, fog ? 1.0f : 0.0f},
-                   .curve = {AO_OPEN, AO_POWER, A.debug == 2 ? 2.0f : 0.0f, gm.factor},
+                   .curve = {AO_OPEN, AO_POWER, A.debug == 2 ? 2.0f : AO_MULTIBOUNCE, gm.factor},
                    .size = {(float)w, (float)h, fog ? fog->block[17] : 0, fog ? fog->block[18] : 1.0f}};
     memcpy(pb.ndc_to_view, pa.ndc_to_view, sizeof pb.ndc_to_view);
     memcpy(pb.world, pa.world, sizeof pb.world);
@@ -756,17 +831,56 @@ static void run(VkExec *ex) {
     VkWriteDescriptorSet wg[4] = {W_IMG(0, S, &z_in), W_IMG(1, I, &occ_out), W_IMG(2, S, lit ? &src_in : &z_in),
                                   W_IMG(3, S, &amb_in)};
     dispatch(ex, 2, A.gather[lit], wg, 4, &pa, sizeof pa, gx, gy);
+    // 6, 7 at the gi level: the radiance cascades and their resolve (vk_rc.c), whose g the blur applies; a debug view
+    // replaces the factor in image 2 after the blur instead
+    int rc_ran = 0, bounce = 0, rc_shown = 0;
+    VkDescriptorImageInfo g_in = mean_in;
+    RcInputs rin = {0};
+    if (A.level == 3) {
+        int rc_state = lit ? 1 : 2;
+        if (rc_state != A.rc_state && A.rc_logs < 8) {
+            A.rc_logs++;
+            if (!lit) rt_log("vk: ambient occlusion gi: no ambient light this frame (%s): high alone", why);
+            else if (A.rc_state == 2) rt_log("vk: ambient occlusion gi: the ambient light is back, the cascades too");
+        }
+        A.rc_state = rc_state;
+        if (lit) {
+            rin = (RcInputs){.lay = A.lay_b, .nearest = A.nearest, .linear = A.linear, .trilinear = A.trilinear,
+                             .z = A.im[0].view, .src = A.src_view, .amb = gm.amb, .w = hw, .h = hh,
+                             .src_levels = A.src_levels, .aspect = pa.size[2], .amb_factor = gm.factor,
+                             .light = A.rc_light, .temporal = A.rc_temporal,
+                             .focal = (float)fabs(pj[5])};
+            memcpy(rin.ndc_to_view, pa.ndc_to_view, sizeof rin.ndc_to_view);
+            memcpy(rin.world, pa.world, sizeof rin.world);
+            for (int r = 0; r < 3; r++)   // world to view: rows 0-2 of the camera block
+                for (int k = 0; k < 4; k++) rin.view[r][k] = cam[4 * r + k];
+            int view = ap_view ? A.rc_view : RC_VIEW_NONE;
+            rc_ran = vk_rc_run(ex, &rin, view, A.rc_cascade);
+            rc_shown = rc_ran && view != RC_VIEW_NONE;
+            bounce = rc_ran && view == RC_VIEW_NONE && A.rc_apply;
+        }
+    }
+    float rc_cap = 0;
+    if (bounce) {   // ao_blur.comp's free constants with LIT: world0-2 .w, glow .y and .z
+        float strength;
+        g_in.imageView = vk_rc_bounce(&pb.world[0][3], &rc_cap, &strength, &pb.glow[1], &pb.glow[2]);
+        pb.world[1][3] = rc_cap, pb.world[2][3] = strength;
+        rc_cap *= strength;
+    }
     // 3: without the ambient light, the light's typical brightness (to let go of what glows); then the pattern
     // averaged out and the factor on the light, into image 2
     if (!lit) step(ex, 0, A.comp[1], light_in, A.im[3].view, NULL, 0, 1, 1);
     VkWriteDescriptorSet wb[6] = {W_IMG(0, S, &occ_in), W_IMG(1, I, &k_out),   W_IMG(2, S, &light_in),
-                                  W_IMG(3, S, &mean_in), W_IMG(4, S, &fog_in), W_IMG(5, S, &amb_in)};
+                                  W_IMG(3, S, &g_in),   W_IMG(4, S, &fog_in), W_IMG(5, S, &amb_in)};
     dispatch(ex, 3, A.blurp[lit], wb, 6, &pb, sizeof pb, gx, gy);
+    if (rc_shown) vk_rc_show(ex, &rin, A.im[2].view);
     // 4: scaled up and onto the light target
+    if (rc_shown) ap = ap_view;
     struct { float inv2[4], inv3[4], size[4], mode[4]; } pf;
     memcpy(&pf, &pz, sizeof pz);
     pf.size[3] = 0;
-    pf.mode[0] = A.debug == 1 ? 1.0f : 0.0f, pf.mode[1] = 0, pf.mode[2] = (float)sc, pf.mode[3] = 0;
+    pf.mode[0] = A.debug == 1 || rc_shown ? 1.0f : 0.0f, pf.mode[1] = rc_cap, pf.mode[2] = (float)sc;
+    pf.mode[3] = rc_cap > 0 ? pb.glow[2] : 0;   // ao_apply.frag: its wider search within the bounce's fade distance
     VkRenderingAttachmentInfo ca = {.sType = VK_STRUCTURE_TYPE_RENDERING_ATTACHMENT_INFO, .imageView = cv,
                                     .imageLayout = VK_IMAGE_LAYOUT_GENERAL, .loadOp = VK_ATTACHMENT_LOAD_OP_LOAD,
                                     .storeOp = VK_ATTACHMENT_STORE_OP_STORE};
@@ -886,6 +1000,7 @@ void vk_ao_draw(VkExec *ex) {
 
 void vk_ao_frame(void) {
     read_settings();
+    vk_rc_frame(A.level == 3);
     A.have = A.lin = A.armed = A.done = A.wrote = 0;
     memset(A.cams, 0, sizeof A.cams);
     memset(A.fogs, 0, sizeof A.fogs);
@@ -896,6 +1011,7 @@ void vk_ao_release(void) {
     VkCtx *c = vk_ctx();
     if (!c) return;
     VkDevice d = c->device;
+    vk_rc_release();
     free_images(0);
     for (int i = 0; i < A.napply; i++) vkDestroyPipeline(d, A.apply[i].p, NULL);
     for (int i = 0; i < 3; i++)

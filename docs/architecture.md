@@ -238,7 +238,7 @@ Every guest thread is a host thread. Astral Chain assumes Horizon's scheduler: t
   never shows. HDR output records the upscaled picture as the frame's scene (`vk_hdr.c` `vk_hdr_draw`).
   `output_res = auto` takes the screen's size, up to 1920x1080 without an upscaler and 3840x2160 with one (2560x1440 on
   a GPU with 4.5 GB of video memory or less).
-- Ambient occlusion (`vk_ao.c`, `ao = off | low | high`, live; off by default): the game has none.
+- Ambient occlusion (`vk_ao.c`, `ao = off | low | high | gi`, live; off by default): the game has none.
   The first light-target pass with the scene depth after the game's R32F linear-depth pass that writes colour is the
   opaque lighting (in play, every other frame, a pass with its colour writes masked off comes before it); when
   the next pass with other targets begins (or a dispatch or copy comes first), `ao_prep.comp` takes the scene depth to a
@@ -246,9 +246,23 @@ Every guest thread is a host thread. Astral Chain assumes Horizon's scheduler: t
   quarter of the scene's resolution with coarser levels, `ao.comp` searches horizons along 2 or 3 directions within
   1.5 m and a quarter of the picture's height (GTAO's closed-form integral, a fixed 4x4 pattern), `ao_blur.comp`
   averages the pattern out at half resolution with depth-aware weights and turns the visibility into the factor on the
-  light by a fixed curve (visibility from 0.9 up is left alone, the rest squared: `AO_OPEN`, `AO_POWER`), and
+  light by a fixed curve (visibility from 0.9 up is left alone, the rest to the power 1.5, then lifted by the
+  multi-bounce fit of Jimenez et al. 2016 with an albedo of 0.3: `AO_OPEN`, `AO_POWER`, `AO_MULTIBOUNCE`), and
   `ao_apply.frag` scales the factor up and multiplies the light target through a blend. Transparents, bloom, tonemap
   and HUD come after. The camera is the c3 block of the scene's draws, as for the motion vectors.
+  The curve was softened from a plain square after players found the darkening too strong where no direct light
+  falls: there the whole pixel is the ambient part, so the occlusion acts at full strength (measured on captured
+  Harmony Square frames: 88 to 96% of the pixels under a factor of 0.5 were such pixels). The power and the multi-bounce
+  fit took those pixels from 15.2% to 9.6% of the picture at `high`, keeping about three quarters of the contacts'
+  darkening. `ao.comp` also adds 4 times the square of a sample's offset along the view direction to its squared
+  distance (`AO_THIN`, after XeGTAO's thin-occluder compensation), so that component counts √5 times its length,
+  towards or away from the camera (1.5 m of reach become 0.67 m straight along the view): the depth buffer has no
+  thickness, and the open metal cage around a Harmony Square tree darkened 1.5 m of the grass behind it like a wall
+  (that grass kept 89% of its light at `high` before, 97% after). It also weakens the darkening of a ground 0.25 to
+  0.75 m from a wall seen face on by 35 to 45%; penalising only the samples on the camera's side gave the same
+  picture. Judged in play in Harmony Square, simulated on captured frames. Left out: a lower strength or a
+  floor (they took half the contacts' darkening), a shorter radius (shortens the reach under cars everywhere), a raised
+  cap on the `gi` bounce (g rarely reaches it beyond 1 m of a source; the probes' shimmer gathers near sources).
   The occlusion takes only what the sky gives. The game's opaque shaders light a surface with `mask x albedo x
   ambient(N) + local lights + reflections + emission`, `ambient(N)` being the ambient cube map (fragment texture slot
   5) along the normal times c5 row 1 `.w` over pi; `vk_ao_draw` takes both from the opaque lighting's draws. The
@@ -277,6 +291,40 @@ Every guest thread is a host thread. Astral Chain assumes Horizon's scheduler: t
   0.16 ms (low) to the first. `AC_GPU_PASSES` times each step ("ao"),
   `AC_AO_DEBUG=1` shows the factor alone, `2` the part of the scene the occlusion acts on (without the fog computed
   here and the light beyond what the sky gives: a check of both), `3` multiplies the fog too.
+  `ao = gi` runs the occlusion as `high` and adds radiance cascades over the depth buffer (`vk_rc.c`), for the light
+  the visible surfaces send each other at long range, only when the game's ambient light is known (without it the
+  frame is `high` alone). It is the screen-space hierarchy Sannikov describes for Path of Exile 2: probes on a screen
+  grid (cascade 0 every 4 occlusion texels; the spacing grows with the occlusion's width to keep about 184 probes
+  across, so the reach follows the width: 61% of the height at 16:9, more on wider pictures and below 736 texels wide),
+  8 screen directions doubling per cascade, intervals doubling in length over 6 cascades (252 texels at 736x414), one
+  march of the view z per probe and direction serving every elevation through a 32-sector bitmask in 4 elevation
+  bins. `rc_trace.comp` marches and merges each cascade from the top down, counting by default only what a surface
+  sends beyond the sky it hides (the ambient cube map along the direction to it), and `rc_resolve.comp` turns cascade
+  0 into g, the bounce over the ambient light along the normal. `ao_blur.comp` brings g to the occlusion's texels,
+  caps it at 1, fades it out from 25 to 50 view units and makes the factor `1 + share x (g - (1 - k))`, which
+  `ao_apply.frag` lets rise above 1; there, a pixel whose four texels all lie on another surface searches the 4x4
+  texels around it for its own within the fade distance (with a factor far from 1 that band showed one-texel stairs
+  along slanted depth edges; no measurable cost on the Arc 140T); the other levels keep their shaders' paths
+  unchanged. `AC_RC_LIGHT=zero` counts
+  the samples' whole light, `AC_RC_APPLY=0` computes without applying; `AC_RC_DEBUG=g` and `open` (with
+  `AC_RC_DEBUG_CASCADE=<i>` for one cascade alone) show the bounce and the open share of the hemisphere through
+  `ao_apply.frag`'s debug path. On an Arc 140T, 1472x828 scene, before the application: 0.68 ms for the cascades and
+  0.05 ms for the resolve (`AC_GPU_PASSES` "ao step 6" and "7"), 9.5 MiB of images, made at the first frame at `gi`
+  and given back after 600 presents without it; applied, `gi` cost 0.83 to 0.93 ms over `high` in single runs at
+  1472x828 (FSR 3 or XeSS balanced for 2560x1440), 1.2 to 1.4 ms at 2560x1440 without an upscaler.
+  On captured frames the shaders match a numpy oracle (ratio of the
+  means 0.999 and 1.002, correlation 0.993 and 0.997); against a brute-force reference the cascades lose about 20% of
+  the light, mostly from the back-face test on sparse samples. In motion the bounce near small bright sources shimmers
+  slightly; on frames captured in play at such a spot the brute-force reference changes from frame to frame almost
+  as much as the cascades (0.042 against 0.049 of the ambient light in the shimmering patch), so the cause is the
+  screen-space input under the camera's motion and jitter, and sampling changes (more directions or steps, a light
+  level set by the ray's footprint, a tent filter) gained 11% at most there; a 3x3 average of g had no visible effect in
+  play. So the bounce is blended with last frame's at the probes, on by default at `gi` (outside the design's
+  no-history rule; `AC_RC_TEMPORAL=0` turns it off as a debug switch), reprojected with the camera and kept on the same
+  surface, dropped at a camera cut: offline 70% less frame-to-frame change in the shimmering patch, in game on a
+  turning camera the probes' change from 0.23-0.33 to 0.05-0.06 of the mean bounce (about 80% less), for 0.02 ms and
+  0.3 MiB (Arc 140T, 184x104 probes), made only at the first frame at `gi`, at the price of the bounce of moving things
+  following them about 3 frames late. `vk_rc.c`'s header lists the measurements and the variants left out.
 - The sun shadow map, one 2048x2048 DEPTH24_STENCIL8 texture on 1.0.1, is made `shadow_scale` times larger on each side
   (`vk_texture.c` `shadow_scale_of`; 2 by default, 1 in the Steam Deck profile): its depth-only pass draws at that
   size and the screen-space sun mask that reads it samples in UV, so edges get finer at the same softness. At x2 it

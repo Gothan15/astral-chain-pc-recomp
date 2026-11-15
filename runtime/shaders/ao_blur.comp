@@ -6,8 +6,9 @@
 // axis, which ao_apply.frag takes into account. Each texel also counts by how close its view z is to the centre's, 1
 // over the near half of the tolerance, so occlusion stays on its side of a depth edge and a surface that slants away
 // still counts its texels alike.
-// The visibility becomes what is left of the ambient light through a fixed curve (vk_ao.c AO_OPEN, AO_POWER):
-// visibilities from "open" up are 1, the rest, scaled to 0..1, is raised to "power".
+// The visibility becomes what is left of the ambient light through a fixed curve (vk_ao.c AO_OPEN, AO_POWER,
+// AO_MULTIBOUNCE): visibilities from "open" up are 1, the rest, scaled to 0..1, is raised to "power" and lifted by the
+// multi-bounce fit.
 // The factor then takes that occlusion on one part of the pixel only, per colour channel.
 // It spares the game's fog. Astral Chain's opaque fragment shaders end with their distance fog:
 //   t   = pow(clamp((distance to the camera - start) / range, 0, 1), exponent)
@@ -33,6 +34,12 @@
 // Each channel's factor is 1 - (1 - k) x part / pixel, k being what is left of the ambient light: it never goes below
 // the plain occlusion k nor above 1. Where the pixel holds less light than the fog computed here (a surface drawn
 // without fog), the part is 0.
+// The bounce of the gi level (vk_ao.c, vk_rc.c; with LIT and world0.w > 0, which the other levels never set): g, the
+// light the visible surfaces send this one over the ambient light, from rc_resolve.comp's probes in mean_tex, blended
+// to the texel between the 4 probes around it by distance and by how close their view z is to its own (the nearest in
+// depth when none matches). It is capped, scaled and faded out with distance (the probes are least steady far away),
+// and the factor becomes 1 + share x (g - (1 - k)): the part the sky gives gets g of the ambient light on top of what
+// the occlusion leaves. It can then exceed 1 (ao_apply.frag lets it, up to 1 + the cap).
 // In: .rgb the visibility per channel, .a view z (0 sky). Out: .rgb the factor on the light, .a view z (0 sky).
 layout(constant_id = 0) const bool LIT = false;
 const float ALBEDO = 0.9;   // no surface reflects more of the ambient light than this
@@ -40,18 +47,22 @@ layout(local_size_x = 8, local_size_y = 8) in;
 layout(binding = 0) uniform sampler2D ao_tex;
 layout(binding = 1, rgba16f) uniform writeonly image2D ao_out;
 layout(binding = 2) uniform sampler2D light_tex;   // bilinear
-layout(binding = 3) uniform sampler2D mean_tex;    // 1x1; not written with LIT
+layout(binding = 3) uniform sampler2D mean_tex;    // 1x1; not written with LIT; with LIT at the gi level, g per probe
+                                                   // (.rgb g, .a probe view z)
 layout(binding = 4) uniform samplerCube fog_tex;   // the game's fog cube map; a stand-in without fog
 layout(binding = 5) uniform samplerCube amb_tex;   // one coarse level of the game's ambient cube map; a stand-in
                                                    // without LIT
 layout(push_constant) uniform P {
     vec4 glow;          // x: light-target pixels per occlusion texel; y, z: the brightness, in multiples of the typical
                         // one, where the occlusion starts to fade and where it is gone; w: 1 with the game's fog known
-    vec4 curve;         // open, power, 2 for the view of the occluded part alone (vk_ao.c AC_AO_DEBUG=2), the ambient
-                        // light's factor on amb_tex
+    vec4 curve;         // open, power, 2 for the view of the occluded part alone (vk_ao.c AC_AO_DEBUG=2) or else the
+                        // albedo of the multi-bounce fit (0: off; vk_ao.c AO_MULTIBOUNCE), the ambient light's
+                        // factor on amb_tex
     vec4 ndc_to_view;   // view x = z * (ndc.x * a + b), view y = z * (ndc.y * c + d), as in ao.comp
     vec4 size;          // light target width, height, the fog's luminance threshold, its factor on bright surfaces
-    vec4 world0, world1, world2;   // .xyz: the rows of the view-to-world rotation
+    vec4 world0, world1, world2;   // .xyz: the rows of the view-to-world rotation; .w with LIT at the gi level: the
+                                   // probe spacing in texels (0: no bounce), the cap on g, the strength
+                                   // (glow.y and glow.z then: the distances where the bounce starts to fade and is gone)
     vec4 fog;           // start, 1 / range, exponent, colour scale
 } pc;
 
@@ -88,6 +99,33 @@ vec3 nearer(vec3 c, vec3 a, vec3 b) {
     return abs(da.z) < abs(db.z) ? da : db;
 }
 
+// g at occlusion texel p of view z: probe i stands at texel i * spacing + spacing / 2 (rc_trace.comp), and this
+// texel's value sits half a texel before its centre (as the blurred visibility), at p. Limit: rc_trace.comp and
+// rc_resolve.comp bring a last probe past the border back to the last texel (a size whose remainder by the spacing is
+// 1 to spacing / 2); its position here is the unbounded one, off by up to spacing / 2 texels on the last two columns or
+// rows.
+vec3 bounce_at(ivec2 p, float z) {
+    int sp = int(pc.world0.w);
+    ivec2 gs = textureSize(mean_tex, 0);
+    vec2 u = (vec2(p) - float(sp / 2) - 0.5) / float(sp);
+    ivec2 i0 = ivec2(floor(u));
+    vec2 f = u - vec2(i0);
+    float tol = (0.04 * abs(z) + 0.05) * 2.0, wsum = 0.0, near = 1e30;
+    vec3 sum = vec3(0.0), nearv = vec3(0.0);
+    for (int y = 0; y < 2; y++)
+        for (int x = 0; x < 2; x++) {
+            vec4 g = texelFetch(mean_tex, clamp(i0 + ivec2(x, y), ivec2(0), gs - 1), 0);
+            // rc_resolve.comp writes finite values; a non-finite one would give NaN even at weight 0
+            if (g.a == 0.0 || any(isnan(g)) || any(isinf(g))) continue;
+            float dz = abs(g.a - z);
+            float w = (x == 0 ? 1.0 - f.x : f.x) * (y == 0 ? 1.0 - f.y : f.y) * clamp(2.0 - 2.0 * dz / tol, 0.0, 1.0);
+            sum += g.rgb * w;
+            wsum += w;
+            if (dz < near) near = dz, nearv = g.rgb;
+        }
+    return max(wsum > 1e-3 ? sum / wsum : nearv, vec3(0.0));
+}
+
 void main() {
     ivec2 p = ivec2(gl_GlobalInvocationID.xy), size = textureSize(ao_tex, 0);
     if (p.x >= size.x || p.y >= size.y) return;
@@ -114,7 +152,23 @@ void main() {
     }
     vec3 k = pow(clamp(v / pc.curve.x, 0.0, 1.0), vec3(pc.curve.y));   // what is left of the ambient light
     bool part_view = pc.curve.z > 1.5;
-    if (!part_view && min(k.r, min(k.g, k.b)) >= 1.0) {   // open: nothing to take
+    if (!part_view && pc.curve.z > 0.0) {
+        // The surfaces that hide the sky send part of it back; ao.comp counts those darker than the ambient light as
+        // black. The multi-bounce fit of Jimenez et al. 2016 ("Practical Real-Time Strategies for Accurate Indirect
+        // Occlusion", its multi-bounce approximation) gives what is left after the bounces when the surroundings have
+        // the albedo rho: ((a k + b) k + c) k, never below k, 1 at k = 1, lifting the deepest occlusion most.
+        float rho = pc.curve.z;
+        vec3 a = vec3(2.0404 * rho - 0.3324), b = vec3(-4.7951 * rho + 0.6417), c3 = vec3(2.7552 * rho + 0.6903);
+        k = max(k, ((k * a + b) * k + c3) * k);
+    }
+    vec3 g = vec3(0.0);
+    bool bounce = LIT && pc.world0.w > 0.0 && !part_view;
+    if (bounce) {   // faded out first: beyond the fade no probe is read and g stays 0 (the open texel stops early)
+        float dist = length(view_at((vec2(p) * pc.glow.x) + 0.5, z));
+        float fade = clamp((pc.glow.z - dist) / (pc.glow.z - pc.glow.y), 0.0, 1.0);
+        if (fade > 0.0) g = min(bounce_at(p, z), vec3(pc.world1.w)) * pc.world2.w * fade;
+    }
+    if (!part_view && min(k.r, min(k.g, k.b)) >= 1.0 && max(g.r, max(g.g, g.b)) <= 0.0) {   // open: nothing to take
         imageStore(ao_out, p, vec4(1.0, 1.0, 1.0, z));
         return;
     }
@@ -134,5 +188,5 @@ void main() {
         part = min(part, ALBEDO * (1.0 - f) * ambient);
     }
     vec3 share = clamp(part / max(c, vec3(1e-6)), 0.0, 1.0);
-    imageStore(ao_out, p, vec4(part_view ? share : 1.0 - (1.0 - k) * share, z));
+    imageStore(ao_out, p, vec4(part_view ? share : bounce ? 1.0 + share * (g - (1.0 - k)) : 1.0 - (1.0 - k) * share, z));
 }

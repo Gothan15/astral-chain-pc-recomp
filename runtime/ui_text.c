@@ -108,11 +108,15 @@ static const char *const text_en[UI_TEXT_COUNT] = {
                                   "85 to 130 MiB at 2x, 340 to 520 MiB at 4x). Takes effect at the next start.",
     [UI_MENU_AO] = "Ambient occlusion",
     [UI_MENU_AO_DESC] = "Darkens creases, corners and the ground under characters and objects, where little of the "
-                        "surrounding light reaches. Computed on the screen after the world is lit; the game has none of "
-                        "its own. High costs more GPU time than Low. Takes effect at once.",
+                        "surrounding light reaches. High + bounce light also adds the light the surfaces on screen send "
+                        "back to each other: a lit wall or floor brightens and tints what faces it, even from far away. "
+                        "Computed on the screen after the world is lit; the game has none of its own. Each level costs "
+                        "more GPU time than the one before; High + bounce light is demanding, so on a weak graphics card "
+                        "prefer High. Takes effect at once.",
     [UI_MENU_AO_OFF] = "Off",
     [UI_MENU_AO_LOW] = "Low",
     [UI_MENU_AO_HIGH] = "High",
+    [UI_MENU_AO_GI] = "High + bounce light (demanding)",
     [UI_MENU_UPSCALING] = "Upscaler",
     [UI_MENU_UPSCALING_DESC] = "A temporal upscaler in place of the game's anti-aliasing: smoother edges and less "
                                "shimmer, and with a mode below Native more frames per second. NVIDIA DLSS needs an NVIDIA "
@@ -505,11 +509,15 @@ static const char *const text_ru[UI_TEXT_COUNT] = {
                                   "85–130 МиБ при 2x, 340–520 МиБ при 4x). Действует после перезапуска.",
     [UI_MENU_AO] = "Фоновое затенение",
     [UI_MENU_AO_DESC] = "Затемняет складки, углы и землю под персонажами и предметами, куда доходит мало окружающего "
-                        "света. Считается по экрану после освещения; в самой игре его нет. «Высокое» требует больше "
-                        "времени GPU, чем «Низкое». Действует сразу.",
+                        "света. «Высокое + непрямой свет» добавляет и свет, который поверхности на экране отражают "
+                        "друг на друга: освещённая стена или пол подсвечивает и окрашивает то, что напротив, даже "
+                        "издалека. Считается по экрану после освещения; в самой игре этого нет. Каждый следующий "
+                        "уровень требует больше времени GPU; «Высокое + непрямой свет» ресурсоёмко, на слабой видеокарте "
+                        "лучше выбрать «Высокое». Действует сразу.",
     [UI_MENU_AO_OFF] = "Выкл.",
     [UI_MENU_AO_LOW] = "Низкое",
     [UI_MENU_AO_HIGH] = "Высокое",
+    [UI_MENU_AO_GI] = "Высокое + непрямой свет (ресурсоёмко)",
     [UI_MENU_UPSCALING] = "Апскейлер",
     [UI_MENU_UPSCALING_DESC] = "Временной апскейлер вместо сглаживания игры: ровнее края и меньше мерцания, а в режиме "
                                "ниже «Родного» — больше кадров в секунду. NVIDIA DLSS нужна видеокарта NVIDIA RTX и "
@@ -1178,11 +1186,15 @@ static const char *const text_pt_br[UI_TEXT_COUNT] = {
                                   "próximo início.",
     [UI_MENU_AO] = "Oclusão de ambiente",
     [UI_MENU_AO_DESC] = "Escurece dobras, cantos e o chão sob personagens e objetos, onde chega pouca luz ao redor. "
-                        "Calculada na tela depois da iluminação; o jogo não tem a sua. Alta custa mais tempo de GPU "
-                        "que Baixa. Vale na hora.",
+                        "Alta + luz indireta também adiciona a luz que as superfícies na tela refletem umas nas outras: "
+                        "uma parede ou um chão iluminado clareia e tinge o que está à sua frente, mesmo de longe. "
+                        "Calculada na tela depois da iluminação; o jogo não tem a sua. Cada nível custa mais tempo de "
+                        "GPU que o anterior; Alta + luz indireta é pesada, então em uma placa de vídeo fraca prefira Alta. "
+                        "Vale na hora.",
     [UI_MENU_AO_OFF] = "Desligada",
     [UI_MENU_AO_LOW] = "Baixa",
     [UI_MENU_AO_HIGH] = "Alta",
+    [UI_MENU_AO_GI] = "Alta + luz indireta (pesada)",
     [UI_MENU_UPSCALING] = "Upscaler",
     [UI_MENU_UPSCALING_DESC] = "Um upscaler temporal no lugar do antisserrilhado do jogo: bordas mais suaves e menos "
                                "cintilação e, com um modo abaixo de Nativo, mais quadros por segundo. NVIDIA DLSS precisa "
@@ -1710,10 +1722,13 @@ static const char *const text_zh_hans[UI_TEXT_COUNT] = {
                                   "但占用更多显存（2x 约 85–130 MiB，4x 约 340–520 MiB）。下次启动时生效。",
     [UI_MENU_AO] = "环境光遮蔽",
     [UI_MENU_AO_DESC] = "让褶皱、角落以及角色和物体下方的地面变暗，那里接收到的周围光线较少。在光照之后于屏幕空间计算；"
-                        "游戏本身没有此效果。“高”比“低”占用更多 GPU 时间。立即生效。",
+                        "游戏本身没有此效果。“高 + 间接光照”还会加入屏幕上各表面相互反射的光：被照亮的墙壁或地面会照亮"
+                        "对面的物体并映上自己的颜色，即使相距很远。每提高一级都会占用更多 GPU 时间；“高 + 间接光照”负载较高，"
+                        "显卡较弱时请选择“高”。立即生效。",
     [UI_MENU_AO_OFF] = "关",
     [UI_MENU_AO_LOW] = "低",
     [UI_MENU_AO_HIGH] = "高",
+    [UI_MENU_AO_GI] = "高 + 间接光照（高负载）",
     [UI_MENU_UPSCALING] = "超分辨率",
     [UI_MENU_UPSCALING_DESC] = "以时间性超分辨率取代游戏的抗锯齿：边缘更平滑、闪烁更少；选择低于“原生”的模式还能提高帧率。"
                                "NVIDIA DLSS 需要 NVIDIA RTX 显卡，并将 nvngx_dlss.dll 放在 astralchain.exe 旁；Intel XeSS "
