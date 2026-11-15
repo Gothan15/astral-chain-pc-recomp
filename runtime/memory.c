@@ -435,6 +435,11 @@ uint32_t mem_set_permission(uint64_t a, uint64_t n, uint32_t perm) {
     if (i < 0) return R_INVALID_STATE;
     const RtLoaded *m = ldr_module(i);
     plat_mutex_lock(&lock);
+    for (unsigned k = 0; k < nstack_maps; k++)   // pages moved to a thread stack stay closed until UnmapMemory
+        if (overlaps(a, n, stack_maps[k].src, stack_maps[k].size)) {
+            plat_mutex_unlock(&lock);
+            return R_INVALID_STATE;
+        }
     uint8_t *t = perm_table(i) + (a - m->base - m->data_off) / PAGE;
     for (uint64_t p = 0; p < n / PAGE; p++)
         if (t[p] & ATTR_PERMISSION_LOCKED) {
@@ -464,8 +469,13 @@ uint32_t mem_set_attribute(uint64_t a, uint64_t n, uint32_t mask, uint32_t at) {
     return R_OK;
 }
 
-// ---- 0x04/0x05 MapMemory, UnmapMemory: thread stacks move from heap or alias into the stack region by copy; the
-// source is inaccessible while moved and gets the contents back on unmap.
+// ---- 0x04/0x05 MapMemory, UnmapMemory: thread stacks move from the heap, the alias region or a module's data into
+// the stack region by copy; the source is inaccessible while moved and gets the contents back on unmap.
+// A module's data is a source Horizon takes (CodeData can be aliased) and nn::os relies on it: before CreateThread it
+// maps the stack buffer it was given, and aborts when no attempt succeeds (sdk
+// ThreadManagerImplByHorizon::MapAliasStack accepts a source in state CodeData, Normal or AliasCodeData). Astral
+// Chain's vibration file player starts its update thread on a static 8 KiB buffer of main's .bss the first time a
+// vibration file plays, which is at the end of the game.
 static int alias_all_mapped(uint64_t a, uint64_t n) {   // under lock
     uint64_t first = (a - L.alias.base) / PAGE;
     for (uint64_t i = 0; i < n / PAGE; i++)
@@ -478,12 +488,21 @@ static uint32_t stack_move(int unmap, uint64_t dst, uint64_t src, uint64_t n) {
     if (!inside(dst, n, L.stack)) return R_INVALID_REGION;
     int in_heap = inside(src, n, (RtRange){L.heap.base, heap_size});
     int in_alias = inside(src, n, L.alias);
-    if (!in_heap && !in_alias) return R_INVALID_REGION;
+    int mod = in_heap || in_alias ? -1 : module_data(src, n);
+    if (!in_heap && !in_alias && mod < 0) return R_INVALID_REGION;
     plat_mutex_lock(&lock);
     uint32_t r = R_OK;
     if (in_alias && !alias_all_mapped(src, n)) {
         r = R_INVALID_REGION;
         goto out;
+    }
+    if (mod >= 0 && !unmap) {   // only pages the game can read and write, whose permission is not locked
+        uint64_t off = src - ldr_module(mod)->base;
+        for (uint64_t p = 0; p < n; p += PAGE)
+            if (module_page_perm(mod, off + p) != PERM_RW) {
+                r = R_INVALID_STATE;
+                goto out;
+            }
     }
     unsigned found = nstack_maps;
     for (unsigned i = 0; i < nstack_maps; i++)
@@ -518,8 +537,21 @@ out:
     return r;
 }
 
-uint32_t mem_map(uint64_t dst, uint64_t src, uint64_t n) { return stack_move(0, dst, src, n); }
-uint32_t mem_unmap(uint64_t dst, uint64_t src, uint64_t n) { return stack_move(1, dst, src, n); }
+// A refused move is logged (the first 8): nn::os aborts the game when it cannot move a thread's stack, and that abort
+// names neither the range nor the reason.
+static uint32_t stack_move_logged(int unmap, uint64_t dst, uint64_t src, uint64_t n) {
+    static volatile int32_t shown;
+    uint32_t r = stack_move(unmap, dst, src, n);
+    if (r && plat_inc32(&shown) <= 8) {
+        char d[128];
+        rt_log("%sMapMemory to %#llx of %s, size %#llx, failed %#x", unmap ? "Un" : "", (unsigned long long)dst,
+               ldr_describe(src, d, sizeof d), (unsigned long long)n, r);
+    }
+    return r;
+}
+
+uint32_t mem_map(uint64_t dst, uint64_t src, uint64_t n) { return stack_move_logged(0, dst, src, n); }
+uint32_t mem_unmap(uint64_t dst, uint64_t src, uint64_t n) { return stack_move_logged(1, dst, src, n); }
 
 // ---- 0x2C/0x2D MapPhysicalMemory, UnmapPhysicalMemory. Horizon maps only the still-unmapped pages of the range and
 // leaves mapped pages and their contents alone; Astral Chain's heaps grow by re-mapping ranges they partly own.
@@ -658,8 +690,8 @@ uint32_t mem_query(uint64_t a, RtMemoryInfo *out) {
         r.state = ST_CODE;
         r.perm = PERM_RX;
     }
-    // Moved stacks: the destination is Stack, the source Normal without access; free and normal regions around them
-    // are clipped (MNG services.c).
+    // Moved stacks: the destination is Stack, the source keeps its state (Normal, or CodeData in a module) without
+    // access; free, normal and module data regions around them are clipped (MNG services.c).
     for (unsigned i = 0; i < nstack_maps; i++) {
         const StackMap *m = &stack_maps[i];
         uint64_t end = m->dst + m->size, send = m->src + m->size;
@@ -668,11 +700,12 @@ uint32_t mem_query(uint64_t a, RtMemoryInfo *out) {
             break;
         }
         if (a >= m->src && a < send) {
-            r = (RtMemoryInfo){.base = m->src, .size = m->size, .state = ST_NORMAL, .perm = PERM_NONE, .attr = 4};
+            r = (RtMemoryInfo){.base = m->src, .size = m->size, .perm = PERM_NONE, .attr = 4,
+                               .state = r.state == ST_CODEDATA ? ST_CODEDATA : ST_NORMAL};
             break;
         }
         uint64_t lo = r.base, hi = r.base + r.size;
-        uint64_t b = r.state == ST_FREE ? m->dst : r.state == ST_NORMAL ? m->src : 0;
+        uint64_t b = r.state == ST_FREE ? m->dst : r.state == ST_NORMAL || r.state == ST_CODEDATA ? m->src : 0;
         uint64_t e = b + m->size;
         if (!b) continue;
         if (e <= a && e > lo) lo = e;

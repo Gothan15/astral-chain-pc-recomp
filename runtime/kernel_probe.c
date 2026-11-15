@@ -25,7 +25,7 @@ static int failures;
 #define CHECK(cond, ...) do { if (!(cond)) { failures++; printf("  FAIL: " __VA_ARGS__); putchar('\n'); } } while (0)
 
 static uint64_t a_lock_waiter, a_cv_waiter, a_cv_order_waiter, a_arb_waiter, a_event_waiter, a_core_worker,
-    a_exit_entry, a_exit_nested, a_fiber_fn, a_fiber_exit_thread, a_fiber_exit_fn, a_tick_worker;
+    a_exit_entry, a_exit_nested, a_fiber_fn, a_fiber_exit_thread, a_fiber_exit_fn, a_tick_worker, a_stack_worker;
 static uint64_t a_fib_init, a_fib_fin, a_fib_switch, a_fib_cur, tick_stub;
 
 // ---- helpers: SVCs through rt_svc, thread start and join
@@ -549,6 +549,66 @@ static void test_exit(Cpu *c) {
     CHECK(ok, "ExitThread unwinding (bad %d %d)", a.bad, b.bad);
 }
 
+// ---- a thread on a stack that lives in a module's data: nn::os moves the stack buffer it is given into the stack
+// region with MapMemory before CreateThread, and aborts when no attempt succeeds (sdk
+// ThreadManagerImplByHorizon::MapAliasStack takes a source in module data, the heap or the alias region). Astral
+// Chain's vibration file player starts its update thread on a page-aligned static buffer of main's .bss.
+typedef struct { uint64_t sp; } StackJob;
+
+static void stack_worker(Cpu *c) {
+    StackJob *j = arg_p(c, 0);
+    j->sp = c->sp;
+    ST64(c->sp - 16, 0x600d);
+    exit_thread(c);
+}
+
+static void test_module_stack(Cpu *c) {
+    const RtLoaded *m = ldr_module(0);
+    const uint64_t n = 0x2000;
+    uint64_t src = (m->base + m->size - n) & ~0xfffull, dst = mem_layout()->stack.base + 0x200000;
+    uint64_t mb, ms;
+    kern_main_stack(&mb, &ms);
+    if (dst < mb + ms && mb < dst + 0x10000 + n) dst = mb + ms + 0x100000;   // clear of the main thread's stack
+    RtMemoryInfo q;
+    int before = failures;
+    ST64(src + 8, 0x77);
+    uint32_t r = sv(c, 0x04, dst, src, n, 0);
+    CHECK(r == 0, "MapMemory of %s data +%#llx into the stack region: %#x", m->name,
+          (unsigned long long)(src - m->base), r);
+    if (!r) {
+        CHECK(LD64(dst + 8) == 0x77, "the moved stack lost the contents of the module's pages");
+        mem_query(src, &q);
+        CHECK(q.base == src && q.size == n && q.state == 4 && q.perm == 0, "QueryMemory on the moved module pages: "
+              "base +%#llx size %#llx state %u perm %u", (unsigned long long)(q.base - m->base),
+              (unsigned long long)q.size, q.state, q.perm);
+        CHECK(sv(c, 0x02, src, n, 3, 0) != 0, "SetMemoryPermission on pages moved to a stack");
+        CHECK(sv(c, 0x04, dst + 0x10000, src, n, 0) != 0, "MapMemory of pages already moved to a stack");
+        StackJob j = {0};
+        c->x[1] = a_stack_worker;
+        c->x[2] = ga(&j);
+        c->x[3] = dst + n;
+        c->x[4] = 44;
+        c->x[5] = (uint64_t)(int64_t)-2;
+        rt_svc(c, 0x08, 0);
+        CHECK(c->x[0] == 0, "CreateThread on the moved stack: %#llx", (unsigned long long)c->x[0]);
+        if (!c->x[0]) {
+            uint32_t h = (uint32_t)c->x[1];
+            start(c, h);
+            join(c, h);
+            CHECK(j.sp == dst + n && LD64(dst + n - 16) == 0x600d,
+                  "the thread did not run on the moved stack (sp %#llx)", (unsigned long long)j.sp);
+        }
+        CHECK(sv(c, 0x05, dst, src, n, 0) == 0, "UnmapMemory of the moved stack");
+        mem_query(src, &q);
+        CHECK(q.state == 4 && q.perm == 3 && LD64(src + 8) == 0x77 && LD64(src + n - 16) == 0x600d,
+              "the module's pages after UnmapMemory: state %u perm %u", q.state, q.perm);
+        ST64(src + 8, 0);
+        ST64(src + n - 16, 0);
+    }
+    printf("thread stack in module data: moved to the stack region, run on, moved back: %s\n",
+           failures > before ? "FAIL" : "ok");
+}
+
 // ---- lifted code: main's PLT stub for nn::os::GetSystemTick -> lifted sdk -> rt_ticks
 typedef struct { uint64_t first, last; long bad; } TickJob;
 
@@ -623,6 +683,7 @@ static void probe_main(Cpu *c) {
     test_cores(c);
     test_fibers(c);
     test_exit(c);
+    test_module_stack(c);
     test_lifted_ticks(c);
     test_exit_process(c);
 }
@@ -697,6 +758,7 @@ int probe_kernel(void) {
     a_fiber_exit_thread = hostfn_register("probe-kernel fiber exit thread", fiber_exit_thread);
     a_fiber_exit_fn = hostfn_register("probe-kernel fiber exit", fiber_exit_fn);
     a_tick_worker = hostfn_register("probe-kernel tick worker", tick_worker);
+    a_stack_worker = hostfn_register("probe-kernel stack worker", stack_worker);
     a_fib_init = hostfn_register(KERN_SYM_INITIALIZE_FIBER, kern_fiber_initialize);   // the loader's addresses
     a_fib_fin = hostfn_register(KERN_SYM_FINALIZE_FIBER, kern_fiber_finalize);
     a_fib_switch = hostfn_register(KERN_SYM_SWITCH_TO_FIBER, kern_fiber_switch);
