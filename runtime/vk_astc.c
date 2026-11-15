@@ -380,13 +380,15 @@ static int native_device(VkCtx *c) { return c->has_astc_ldr; }
 #define RGBA8_VRAM_MIN (5632ull << 20)
 
 static const char *auto_bc(VkCtx *c) {
-    uint64_t vram = 0;
+    uint64_t vram = 0, limit = vk_mem_vram_limit();
     for (uint32_t h = 0; h < c->mem_props.memoryHeapCount && h < VK_MAX_MEMORY_HEAPS; h++)
         if (c->mem_props.memoryHeaps[h].flags & VK_MEMORY_HEAP_DEVICE_LOCAL_BIT) vram += c->mem_props.memoryHeaps[h].size;
+    int limited = limit && vram > limit;
+    if (limited) vram = limit;
     int discrete = c->props.deviceType == VK_PHYSICAL_DEVICE_TYPE_DISCRETE_GPU;
     const char *b = discrete && vram >= RGBA8_VRAM_MIN ? "0" : "bc1";
-    rt_log("vk: AC_ASTC_BC=auto: %s GPU, %.1f GiB of video memory: %s", discrete ? "discrete" : "integrated or other",
-           vram / 1073741824.0, *b == '0' ? "RGBA8" : "bc1");
+    rt_log("vk: AC_ASTC_BC=auto: %s GPU, %.1f GiB of video memory%s: %s", discrete ? "discrete" : "integrated or other",
+           vram / 1073741824.0, limited ? " (AC_VRAM_LIMIT_MIB)" : "", *b == '0' ? "RGBA8" : "bc1");
     return b;
 }
 

@@ -46,6 +46,7 @@ typedef struct PoolRec {
     uint64_t import_lo, import_hi;     // POOL_IMPORT: the imported host range (aligned outwards)
     VkBuffer buf;
     VkDeviceMemory mem;                // POOL_IMPORT
+    uint64_t local_bytes;              // POOL_IMPORT: the import's bytes when its memory type is on a DEVICE_LOCAL heap
     VmaAllocation alloc;               // POOL_PHYS
     VPage *pt;                         // POOL_VIRT: size / 64 KiB entries
     uint64_t npages;
@@ -97,6 +98,10 @@ static pidx pool_index;                // POOL_IMPORT, POOL_PHYS and POOL_VIRT r
 static PoolRec **phys_list;            // physical pools by key, for MapVirtual requests
 static int nphys, cap_phys;
 static int32_t n_imports, n_import_failures;
+// Imported guest memory the driver counts on a DEVICE_LOCAL heap: on an integrated GPU, whose one heap is the system
+// memory, the guest pools (about 2.5 GiB in play) sit inside the device-local usage the budget query reports; on a
+// discrete GPU they import into the host heap and this stays 0. vk_mem_vram takes it out under AC_VRAM_LIMIT_MIB.
+static int64_t import_local_bytes;
 static PFN_vkGetMemoryHostPointerPropertiesEXT p_host_props;
 
 static VkBufferUsageFlags pool_usage(const VkCtx *c) {
@@ -169,6 +174,11 @@ static int import_pool(VkCtx *c, PoolRec *r, uint64_t addr, uint64_t size) {
         r->buf = VK_NULL_HANDLE;
         r->mem = VK_NULL_HANDLE;
         return 0;
+    }
+    uint32_t heap = c->mem_props.memoryTypes[type].heapIndex;
+    if (c->mem_props.memoryHeaps[heap].flags & VK_MEMORY_HEAP_DEVICE_LOCAL_BIT) {
+        r->local_bytes = n;
+        __atomic_add_fetch(&import_local_bytes, (int64_t)n, __ATOMIC_RELAXED);
     }
     plat_inc32(&n_imports);
     return 1;
@@ -244,6 +254,7 @@ static void destroy_rec(VkCtx *c, PoolRec *r) {
     if (r->salloc) vmaDestroyBuffer(c->vma, r->buf, r->salloc), r->buf = VK_NULL_HANDLE;
     if (r->buf) vkDestroyBuffer(c->device, r->buf, NULL);
     if (r->mem) vkFreeMemory(c->device, r->mem, NULL);
+    if (r->local_bytes) __atomic_sub_fetch(&import_local_bytes, (int64_t)r->local_bytes, __ATOMIC_RELAXED);
     if (r->alloc) vmaFreeMemory(c->vma, r->alloc);
     free(r->pt);
     free(r->wb);
@@ -544,6 +555,32 @@ void vk_mem_census(uint64_t frame) {
            (unsigned long long)frame, (unsigned long long)count[POOL_IMPORT], total[POOL_IMPORT] / 1048576.0,
            n_import_failures, (unsigned long long)count[POOL_PHYS], total[POOL_PHYS] / 1048576.0,
            (unsigned long long)count[POOL_VIRT], total[POOL_VIRT] / 1048576.0);
+    // The commit a crash report prints, as a baseline: a crash far above it points at growth during play. A driver short
+    // of memory faults or throws instead of failing an allocation, and the commit is what tells that apart.
+    double proc, sys_used, sys_limit;
+    plat_commit_info(&proc, &sys_used, &sys_limit);
+    rt_log("mem: commit at frame %llu: this process %.0f MB, the system %.0f of %.0f MB", (unsigned long long)frame, proc,
+           sys_used, sys_limit);
+    // Per heap, what VMA holds (its blocks, and the allocations inside them) beside what the driver counts for the
+    // process: usage above VMA's blocks is the imported guest pools (on an integrated GPU's device-local heap) and the
+    // driver's own memory (pipelines, command buffers, descriptor pools).
+    VkCtx *vc = vk_ctx();
+    if (vc && vc->vma) {
+        VmaBudget vb[VK_MAX_MEMORY_HEAPS];
+        vmaGetHeapBudgets(vc->vma, vb);
+        for (uint32_t h = 0; h < vc->mem_props.memoryHeapCount && h < VK_MAX_MEMORY_HEAPS; h++)
+            rt_log("mem: heap %u (flags %#x) at frame %llu: vma %u blocks %.0f MiB, %u allocations %.0f MiB; driver usage "
+                   "%.0f of %.0f MiB", h, vc->mem_props.memoryHeaps[h].flags, (unsigned long long)frame,
+                   vb[h].statistics.blockCount, vb[h].statistics.blockBytes / 1048576.0, vb[h].statistics.allocationCount,
+                   vb[h].statistics.allocationBytes / 1048576.0, vb[h].usage / 1048576.0, vb[h].budget / 1048576.0);
+        uint64_t used, budget;
+        int exact;
+        int64_t imp = __atomic_load_n(&import_local_bytes, __ATOMIC_RELAXED);
+        if (vk_mem_vram_limit() && vk_mem_vram(&used, &budget, &exact))
+            rt_log("mem: video memory at frame %llu as AC_VRAM_LIMIT_MIB sees it: %.0f of %.0f MiB (%.0f MiB of imported "
+                   "guest pools left out)", (unsigned long long)frame, used / 1048576.0, budget / 1048576.0,
+                   imp / 1048576.0);
+    }
     static const char *const kinds[] = {"", "import", "physical", "virtual"};
     for (int j = 0; j < ng; j++) {
         char f[160];
@@ -563,10 +600,32 @@ void vk_mem_census(uint64_t frame) {
     window_start = frame;
 }
 
+// AC_VRAM_LIMIT_MIB: the port acts as if the card had at most this much video memory, so the paths written for small
+// cards run on a large one or on an integrated GPU. Read once; the driver knows nothing of it, so nothing fails to
+// allocate past it: what changes is every decision the port takes from the device's memory. vk_mem_vram's budget is at
+// most the limit (the VRAM pressure sweep and over_budget in vk_texture.c, the texture cache's default bound, the
+// mirror refusal in mirror_create), and the choices made from the card's size at start take the limit as the size
+// (vk_astc.c auto_bc, boot.c settle_resolution). Empty or 0: no limit.
+uint64_t vk_mem_vram_limit(void) {
+    static int64_t limit = -1;   // bytes; -1 until read
+    int64_t l = __atomic_load_n(&limit, __ATOMIC_RELAXED);
+    if (l >= 0) return (uint64_t)l;
+    const char *s = cfg_get("AC_VRAM_LIMIT_MIB");
+    long long mb = s && *s ? strtoll(s, NULL, 10) : 0;
+    l = mb > 0 ? (int64_t)mb << 20 : 0;
+    int64_t unread = -1;
+    if (__atomic_compare_exchange_n(&limit, &unread, l, 0, __ATOMIC_RELAXED, __ATOMIC_RELAXED) && l)
+        rt_log("mem: video memory limited to %lld MiB (AC_VRAM_LIMIT_MIB): the budget and the size the port works from; "
+               "the guest pools imported into a device-local heap (an integrated GPU's) count outside it, as they would "
+               "on a discrete card", mb);
+    return (uint64_t)l;
+}
+
 int vk_mem_vram(uint64_t *used, uint64_t *budget, int *exact) {
     VkCtx *c = vk_ctx();
     *used = *budget = 0, *exact = 0;
     if (!c) return 0;
+    uint64_t limit = vk_mem_vram_limit();
     const VkPhysicalDeviceMemoryProperties *mp = &c->mem_props;
     if (c->has_memory_budget) {
         VkPhysicalDeviceMemoryBudgetPropertiesEXT b = {.sType = VK_STRUCTURE_TYPE_PHYSICAL_DEVICE_MEMORY_BUDGET_PROPERTIES_EXT};
@@ -576,6 +635,13 @@ int vk_mem_vram(uint64_t *used, uint64_t *budget, int *exact) {
             if (p2.memoryProperties.memoryHeaps[h].flags & VK_MEMORY_HEAP_DEVICE_LOCAL_BIT)
                 *used += b.heapUsage[h], *budget += b.heapBudget[h];
         *exact = 1;
+        if (limit) {
+            // The driver's usage holds the imported guest pools on an integrated GPU; a discrete card of the size
+            // asked for keeps them in system memory, so they leave the usage the limit is held against.
+            uint64_t imp = (uint64_t)__atomic_load_n(&import_local_bytes, __ATOMIC_RELAXED);
+            *used = *used > imp ? *used - imp : 0;
+            if (*budget > limit) *budget = limit;
+        }
         return *budget != 0;
     }
     VmaBudget vb[VK_MAX_MEMORY_HEAPS];
@@ -583,6 +649,7 @@ int vk_mem_vram(uint64_t *used, uint64_t *budget, int *exact) {
     for (uint32_t h = 0; h < mp->memoryHeapCount && h < VK_MAX_MEMORY_HEAPS; h++)
         if (mp->memoryHeaps[h].flags & VK_MEMORY_HEAP_DEVICE_LOCAL_BIT)
             *used += vb[h].statistics.blockBytes, *budget += mp->memoryHeaps[h].size;
+    if (limit && *budget > limit) *budget = limit;   // VMA's blocks hold no imports: the usage stays as it is
     return *budget != 0;
 }
 

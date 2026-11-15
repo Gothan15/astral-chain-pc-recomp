@@ -348,6 +348,14 @@ Every guest thread is a host thread. Astral Chain assumes Horizon's scheduler: t
   and the decode runs again; at last the scratch is taken from system memory, slower but never left out
   (`vk_texture.c` `tex_reclaim`, `vk_astc.c` `vk_astc_record_host`). A texture that still got nothing is decoded again
   at its next use instead of keeping stale memory.
+  `AC_VRAM_LIMIT_MIB` makes the port act as if the card had that much video memory, to drive these paths on a large
+  card or an integrated GPU: the budget the guards read is at most the limit, the texture cache's default bound and
+  the mirror refusal follow it, and the start choices taken from the card's size (`AC_ASTC_BC=auto`, `output_res =
+  auto`) take the limit as the size. On an integrated GPU the imported guest pools sit in the device-local heap; they
+  leave the usage held against the limit, as a discrete card keeps them in system memory. The driver knows nothing of
+  the limit, so no allocation fails past it (`vk_memory.c` `vk_mem_vram_limit`). The memory census at frames 600 and
+  1800 logs the process and system commit and, per heap, VMA's blocks beside the driver's usage; crash reports print
+  the commit too.
   --probe-astc holds both encoders and the scan to PSNR and exactness bounds. The CPU decoder (`tex_astc*.c`) is the fallback and the test oracle.
 - Draw state. A draw whose program, bound state and textures repeat reuses the previous draw's shaders and skips rebuilding its descriptor sets; descriptor sets are written through update templates (`vk_exec_draw.c`, `vk_pipeline.c`).
 - Allocation: Vulkan Memory Allocator. Debugging: Vulkan validation layers, per-pass frame dumps (`AC_DUMP`, or F12 with `AC_DUMP_KEY=1`; `vk_dump.c`) and a flight recorder (`AC_FLIGHT`). RenderDoc cannot capture, because it hides `VK_EXT_external_memory_host` from the application.

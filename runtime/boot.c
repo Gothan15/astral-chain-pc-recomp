@@ -310,6 +310,8 @@ static void settle_resolution(void) {
     for (uint32_t i = 0; i < m->memoryHeapCount; i++)
         if ((m->memoryHeaps[i].flags & VK_MEMORY_HEAP_DEVICE_LOCAL_BIT) && m->memoryHeaps[i].size > big)
             big = m->memoryHeaps[i].size;
+    uint64_t limit = vk_mem_vram_limit();   // AC_VRAM_LIMIT_MIB: the card size the port acts on
+    if (limit && big > limit) big = limit;
     res_settle(vk_dlaa_upscaler_ok(), (unsigned)(big >> 20));
 }
 

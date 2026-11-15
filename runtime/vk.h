@@ -271,8 +271,11 @@ int vk_mem_class_of(uint64_t addr);               // VK_MCLS_* of the pool at ad
 void vk_mem_census(uint64_t frame);               // at each present: pool census and traffic, logged at frame 1800 and,
                                                   // with AC_TRACE=perf, every 1800 frames
 // VRAM in use and its budget, summed over the DEVICE_LOCAL heaps. exact 1: VK_EXT_memory_budget (the whole process),
-// 0: this allocator's own allocations against the heap sizes. 0 when unknown.
+// 0: this allocator's own allocations against the heap sizes. 0 when unknown. Under AC_VRAM_LIMIT_MIB the budget is at
+// most the limit and the usage leaves out the guest pools imported into a device-local heap.
 int vk_mem_vram(uint64_t *used, uint64_t *budget, int *exact);
+// AC_VRAM_LIMIT_MIB in bytes, 0 without a limit: the video memory the port acts as if the card had (vk_memory.c).
+uint64_t vk_mem_vram_limit(void);
 // VRAM headroom (vk_headroom.c): the VMA callbacks that see new device memory, and the thread that allocates the next
 // block of each memory type in use ahead of the render thread.
 const VmaDeviceMemoryCallbacks *vk_headroom_callbacks(void);
