@@ -105,6 +105,8 @@ static struct {
     VkPipeline pipe[2];                  // bound per bind point: 0 graphics, 1 compute
     VkPipeState st;                      // the state vk_pipeline_set_dynamic last recorded
     int st_valid;
+    int dyn_valid;                       // vk_pipeline_set_dynamic_delta's record of this command buffer's dynamic state
+                                         // holds (AC_DYN_DELTA); pipeline binds keep it, the memset clears it
     VkBuffer vb[17];                     // vertex buffers last bound
     VkDeviceSize vo[17], vsz[17], vstr[17];
     int vcls[17];                        // their pool class and pool record, for the census
@@ -143,6 +145,10 @@ static struct {
     int on;
     uint64_t draws, bind[2], desc[2], push, push_skip, set_new, set_reuse, ac_miss, same_prog, same_all, bind_skip;
 } BS = {-1};
+
+// AC_DYN_DELTA (prepare_draw): the mode and, for the perf line, the set_dynamic calls, the commands they recorded
+// (a full set counts 1) and the calls that recorded none.
+static struct { int mode; uint64_t calls, cmds, empty; } DD = {-1};
 
 // The inputs of the last graphics bind_resources (bind_sig) and what its build counted for the traffic census, which a
 // skipped build counts again. RS_BYTES bounds the bound-slot bytes a pipeline reads (RsList): per binding at most one
@@ -203,7 +209,19 @@ static void cb_done(void *arg) {   // completion thread
     free(r->written), free(r->pools), free(r->chunks), free(r);
 }
 
+// Also what makes the dynamic state delta of prepare_draw safe: a pass that binds a graphics pipeline of its own (whose
+// dynamic states differ from P.dyn) or records a vkCmdSet* of a P.dyn state on the replay's command buffer calls this
+// afterwards, so the next draw records the full set.
 void vk_exec_draw_new_cb(void) { memset(&B, 0, sizeof B); }
+
+void vk_exec_draw_perf(uint64_t subs) {
+    if (DD.mode < 0 || !subs || !DD.calls) return;
+    double k = 1.0 / (double)subs;
+    rt_log("perf: dynamic state per submission: %.1f calls, %.1f commands (a full set counts 1), %.1f calls with nothing "
+           "changed%s", DD.calls * k, DD.cmds * k, DD.empty * k,
+           DD.mode == 2 ? " (AC_DYN_DELTA=ab)" : DD.mode ? "" : " (AC_DYN_DELTA=0)");
+    DD.calls = DD.cmds = DD.empty = 0;
+}
 
 static CbRes *cb_res(VkExec *ex) {
     if (cur && cur_fence == ex->fence) return cur;
@@ -2445,8 +2463,21 @@ static int prepare_draw(VkExec *ex, int prim, int32_t count, int restart) {
     if (!p || !info) return warn_once(W_PIPELINE, "a graphics pipeline could not be created: draws with it are skipped"), 0;
     bind_pipeline(ex, VK_PIPELINE_BIND_POINT_GRAPHICS, p);
     if (!B.st_valid || memcmp(&B.st, &s, sizeof s)) {
-        vk_pipeline_set_dynamic(ex->cb, &s);
-        ex->recorded++;
+        // AC_DYN_DELTA (default 1; 0 the full set at every change, as before; ab alternates with the AC_AB blocks):
+        // only the dynamic states whose values changed since the last call in this command buffer. A pipeline bind
+        // clears st_valid but not dyn_valid: every pipeline here declares the same dynamic states, which the bind
+        // leaves as they were (the viewport, scissor and stencil values of record_fixed rely on that too).
+        if (DD.mode < 0) DD.mode = rt_knob("DYN_DELTA", "1");
+        uint32_t cmds = 1;
+        if (RT_KNOB_ON(DD.mode)) {
+            vk_pipeline_set_dynamic_delta(ex->cb, &s, B.dyn_valid, &cmds);
+            B.dyn_valid = 1;
+        } else {
+            vk_pipeline_set_dynamic(ex->cb, &s);
+            B.dyn_valid = 0;   // the delta's record is stale from here on
+        }
+        DD.calls++, DD.cmds += cmds, DD.empty += !cmds;
+        ex->recorded += cmds != 0;
         B.st = s, B.st_valid = 1;
     }
     vk_dlaa_draw(ex);

@@ -129,6 +129,9 @@ void vk_exec_inline_end(int reopen);
 // vk_exec_draw.c: forget what the command buffer being recorded has bound (pipeline, sets, dynamic state, vertex
 // buffers): the replay continues in a new one (vk_sync_split).
 void vk_exec_draw_new_cb(void);
+// vk_exec_draw.c, AC_TRACE=perf: logs the dynamic state calls and commands per submission over the last subs
+// submissions (AC_DYN_DELTA), and starts the counts again.
+void vk_exec_draw_perf(uint64_t subs);
 VkBuffer vk_exec_inline_buffer(VkDeviceSize size);
 // vk_exec.c: the stand-in a 3D BC render target is drawn through goes with its image (vk_exec_image_gone).
 void vk_exec_bc_gone(VkImage image);

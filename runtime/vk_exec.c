@@ -963,6 +963,7 @@ int vk_exec_record(VkCommandBuffer cb, const uint64_t *handles, int n, uint64_t 
     if (n) n_subs++;
     if ((rt_trace & RT_TRACE_PERF) && n_subs >= 240) {
         rt_log("perf: replay command buffer parts per submission %.2f", (double)(n_subs + n_parts) / (double)n_subs);
+        vk_exec_draw_perf(n_subs);
         n_subs = n_parts = 0;
     }
     return ex->recorded - part_start;   // what the last part holds

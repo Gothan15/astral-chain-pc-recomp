@@ -582,7 +582,14 @@ VkPipeline vk_pipeline_compute(const GfxShader *cs, const VkPipeInfo **info);
 // write masks and references; vertex buffers with vkCmdBindVertexBuffers2 (strides NULL when
 // vk_pipeline_vertex_input_dynamic(), else from VkPipeState.vstream).
 void vk_pipeline_set_dynamic(VkCommandBuffer cb, const VkPipeState *s);
-int vk_pipeline_vertex_input_dynamic(void);    // 1: vertex input is VK_EXT_vertex_input_dynamic_state
+// The same states, recording only those whose values differ from what cb holds. Every graphics pipeline made here
+// declares the same dynamic states (P.dyn), and binding a pipeline leaves the states it declares dynamic as they
+// were, so cb still holds what the last call recorded unless something else set them. valid 0 (a new command buffer,
+// or a pass that bound a pipeline of its own or set these states): the full set, and the record restarts; valid 1:
+// the difference from the last call's values. *cmds: the commands recorded (a full set counts 1, 0 when nothing
+// changed).
+void vk_pipeline_set_dynamic_delta(VkCommandBuffer cb, const VkPipeState *s, int valid, uint32_t *cmds);
+int vk_pipeline_vertex_input_dynamic(void);   // 1: vertex input is VK_EXT_vertex_input_dynamic_state
 // Translator answers from the bound state: attr_type from the vertex attribute formats (vs), frag_out_type from the
 // colour target formats (fs). Other fields are left as they are; either pointer may be NULL.
 void vk_pipeline_answers(const VkPipeState *s, GfxShaderAnswers *vs, GfxShaderAnswers *fs);
