@@ -1118,7 +1118,7 @@ static void perf_gpu_once(const MenuTarget *t) {
     for (uint32_t h = 0; h < mp.memoryHeapCount; h++)
         if (mp.memoryHeaps[h].flags & VK_MEMORY_HEAP_DEVICE_LOCAL_BIT) vram += mp.memoryHeaps[h].size;
     perfmon_set_gpu(p2.properties.deviceName, id.deviceLUIDValid ? id.deviceLUID : NULL, has_bus ? (int)bus.pciBus : -1,
-                    (float)(vram >> 20));
+                    (float)(vram >> 20), p2.properties.deviceType == VK_PHYSICAL_DEVICE_TYPE_INTEGRATED_GPU);
 }
 
 static void perf_tick(uint64_t now, const MenuTarget *t) {

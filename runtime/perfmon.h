@@ -41,8 +41,9 @@ typedef struct {
 // them. Off: perf_present skips perfmon_frame and nothing samples.
 void perfmon_mode(int mode);
 // The Vulkan device the game renders on: its name, its LUID (8 bytes; NULL when the driver gives none), its PCI bus
-// (-1 unknown) and its device-local memory. Before the first perfmon_mode(2).
-void perfmon_set_gpu(const char *name, const uint8_t *luid, int pci_bus, float vram_total_mb);
+// (-1 unknown), its device-local memory and whether it is an integrated GPU (its memory is system memory). Before the
+// first perfmon_mode(2).
+void perfmon_set_gpu(const char *name, const uint8_t *luid, int pci_bus, float vram_total_mb, int integrated);
 // A game frame was presented (perf_present, the render thread, only while the overlay is on): the time since the last
 // one, the render thread's waits of this frame (PERF_N entries, host.h), its replay time and the running count of
 // texture uploads.

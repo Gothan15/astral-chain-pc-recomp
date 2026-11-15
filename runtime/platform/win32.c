@@ -1339,9 +1339,9 @@ static BOOL CALLBACK pdh_load(INIT_ONCE *o, void *p, void **c) {
 }
 
 // One PDH query with its wildcard counters ("\Object(*)\Counter"). A query whose open failed stays NULL.
-typedef struct { PDH_HQUERY q; PDH_HCOUNTER c[2]; } PdhQuery;
+typedef struct { PDH_HQUERY q; PDH_HCOUNTER c[3]; } PdhQuery;
 
-static void pdh_query(PdhQuery *pq, const wchar_t *c0, const wchar_t *c1) {
+static void pdh_query(PdhQuery *pq, const wchar_t *c0, const wchar_t *c1, const wchar_t *c2) {
     InitOnceExecuteOnce(&pdh.once, pdh_load, NULL, NULL);
     pq->q = NULL;
     if (!pdh.open || pdh.open(NULL, 0, &pq->q) != ERROR_SUCCESS) {
@@ -1350,7 +1350,8 @@ static void pdh_query(PdhQuery *pq, const wchar_t *c0, const wchar_t *c1) {
     }
     if (pdh.add(pq->q, c0, 0, &pq->c[0]) != ERROR_SUCCESS) pq->c[0] = NULL;
     if (!c1 || pdh.add(pq->q, c1, 0, &pq->c[1]) != ERROR_SUCCESS) pq->c[1] = NULL;
-    if (!pq->c[0] && !pq->c[1]) {
+    if (!c2 || pdh.add(pq->q, c2, 0, &pq->c[2]) != ERROR_SUCCESS) pq->c[2] = NULL;
+    if (!pq->c[0] && !pq->c[1] && !pq->c[2]) {
         pdh.close(pq->q);
         pq->q = NULL;
     }
@@ -1371,22 +1372,25 @@ static PDH_FMT_COUNTERVALUE_ITEM_W *pdh_items(PDH_HCOUNTER c, DWORD *count) {
 
 struct PlatLoad {
     uint64_t idle, kernel, user, proc;   // the previous call's times; kernel 0 before the first
-    PdhQuery thermal, gpu;               // gpu: engine utilisation, adapter dedicated memory
+    PdhQuery thermal, gpu;               // gpu: engine utilisation, adapter dedicated and shared memory
     wchar_t luid[40];                    // "luid_0x<high>_0x<low>" of the adapter, lower case; empty for any
+    int integrated;                      // the adapter's memory is system memory: its shared usage counts as video memory
 };
 
-PlatLoad *plat_load_open(const uint8_t *gpu_luid, int pci_bus) {
+PlatLoad *plat_load_open(const uint8_t *gpu_luid, int pci_bus, int integrated) {
     (void)pci_bus;   // the LUID names the adapter
     PlatLoad *l = calloc(1, sizeof *l);
     if (!l) return NULL;
+    l->integrated = integrated;
     if (gpu_luid) {   // Vulkan's deviceLUID is the LUID struct's memory: LowPart, then HighPart
         uint32_t lo, hi;
         memcpy(&lo, gpu_luid, 4);
         memcpy(&hi, gpu_luid + 4, 4);
         swprintf(l->luid, sizeof l->luid / sizeof *l->luid, L"luid_0x%08x_0x%08x", hi, lo);
     }
-    pdh_query(&l->thermal, L"\\Thermal Zone Information(*)\\Temperature", NULL);
-    pdh_query(&l->gpu, L"\\GPU Engine(*)\\Utilization Percentage", L"\\GPU Adapter Memory(*)\\Dedicated Usage");
+    pdh_query(&l->thermal, L"\\Thermal Zone Information(*)\\Temperature", NULL, NULL);
+    pdh_query(&l->gpu, L"\\GPU Engine(*)\\Utilization Percentage", L"\\GPU Adapter Memory(*)\\Dedicated Usage",
+              integrated ? L"\\GPU Adapter Memory(*)\\Shared Usage" : NULL);
     return l;
 }
 
@@ -1462,18 +1466,25 @@ void plat_gpu_load(PlatLoad *l, float *load_pct, float *vram_used_mb) {
     free(it);
     for (int k = 0; k < nt; k++)
         if (t[k].sum > *load_pct) *load_pct = (float)(t[k].sum > 100 ? 100 : t[k].sum);
-    // Adapter memory instances: "luid_0x.._0x.._phys_<n>", bytes. Without a LUID: the adapter that uses the most.
-    it = pdh_items(l->gpu.c[1], &n);
+    // Adapter memory instances: "luid_0x.._0x.._phys_<n>", bytes. Without a LUID: the adapter that uses the most. An
+    // integrated GPU has no dedicated memory of its own (an Arc 140T reports 0 dedicated bytes and its whole use, 917
+    // MiB at the title screen, as shared), so there the shared usage adds in: it is what Task Manager shows as the
+    // GPU's memory. A discrete GPU's shared usage is system memory and stays out.
     double sum = 0, best = -1;
-    for (DWORD i = 0; it && i < n; i++) {
-        if (it[i].FmtValue.CStatus != PDH_CSTATUS_VALID_DATA) continue;
-        wchar_t lu[40];
-        inst_luid(it[i].szName, lu);
-        if (l->luid[0] ? !wcscmp(lu, l->luid) : 0) sum += it[i].FmtValue.doubleValue;
-        if (it[i].FmtValue.doubleValue > best) best = it[i].FmtValue.doubleValue;
+    int seen = 0;
+    for (int k = 1; k <= (l->integrated ? 2 : 1); k++) {
+        it = pdh_items(l->gpu.c[k], &n);
+        for (DWORD i = 0; it && i < n; i++) {
+            if (it[i].FmtValue.CStatus != PDH_CSTATUS_VALID_DATA) continue;
+            wchar_t lu[40];
+            inst_luid(it[i].szName, lu);
+            if (l->luid[0] ? !wcscmp(lu, l->luid) : 0) sum += it[i].FmtValue.doubleValue, seen = 1;
+            if (it[i].FmtValue.doubleValue > best) best = it[i].FmtValue.doubleValue;
+        }
+        free(it);
     }
-    if (it && (l->luid[0] ? sum > 0 : best >= 0)) *vram_used_mb = (float)((l->luid[0] ? sum : best) / 1048576.0);
-    free(it);
+    // With a LUID, an adapter that was found counts even at 0 bytes; before, a sum of 0 left the cell empty.
+    if (l->luid[0] ? seen : best >= 0) *vram_used_mb = (float)((l->luid[0] ? sum : best) / 1048576.0);
 }
 
 void plat_mem_info(float *used_mb, float *total_mb, float *proc_mb) {

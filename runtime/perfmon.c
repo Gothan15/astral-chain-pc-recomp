@@ -117,9 +117,11 @@ static uint8_t g_gpu_luid[8];
 static int g_gpu_luid_ok;
 static int g_gpu_bus = -1;
 static float g_vram_total_mb = -1;
+static int g_gpu_integrated;
 
-void perfmon_set_gpu(const char *name, const uint8_t *luid, int pci_bus, float vram_total_mb) {
+void perfmon_set_gpu(const char *name, const uint8_t *luid, int pci_bus, float vram_total_mb, int integrated) {
     plat_mutex_lock(&g_lock);
+    g_gpu_integrated = integrated;
     snprintf(g_gpu_name, sizeof g_gpu_name, "%s", name ? name : "");
     g_gpu_luid_ok = luid != NULL;
     if (luid) memcpy(g_gpu_luid, luid, sizeof g_gpu_luid);
@@ -321,6 +323,7 @@ static void sampler(void *arg) {
     snprintf(s.gpu_name, sizeof s.gpu_name, "%s", g_gpu_name);
     int bus = g_gpu_bus;
     float vram_total = g_vram_total_mb;
+    int integrated = g_gpu_integrated;
     plat_mutex_unlock(&g_lock);
     sysinfo_cpu_name(s.cpu_name, sizeof s.cpu_name);
     if (!g_os_name[0]) plat_os_version(g_os_name, sizeof g_os_name);
@@ -328,7 +331,7 @@ static void sampler(void *arg) {
     tex_holding(s.tex_mode, sizeof s.tex_mode);
     if (!nv.tried) nvml_open(s.gpu_name);
     if (!nv.ok && !adl.tried) adl_open(s.gpu_name, bus);
-    PlatLoad *l = plat_load_open(have_luid ? luid : NULL, bus);
+    PlatLoad *l = plat_load_open(have_luid ? luid : NULL, bus, integrated);
     plat_mutex_lock(&g_lock);
     while (g_smp.want) {
         plat_mutex_unlock(&g_lock);

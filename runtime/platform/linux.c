@@ -1708,6 +1708,7 @@ struct PlatLoad {
     uint64_t proc_ns;
     char gpu[256];                // /sys/class/drm/cardN/device of the GPU in use; empty when unknown
     char temp[256];               // the CPU's hwmon temp1_input; empty when unknown
+    int integrated;               // an APU: its GTT (system memory the GPU maps) counts as video memory
 };
 
 static int read_u64_file(const char *path, uint64_t *v) {
@@ -1770,10 +1771,11 @@ static void find_gpu(char *out, size_t cap, int bus) {
     closedir(d);
 }
 
-PlatLoad *plat_load_open(const uint8_t *gpu_luid, int pci_bus) {
+PlatLoad *plat_load_open(const uint8_t *gpu_luid, int pci_bus, int integrated) {
     (void)gpu_luid;   // Linux has no adapter LUIDs; the PCI bus names the card
     PlatLoad *l = calloc(1, sizeof *l);
     if (!l) return NULL;
+    l->integrated = integrated;
     find_cpu_temp(l->temp, sizeof l->temp);
     find_gpu(l->gpu, sizeof l->gpu, pci_bus);
     return l;
@@ -1816,7 +1818,13 @@ void plat_gpu_load(PlatLoad *l, float *load_pct, float *vram_used_mb) {
     snprintf(path, sizeof path, "%s/gpu_busy_percent", l->gpu);
     if (read_u64_file(path, &v)) *load_pct = (float)v;
     snprintf(path, sizeof path, "%s/mem_info_vram_used", l->gpu);
-    if (read_u64_file(path, &v)) *vram_used_mb = (float)(v >> 20);
+    if (read_u64_file(path, &v)) {
+        // An APU's VRAM is a small carve-out of system memory (the Steam Deck's 1 GiB); the rest of what it uses is GTT.
+        uint64_t gtt;
+        snprintf(path, sizeof path, "%s/mem_info_gtt_used", l->gpu);
+        if (l->integrated && read_u64_file(path, &gtt)) v += gtt;
+        *vram_used_mb = (float)(v >> 20);
+    }
 }
 
 void plat_mem_info(float *used_mb, float *total_mb, float *proc_mb) {
