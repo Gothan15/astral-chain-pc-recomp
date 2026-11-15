@@ -188,7 +188,9 @@ re-protecting imported memory invalidates the driver's userptr buffer on every s
 amdgpu), and importing pins the pages, which drops their write protection. Each CPU-visible pool therefore gets a
 host-visible copy (shadow storage, `runtime/vk_memory.c`): the pages the CPU wrote go in before each submit, and the GPU's
 writes come back at its fence. In play that costs about 0.2 ms a frame and doubles the memory of those pools (about
-1.1 GB). `AC_SHADOW=1` turns it on under Windows too. The Steam Deck's RADV has `VK_EXT_external_memory_host` as
+1.1 GB). `AC_SHADOW=1` turns it on under Windows too. The written pages come from per-submission write-watch snapshots,
+each 2 MiB region queried at most once per submission and shared with the texture checks; `AC_SHADOW_SNAP=0` queries
+each pool at every part of a submission, as before. The Steam Deck's RADV has `VK_EXT_external_memory_host` as
 well: the shadow copies are chosen for the measured cost above, not for a missing extension.
 
 The Deck's GPU (Van Gogh) has no native ASTC, so its textures go through the compute decoder (`runtime/vk_astc.c`,

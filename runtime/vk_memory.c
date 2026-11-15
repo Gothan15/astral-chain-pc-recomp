@@ -956,6 +956,7 @@ static SRange *spend;                             // shadow_lock: GPU writes rec
 static int nspend, cspend;
 static int64_t s_live_n, s_live_bytes;            // shadow_lock
 static uint64_t s_syncs, s_copied, s_queries, s_untracked, s_wb_bytes, s_held_bytes, s_ticks;   // shadow_lock: since the last log
+static uint64_t s_qticks, s_seen;   // shadow_lock: time in the write-watch queries; regions already snapped in the epoch
 
 static int shadow_pool(VkCtx *c, PoolRec *r, uint64_t addr, uint64_t size) {
     r->import_lo = addr & ~0xfffull;
@@ -1039,9 +1040,45 @@ static void shadow_copy(PoolRec *r, uint64_t a, uint64_t b, int i) {
     s_copied += b - a;
 }
 
+// AC_SHADOW_SNAP (default 1; ab alternates with the AC_AB blocks): a pool's sync takes its written pages from the
+// per-submission write-watch snapshots (snap_regions, shared with the texture checks and the VRAM mirror): each 2 MiB
+// region is queried at most once per guest submission (vk_texture_new_submit), however many pools share it and however
+// many parts of the submission sync them, and a shadow region left unwritten for AC_FREEZE_IDLE submissions becomes a
+// freeze candidate, so later queries skip it. The GPU then reads a pool as of the first part that syncs it, nearer the
+// submit call, the moment the game means (vk_usnap.c); a guest write after that snapshot keeps its OS bit and is copied
+// at the next submission's. 0 queries each pool at every sync, as before. After TotK Recomp's vk_memory.c
+// shadow_sync_pool (MIT; THIRD_PARTY_NOTICES.md).
+static int shadow_snap = -1;
+static void shadow_copy_newer(PoolRec *r, uint32_t since);
+
 // shadow_lock and gen_lock held: stamps the pool's written pages and copies those newer than its shadow.
 static void shadow_sync_pool(PoolRec *r) {
     uint64_t lo = r->import_lo, hi = r->import_hi;
+    if (shadow_snap < 0) {
+        shadow_snap = rt_knob("SHADOW_SNAP", "1");
+        rt_log("mem: shadow sync: %s (AC_SHADOW_SNAP)", shadow_snap == 2 ? "alternating with the AC_AB blocks"
+               : shadow_snap ? "per-submission region snapshots" : "a query per pool at every part");
+    }
+    uint32_t epoch = RT_KNOB_ON(shadow_snap) ? vk_texture_epoch() : 0;
+    uint64_t r0 = lo >> SNAP_SHIFT, r1 = (hi - 1) >> SNAP_SHIFT;
+    if (epoch && r1 < SNAP_REGIONS) {
+        uint64_t q0 = qpc();
+        for (uint64_t k = r0; k <= r1; k++) s_seen += snap_at[k] == epoch;
+        s_queries += snap_regions(r0, r1, epoch);   // stamps what the snapshot found, if the region was not seen yet
+        s_qticks += qpc() - q0;
+        int untracked = 0;
+        for (uint64_t k = r0; k <= r1; k++) untracked |= snap_untracked[k];
+        uint32_t since = r->sgen;
+        r->sgen = gen_now;
+        if (untracked) {   // nothing tells which pages changed: all of them
+            s_untracked++;
+            shadow_copy(r, lo, hi, 0);
+            return;
+        }
+        shadow_copy_newer(r, since);
+        return;
+    }
+    uint64_t q0 = qpc();
     uint32_t g = ++gen_now;
     int tracked = 1;
     for (uint64_t a = lo; a < hi;) {   // one query per run of regions that are not frozen
@@ -1053,6 +1090,7 @@ static void shadow_sync_pool(PoolRec *r) {
         if (!query_stamp(a, b, g)) tracked = 0;
         a = b;
     }
+    s_qticks += qpc() - q0;
     uint32_t since = r->sgen;
     r->sgen = gen_now;
     if (!tracked) {   // nothing tells which pages changed: all of them
@@ -1060,6 +1098,13 @@ static void shadow_sync_pool(PoolRec *r) {
         shadow_copy(r, lo, hi, 0);
         return;
     }
+    shadow_copy_newer(r, since);
+}
+
+// shadow_lock and gen_lock held: copies the pool's pages stamped after since, by the CPU or the GPU domain, into its
+// shadow, in runs.
+static void shadow_copy_newer(PoolRec *r, uint32_t since) {
+    uint64_t lo = r->import_lo, hi = r->import_hi;
     uint64_t run = 0;
     for (uint64_t k = lo >> REG_SHIFT; k <= (hi - 1) >> REG_SHIFT; k++) {
         uint64_t a = k << REG_SHIFT, b = a + (1ull << REG_SHIFT);
@@ -1169,12 +1214,12 @@ static void shadow_log(uint64_t frame) {
     mem_hold_stats(&held_now, &holds, &fetched);
     rt_log("mem: shadow at frame %llu: %lld pools %.1f MiB; since the last: %llu pool syncs, %llu queries, %.1f MiB "
            "copied in (%llu untracked), %.1f MiB written back, %.1f MiB left in the shadow (%d ranges held, %llu new, "
-           "%llu fetched back), %.2f ms, %d GPU writes pending",
+           "%llu fetched back), %.2f ms (%.2f ms in queries; %llu regions already snapped), %d GPU writes pending",
            (unsigned long long)frame, (long long)s_live_n, s_live_bytes / 1048576.0, (unsigned long long)s_syncs,
            (unsigned long long)s_queries, s_copied / 1048576.0, (unsigned long long)s_untracked, s_wb_bytes / 1048576.0,
            s_held_bytes / 1048576.0, held_now, (unsigned long long)holds, (unsigned long long)fetched, qpc_ms(s_ticks),
-           nspend);
-    s_syncs = s_queries = s_copied = s_untracked = s_wb_bytes = s_held_bytes = s_ticks = 0;
+           qpc_ms(s_qticks), (unsigned long long)s_seen, nspend);
+    s_syncs = s_queries = s_copied = s_untracked = s_wb_bytes = s_held_bytes = s_ticks = s_qticks = s_seen = 0;
     plat_mutex_unlock(&shadow_lock);
 }
 
