@@ -1538,6 +1538,8 @@ int plat_stderr_path(char *out, size_t cap) {
 
 // ---- process
 
+void plat_exit_skip_unload(void) {}   // _exit below runs no library destructors already
+
 void plat_exit(int code) {
     fflush(stdout);
     fflush(stderr);

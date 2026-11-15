@@ -756,9 +756,22 @@ void plat_aligned_free(void *p) { _aligned_free(p); }
 
 // ---- process
 
+static volatile LONG exit_skip_unload;
+
+void plat_exit_skip_unload(void) { InterlockedExchange(&exit_skip_unload, 1); }
+
+// ExitProcess first stops every other thread wherever it is, then runs each DLL's DLL_PROCESS_DETACH and, for DLLs
+// built with MinGW, their C++ static destructors, on this thread. A handler that takes a lock one of the stopped
+// threads held, or waits for one of them, never returns: the process keeps its memory, its exit is never signalled,
+// and its exe and DLLs stay locked. TerminateProcess ends all threads without running any of that; the log and the
+// C streams are flushed first, and the exit code is the same.
 void plat_exit(int code) {
     fflush(stdout);
     fflush(stderr);
+    if (InterlockedCompareExchange(&exit_skip_unload, 0, 0)) {
+        fflush(NULL);
+        TerminateProcess(GetCurrentProcess(), (UINT)code);
+    }
     ExitProcess((UINT)code);
 }
 

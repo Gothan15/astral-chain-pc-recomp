@@ -85,6 +85,11 @@ static int create_instance(void) {
         validate = 0;
     }
     if (validate) ext[n_ext++] = VK_EXT_DEBUG_UTILS_EXTENSION_NAME;
+    // The validation layer brings its own C++ runtime (libstdc++, winpthreads) and global state. With the MSYS2 build
+    // of the layer on an Intel Arc 140T, every timed run (9 of 9) stayed alive after its last log line, with one
+    // thread left waiting and its memory kept, until ended by hand; no run without the layer did. A run with the
+    // layer exits without the DLLs' unload handlers instead (platform.h plat_exit_skip_unload).
+    if (validate) plat_exit_skip_unload();
     if (vk_hdr_wanted() && instance_ext_present(VK_EXT_SWAPCHAIN_COLOR_SPACE_EXTENSION_NAME))   // HDR10 surface formats
         ext[n_ext++] = VK_EXT_SWAPCHAIN_COLOR_SPACE_EXTENSION_NAME;
     vk_xess_instance_exts(ext, &n_ext, 24);

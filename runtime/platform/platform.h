@@ -262,6 +262,10 @@ void plat_aligned_free(void *p);
 
 // ---- process
 _Noreturn void plat_exit(int code);       // ends the process at once: other threads stop, no atexit handlers run
+// From this call on, plat_exit also skips the DLLs' unload handlers (Windows: TerminateProcess instead of ExitProcess;
+// Linux's _exit runs none already). For runs that load debugging DLLs whose unload code can wait forever on a lock or
+// a thread that the exit has already stopped (vk_device.c create_instance, for the Vulkan validation layer).
+void plat_exit_skip_unload(void);
 int plat_setenv(const char *name, const char *value);    // value NULL removes it; 1 on success
 uint32_t plat_process_id(void);
 // CPU time of the process since it started (user and kernel), and wall time since it started, in ns; 0 when unknown.
