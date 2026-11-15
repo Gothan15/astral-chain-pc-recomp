@@ -156,6 +156,19 @@ const RtConfig *rt_config(void) { return &cfg; }
 volatile int g_fnprof = 0;
 void fnprof_hit(uint64_t addr, uint64_t lr, uint64_t x0) { (void)addr, (void)lr, (void)x0; }
 
+// cpu.h RT_FPCR_NOTE: diagnostic only, the write itself takes effect as before (runtime/simd.h slow paths). One line
+// per distinct RMode/FZ pair (FPCR bits 22-24).
+void rt_fpcr_rmode(uint64_t fpcr, uint64_t lr) {
+    static unsigned seen;
+    unsigned bit = 1u << ((fpcr >> 22) & 7);
+    if (__atomic_fetch_or(&seen, bit, __ATOMIC_RELAXED) & bit) return;
+    static const char *const mode[] = {"nearest", "+inf", "-inf", "zero"};
+    char at[128];
+    rt_log("fpcr: guest code set rounding mode %s, flush-to-zero %s (FPCR %#llx), in a function called from %s",
+           mode[(fpcr >> 22) & 3], fpcr & (1u << 24) ? "on" : "off", (unsigned long long)fpcr,
+           ldr_describe(lr, at, sizeof at));
+}
+
 void rt_brk(Cpu *c, uint32_t imm, uint64_t pc) {
     char at[128], lr[128];
     rt_fatal("brk #%#x at %s (lr %s)", imm, ldr_describe(pc, at, sizeof at), ldr_describe(c->x[30], lr, sizeof lr));
