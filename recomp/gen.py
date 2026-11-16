@@ -59,7 +59,8 @@ MUSTTAIL = '__attribute__((musttail)) return'
 EST_INT = 62
 EST_SIMD = 75
 EST_SIMD_LDST = 48
-EST_FN = 38          # per function: signature, FN_ENTER, closing brace
+EST_FN = 38          # per function: signature, closing brace (fitted when each function also opened with a
+                     # function-entry hook; kept, so the chunk boundaries do not move)
 EST_BR_LABELS = 10   # per instruction of a function with a `br`: switch cases, or labels if it falls back
 
 
@@ -419,13 +420,13 @@ class Emitter:
             cases = ' '.join(f'case {hx(t)}: goto L_{t:x};' for t in range(entry, end, 4))
             redispatch = f'{MUSTTAIL} {fb}(c);'
             out = [f'static void {fb}(Cpu *c);',
-                   f'void {fname(entry)}(Cpu *c) {{', f'    FN_ENTER({hx(entry)});', f'    c->pc = {hx(entry)};',
+                   f'void {fname(entry)}(Cpu *c) {{', f'    c->pc = {hx(entry)};',
                    f'    {redispatch}', '}',
                    f'static void {fb}(Cpu *c) {{', f'    switch (c->pc) {{ {cases} default: break; }}',
                    f'    {MUSTTAIL} rt_dispatch(c);']
         else:
             redispatch = f'{MUSTTAIL} rt_dispatch(c);'
-            out = [f'void {fname(entry)}(Cpu *c) {{', f'    FN_ENTER({hx(entry)});']
+            out = [f'void {fname(entry)}(Cpu *c) {{']
             if fp.used:
                 out.append('    ' + fp.decl())
 

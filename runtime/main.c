@@ -153,9 +153,6 @@ static RtConfig cfg;
 const RtConfig *rt_config(void) { return &cfg; }
 
 // ---- runtime services the generated code calls (cpu.h)
-volatile int g_fnprof = 0;
-void fnprof_hit(uint64_t addr, uint64_t lr, uint64_t x0) { (void)addr, (void)lr, (void)x0; }
-
 // cpu.h RT_FPCR_NOTE: diagnostic only, the write itself takes effect as before (runtime/simd.h slow paths). One line
 // per distinct RMode/FZ pair (FPCR bits 22-24).
 void rt_fpcr_rmode(uint64_t fpcr, uint64_t lr) {
