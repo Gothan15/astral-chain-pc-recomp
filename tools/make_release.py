@@ -16,7 +16,7 @@ cached in toolchain/release-dl/ and checked against the sha256 in PINS; a mismat
     bin/       ac_xlate.exe (+ .id), hactool.exe, SDL3.dll (upstream), libopus-0.dll, libxess.dll (Intel XeSS SDK),
                ninja.exe
     recomp/, tools/, data/, installer/, licenses/, THIRD_PARTY_NOTICES.md, astralchain.ini.example
-    recomplauncher.json   what RecompLauncher does with the release (installer/progress.py)
+    recomplauncher.json   what RecompLauncher does with the release (installer/progress.py), prepare.version = VERSION
     VERSION    the repository's VERSION plus the commit, 0.1.0+973c626; the installer's release string
     Astral Chain-Setup.exe  installer/launcher/launcher.c built with llvm/ (-mwindows): starts python/pythonw.exe -m installer.gui
 
@@ -442,7 +442,7 @@ def build_sources(out):
     copy_tree(ROOT / 'installer', out / 'installer', lambda r: '__pycache__' in r or r.startswith('launcher/'))
     shutil.copy2(ROOT / 'astralchain.ini.example', out / 'astralchain.ini.example')
     # RecompLauncher reads it at the top of the unpacked release, or at the AppDir root of the AppImage
-    shutil.copy2(ROOT / 'recomplauncher.json', out / 'recomplauncher.json')
+    write_manifest(out)
     shutil.copy2(ROOT / 'THIRD_PARTY_NOTICES.md', out / 'THIRD_PARTY_NOTICES.md')
     (out / 'VERSION').write_text(version() + '\n', encoding='utf-8')
 
@@ -541,6 +541,19 @@ def check_bundle(out):
     print('bundle check: the setup ran without a window and recomplauncher.json names files of the folder')
 
 
+def write_manifest(out):
+    """recomplauncher.json with prepare.version set to this release's version (version()). RecompLauncher runs the
+    prepare step again only when the player's files or prepare.version change: an update alone keeps the player's
+    built game, so without a new value every launcher player kept the astralchain.exe of their first setup (the
+    1.17.0 one through the 1.18.0 and 1.18.1 updates) until they pressed Reconfigure. Every release changes the
+    lifted code or the runtime, so every release asks for the step again; the installer then redoes only the steps
+    whose inputs changed (installer/runner.py)."""
+    manifest = json.loads((ROOT / 'recomplauncher.json').read_text(encoding='utf-8'))
+    manifest['prepare']['version'] = version()
+    text = json.dumps(manifest, indent=4, ensure_ascii=False) + '\n'
+    (out / 'recomplauncher.json').write_text(text, encoding='utf-8', newline='\n')
+
+
 def check_manifest(out):
     """recomplauncher.json is in the folder, parses, and its prepare and start programs name a file of this release:
     the launcher runs the first entry that exists, so a renamed Python or setup program would only show at a player's.
@@ -552,6 +565,9 @@ def check_manifest(out):
         shipped = [p for p in programs if (out / p).is_file() or p.endswith('.AppImage') and (out / 'AppRun').is_file()]
         if not shipped:
             sys.exit(f'bundle check: recomplauncher.json {part}.program names no file of the release: {programs}')
+    if manifest['prepare'].get('version') != version():
+        sys.exit(f"bundle check: recomplauncher.json prepare.version is {manifest['prepare'].get('version')!r}, not "
+                 f"{version()!r}: launcher players would keep their old build")
 
 
 def drop_bytecode(out):
