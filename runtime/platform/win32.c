@@ -18,6 +18,13 @@
 
 #include "platform.h"
 
+// Hybrid laptops: NVIDIA Optimus and AMD switchable graphics read these two exports of the executable when it starts
+// and run it on the dedicated GPU. Without them Optimus can put the game on the integrated GPU and hide the dedicated
+// one from its Vulkan device list, whatever the Windows graphics setting says. AC_GPU_INDEX / AC_GPU_NAME still pick
+// another device among those listed.
+__declspec(dllexport) DWORD NvOptimusEnablement = 1;
+__declspec(dllexport) int AmdPowerXpressRequestHighPerformance = 1;
+
 _Static_assert(sizeof(PlatMutex) == sizeof(SRWLOCK), "PlatMutex holds an SRWLOCK");
 _Static_assert(sizeof(PlatCond) == sizeof(CONDITION_VARIABLE), "PlatCond holds a CONDITION_VARIABLE");
 
@@ -327,6 +334,18 @@ uint64_t plat_counter_hz(void) { return qpc_freq(); }
 
 // The default timer tick is 15.6 ms; a 1 ms wait would cost a full tick.
 void plat_timer_1ms(void) { timeBeginPeriod(1); }
+
+// Windows 11 puts a process it deems in the background under EcoQoS (the E-cores of a hybrid Intel CPU, low clocks)
+// and stops honouring its timer resolution while its window is hidden or minimised. The game keeps running out of
+// focus (AC_ASSUME_FOCUS) and its frame pacing needs both, so it opts out of the two. Windows 10 before 1709 does not
+// know the information class and refuses: 0.
+int plat_power_full(void) {
+    PROCESS_POWER_THROTTLING_STATE s = {
+        .Version = PROCESS_POWER_THROTTLING_CURRENT_VERSION,
+        .ControlMask = PROCESS_POWER_THROTTLING_EXECUTION_SPEED | PROCESS_POWER_THROTTLING_IGNORE_TIMER_RESOLUTION,
+        .StateMask = 0};
+    return SetProcessInformation(GetCurrentProcess(), ProcessPowerThrottling, &s, sizeof s) ? 1 : 0;
+}
 
 static PlatScale qpc_ns;   // set before main, so no thread reads it half written
 

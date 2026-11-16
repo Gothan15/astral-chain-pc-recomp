@@ -509,6 +509,10 @@ int main(int argc, char **argv) {
     // Timed guest waits (kernel.c block_inner) sleep in whole milliseconds; at the default 15.6 ms tick a 1 ms wait
     // costs a full tick. AC_TIMER_1MS=0 keeps the default for comparison.
     if (cfg_bool("AC_TIMER_1MS")) plat_timer_1ms();
+    int power = plat_power_full();
+    if (power >= 0)
+        rt_log("power: %s", power ? "OS power throttling off (EcoQoS, timer resolution in the background)"
+                                  : "OS power throttling: the opt-out was refused");
     // Before any other thread starts: they inherit it. AC_CPU_BOOST: auto (what the frequency governor needs), 1 (the
     // wait polling whatever the governor), 0 (off). AC_CPU_BOOST_SPIN_US: the longest poll of one wait.
     {
