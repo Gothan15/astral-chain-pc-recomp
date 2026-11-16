@@ -842,6 +842,52 @@ static int test_mirror(const GfxBackend *b, uint8_t *guest, int *bytes) {
     for (int i = 0; i < 0x800; i++) CHECK(m[0x4800 + i] == 0x77, "fill byte %#x is %02x", i, m[0x4800 + i]);
     b->pool_fini(&pool);
     *bytes = 4096 + 0x1000 + 4096 + 0x1000;
+    // Lazy write-back, with fills standing in for shader stores (vk_mem_lazy_all). 4: a fill of 1.125 MiB that starts
+    // off a page boundary: its whole pages stay in the mirror and are held, the CPU's first read brings them back,
+    // and the bytes around the fill keep the CPU's values.
+    pool_t big = {.magic = NVN_POOL_MAGIC, .flags = 0x22, .mem = guest + 0xD00000, .size = 0x300000,
+                  .game_mem = guest + 0xD00000};
+    CHECK(b->pool_init(&big), "pool_init of the pool for the lazy write-back part");
+    uint8_t *g = big.mem;
+    uint64_t ga = (uint64_t)(uintptr_t)g, hl = 0, hh = 0, rb0 = 0, rb1 = 0, unheld = 0;
+    memset(g, 0x33, 0x300000);
+    CHECK(vk_mem_mirror_probe(ga), "the second pool got no VRAM mirror");
+    vk_mem_lazy_all(1);
+    vk_mem_lazy_stats(&rb0, &unheld);
+    p = put(stream, OP_BEGIN, NULL, 0);
+    const p_clear_buf f4 = {ga + 0x1800, 0x120000, 0xa5a5a5a5u, 0};
+    p = put(p, OP_CLEAR_BUF, &f4, sizeof f4);
+    CHECK(xf_submit(b, stream, p), "fence_wait of the lazy fill timed out");
+    int held = mem_held_by(ga + 0x2000, ga + 0x121000, vk_mem_lazy_owner(ga), &hl, &hh);
+    CHECK(!vk_mem_lazy_on() || (held && hl == ga + 0x2000 && hh == ga + 0x121000),
+          "the whole pages of the lazy fill are not held (%d, %#llx..%#llx)", held, (unsigned long long)(hl - ga),
+          (unsigned long long)(hh - ga));
+    for (int i = 0; i < 0x1800; i++) CHECK(g[i] == 0x33, "byte %#x before the lazy fill is %02x", i, g[i]);
+    for (int i = 0x1800; i < 0x121800; i++) CHECK(g[i] == 0xa5, "lazy fill byte %#x is %02x", i, g[i]);
+    for (int i = 0x121800; i < 0x123000; i++) CHECK(g[i] == 0x33, "byte %#x after the lazy fill is %02x", i, g[i]);
+    vk_mem_lazy_stats(&rb1, &unheld);
+    CHECK(!vk_mem_lazy_on() || rb1 == rb0 + 1, "the CPU read made %llu read-backs, expected 1", (unsigned long long)(rb1 - rb0));
+    // 5: the CPU rewrites part of the range it read back; a copy out of the mirror sees the new bytes.
+    for (int i = 0; i < 4096; i++) g[0x80000 + i] = (uint8_t)(i * 5 + 3);
+    p = put(stream, OP_BEGIN, NULL, 0);
+    const p_copy_b2b c5 = {ga + 0x80000, ga + 0x140000, 4096};
+    p = put(p, OP_COPY_B2B, &c5, sizeof c5);
+    CHECK(xf_submit(b, stream, p), "fence_wait of the copy after the read-back timed out");
+    for (int i = 0; i < 4096; i++)
+        CHECK(g[0x140000 + i] == (uint8_t)(i * 5 + 3), "byte %d copied after a CPU write into a read-back range is %02x", i,
+              g[0x140000 + i]);
+    // 6: a second lazy fill, page-aligned, still held when the pool is finalized: the guest gets its bytes then.
+    p = put(stream, OP_BEGIN, NULL, 0);
+    const p_clear_buf f6 = {ga + 0x180000, 0x140000, 0x3c3c3c3cu, 0};
+    p = put(p, OP_CLEAR_BUF, &f6, sizeof f6);
+    CHECK(xf_submit(b, stream, p), "fence_wait of the second lazy fill timed out");
+    b->pool_fini(&big);
+    vk_mem_lazy_all(0);
+    for (int i = 0x180000; i < 0x2c0000; i++) CHECK(g[i] == 0x3c, "byte %#x of a fill held at pool_fini is %02x", i, g[i]);
+    for (int i = 0x2c0000; i < 0x300000; i++) CHECK(g[i] == 0x33, "byte %#x after the second lazy fill is %02x", i, g[i]);
+    vk_mem_lazy_stats(&rb1, &unheld);
+    CHECK(!unheld, "%llu lazy ranges could not be held", (unsigned long long)unheld);
+    *bytes += 0x123000 + 4096 + 0x180000;
     return 0;
 }
 
@@ -907,7 +953,11 @@ int probe_vkexec(void) {
            zero_bytes, cfg_value("AC_FIX_ZERO"));
     if (vk_mirror_on)
         printf("probe-vkexec: mirror part passed (B2B and fill in a VRAM mirror written back by the fence, a CPU write "
-               "between submissions mirrored, CPU bytes beside a fill kept, %d bytes compared)\n", mirror_bytes);
+               "between submissions mirrored, CPU bytes beside a fill kept; %s; %d bytes compared)\n",
+               vk_mem_lazy_on() ? "lazy write-back: whole pages of a 1.1 MiB fill held and read back at the CPU's first "
+                                  "access, a CPU write after it mirrored, a held range read back at pool_fini"
+                                : "lazy write-back off (AC_MIRROR_LAZY=0): the same fills copied back by their fences",
+               mirror_bytes);
     else
         printf("probe-vkexec: mirror part skipped (memory mode import)\n");
     return 0;

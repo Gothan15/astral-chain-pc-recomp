@@ -193,6 +193,15 @@ each 2 MiB region queried at most once per submission and shared with the textur
 each pool at every part of a submission, as before. The Steam Deck's RADV has `VK_EXT_external_memory_host` as
 well: the shadow copies are chosen for the measured cost above, not for a missing extension.
 
+On a discrete GPU the pools the replay binds as buffers get a copy in video memory instead (the VRAM mirror,
+`runtime/vk_memory.c`); `AC_MEMORY=mirror` turns it on for an integrated GPU and `AC_MEMORY=verify` also compares it
+with guest memory (`AC_VERIFY_MIB` sets how much per submission). The mirror holds only the 64 KiB chunks the replay
+binds, and the large storage buffers the shaders write stay in it until the CPU touches them. Over a save load and a
+Legion summon at 1920x1080 this took the copies between system and video memory from 54 MiB a frame (17 up, 36.7
+back) to 0.8 MiB, and the copies at a pool's first use from 1980 MiB to 105 MiB; measured on an integrated GPU, which
+counts the bytes but has no bus between the two memories. `AC_MIRROR_CHUNKS=0` copies each pool whole at its first
+use and `AC_MIRROR_LAZY=0` copies every GPU write back at the end of its submission, as before.
+
 The Deck's GPU (Van Gogh) has no native ASTC, so its textures go through the compute decoder (`runtime/vk_astc.c`,
 `AC_ASTC`) as on desktop AMD GPUs without it; frame times measured there include it.
 

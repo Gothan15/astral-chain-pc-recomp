@@ -853,9 +853,9 @@ static int bind_range(VkExec *ex, uint64_t addr, uint64_t size, uint64_t align, 
     if (n > max) n = max;
     if (!n) return 0;
     if (sp.offset % align == 0) {
-        VK_MEM_USE(sp);
+        VK_MEM_USE(sp, n);
         *out = (VkDescriptorBufferInfo){sp.buffer, sp.offset, n};
-        if (written) vk_mem_gpu_wrote(&sp, n), vk_usnap_drop(addr, n);
+        if (written) vk_mem_gpu_wrote(&sp, n, 1), vk_usnap_drop(addr, n);
         count_use(sp.cls, use, n);
         VK_MEM_BOUND(sp);
         if (mirror) *mirror = 1;
@@ -2179,8 +2179,8 @@ static void bind_vertex_buffers(VkExec *ex) {
         }
         VkMemSpan sp;
         if (!r->address || !vk_mem_resolve(r->address, 1, &sp)) continue;
-        VK_MEM_USE(sp);
         uint64_t n = r->size && r->size < sp.avail ? r->size : sp.avail;
+        VK_MEM_USE(sp, n);
         vb[b] = sp.buffer, vo[b] = sp.offset, vsz[b] = n, vcls[b] = sp.cls, vpool[b] = sp.pool;
     }
     memcpy(B.vcls, vcls, sizeof vcls), memcpy(B.vpool, vpool, sizeof vpool);
@@ -2708,8 +2708,9 @@ static uint32_t mo_vertex_buffers(VkExec *ex) {
         const NVNbufferRange *r = &ex->vbuf[b];
         VkMemSpan sp;
         if (!r->address || !vk_mem_resolve(r->address, 1, &sp)) continue;
-        VK_MEM_USE(sp);
-        v->b[b] = sp.buffer, v->o[b] = sp.offset, v->sz[b] = r->size && r->size < sp.avail ? r->size : sp.avail;
+        v->sz[b] = r->size && r->size < sp.avail ? r->size : sp.avail;
+        VK_MEM_USE(sp, v->sz[b]);
+        v->b[b] = sp.buffer, v->o[b] = sp.offset;
     }
     memcpy(MQ.vin, ex->vbuf, sizeof MQ.vin);
     MQ.vgen = gen;
@@ -3097,7 +3098,7 @@ static void op_draw_idx(VkExec *ex, const p_draw_idx *d) {
     } else if (sp.offset % isize[d->itype]) {
         return warn_once(W_INDEX, "index buffer %#llx is not aligned to its index size: draw skipped", (unsigned long long)d->ibuf);
     } else {
-        VK_MEM_USE(sp);
+        VK_MEM_USE(sp, bytes);
         vkCmdBindIndexBuffer(ex->cb, sp.buffer, sp.offset, d->itype == NVN_INDEX_TYPE_UNSIGNED_SHORT ? VK_INDEX_TYPE_UINT16 : VK_INDEX_TYPE_UINT32);
         ex->recorded++;
         vk_mem_count(sp.cls, VK_MUSE_IB, bytes);
@@ -3127,8 +3128,8 @@ static void op_draw_idx_ind(VkExec *ex, const p_draw_idx_ind *d) {
         return warn_once(W_INDEX, "index buffer %#llx is not backed or not aligned: indirect draws skipped", (unsigned long long)d->ibuf);
     if (!prepare_draw(ex, d->prim, 0x7fffffff, restart_for(ex, d->prim, d->itype))) return;
     vk_exec_frame.draws++;
-    VK_MEM_USE(ip);
-    VK_MEM_USE(ib);
+    VK_MEM_USE(ip, sizeof(VkDrawIndexedIndirectCommand));
+    VK_MEM_USE(ib, 0);   // the GPU reads the index count: any index up to the end of the pool may be read
     vkCmdBindIndexBuffer(ex->cb, ib.buffer, ib.offset, d->itype == NVN_INDEX_TYPE_UNSIGNED_SHORT ? VK_INDEX_TYPE_UINT16 : VK_INDEX_TYPE_UINT32);
     vkCmdDrawIndexedIndirect(ex->cb, ip.buffer, ip.offset, 1, sizeof(VkDrawIndexedIndirectCommand));
     ex->recorded += 2;
@@ -3180,7 +3181,7 @@ static void op_dispatch_ind(VkExec *ex, const p_dispatch_ind *d) {
     VkPipeline p = vk_pipeline_compute(cs, &info);
     if (!p || !info) return warn_once(W_PIPELINE, "a compute pipeline could not be created: dispatches with it are skipped");
     vk_exec_barrier(ex);
-    VK_MEM_USE(ip);
+    VK_MEM_USE(ip, sizeof(VkDispatchIndirectCommand));
     bind_pipeline(ex, VK_PIPELINE_BIND_POINT_COMPUTE, p);
     c0_dim[0] = c0_dim[1] = c0_dim[2] = 0;
     B.c0_valid[2] = 0;   // a fresh c0 range: the copy below must not change one an earlier dispatch reads
@@ -3210,10 +3211,10 @@ static void op_update_ub(VkExec *ex, const p_update_ub *u) {
     VkBuffer b;
     VkDeviceSize o;
     memcpy(scratch(ex, u->size, &b, &o), u->data, u->size);
-    VK_MEM_PICK(sp);
+    VK_MEM_PICK(sp, u->size, 1);
     VkBufferCopy cp = {o, sp.offset, u->size};
     vkCmdCopyBuffer(ex->cb, b, sp.buffer, 1, &cp);
-    vk_mem_gpu_wrote(&sp, u->size);
+    vk_mem_gpu_wrote(&sp, u->size, 0);
     vk_usnap_drop(u->dst, u->size);
     ex->recorded++;
     vk_mem_count(sp.cls, VK_MUSE_GPU_WRITE, u->size);

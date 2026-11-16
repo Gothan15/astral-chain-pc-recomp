@@ -222,21 +222,28 @@ void vk_mem_dirty_submit(void);                   // vk_sync_submit, under its l
 // VRAM mirror of buffer-bound pools (vk_memory.c). vk_mirror_on: AC_MEMORY=mirror|verify, or the
 // device class is discrete and AC_MEMORY is unset or auto; set at device selection. The replay (submitting thread
 // under vk_sync_submit's lock) calls:
-// - VK_MEM_USE at a vertex, index, uniform, storage or indirect binding of a span vk_mem_resolve returned: the pool's
-//   mirror is created on first use and sp.buffer becomes it (same offsets); a pool that stays imported keeps its buffer.
-// - VK_MEM_PICK where a copy, fill or update reads or writes a span: the mirror if the pool has one, never a new one.
+// - VK_MEM_USE at a vertex, index, uniform, storage or indirect binding of n bytes (0: to the end of the pool) of a
+//   span vk_mem_resolve returned: the pool's mirror is created on first use and sp.buffer becomes it (same offsets);
+//   a pool that stays imported keeps its buffer. The mirror holds only the 64 KiB chunks the replay named this way.
+// - VK_MEM_PICK where a copy, fill or update reads (write 0) or writes (write 1) n bytes of a span: the mirror if the
+//   pool has one, never a new one; a read of bytes the mirror does not hold keeps the imported buffer.
 // - vk_mem_gpu_wrote after recording a GPU write of [sp.offset, sp.offset + size) into sp.buffer: a mirror's bytes go
-//   back to guest memory at the end of the submission. No-op for imported buffers.
+//   back to guest memory at the end of the submission. stored 1: a shader's storage-buffer stores, whose whole pages
+//   stay in the mirror when the range is 1 MiB or more, until the CPU touches them. No-op for imported buffers.
 // - vk_mem_mirror_begin at the start of a submission's recording, vk_mem_mirror_end (records the write-backs; returns
 //   the commands recorded) after its last barrier.
 // vk_sync.c records the copies the mirrors' first accesses queued (vk_mem_mirror_pending) into a prologue command
 // buffer with vk_mem_mirror_prologue and submits it right before each part.
 extern int vk_mirror_on;
-void vk_mem_use(VkMemSpan *sp);
-void vk_mem_pick(VkMemSpan *sp);
-#define VK_MEM_USE(sp) do { if (vk_mirror_on && (sp).pool) vk_mem_use(&(sp)); } while (0)
-#define VK_MEM_PICK(sp) do { if (vk_mirror_on && (sp).pool) vk_mem_pick(&(sp)); } while (0)
-void vk_mem_gpu_wrote(const VkMemSpan *sp, uint64_t size);
+void vk_mem_use(VkMemSpan *sp, uint64_t n);
+void vk_mem_pick(VkMemSpan *sp, uint64_t n, int write);
+#define VK_MEM_USE(sp, n) do { if (vk_mirror_on && (sp).pool) vk_mem_use(&(sp), (n)); } while (0)
+#define VK_MEM_PICK(sp, n, write) do { if (vk_mirror_on && (sp).pool) vk_mem_pick(&(sp), (n), (write)); } while (0)
+void vk_mem_gpu_wrote(const VkMemSpan *sp, uint64_t size, int stored);
+void vk_mem_lazy_all(int on);   // probes: fills and copies of 1 MiB and up stay in the mirror as shader stores do
+void vk_mem_lazy_stats(uint64_t *fetches, uint64_t *unheld);   // ranges read back for the CPU; written back at a fence
+int vk_mem_lazy_on(void);                      // mirror mode with lazy write-back
+const void *vk_mem_lazy_owner(uint64_t addr);  // what holds the lazy ranges of the pool at addr (mem_held_by's ctx)
 // Uniform blocks as of the submit call (vk_usnap.c): vk_exec_record copies the uniform ranges a submission binds before
 // it records, ubo bindings take the copy (0: not copied, bind memory), GPU writes of the replay drop the copies they touch.
 void vk_usnap_begin(const uint64_t *handles, int n, uint64_t fence);

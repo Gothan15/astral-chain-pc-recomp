@@ -174,7 +174,8 @@ void mem_freeze_stats(uint64_t *frozen, uint64_t *freezes, uint64_t *fault_thaws
 // Held ranges (memory.c): whole pages of the stack/heap block or the alias region whose current bytes live elsewhere.
 // They stay inaccessible until the first access, by the guest or the host, or a mem_thaw or mapping change over them,
 // which calls fetch(ctx, a, n, dst) to copy the bytes into dst and puts them in place. fetch runs under memory.c's leaf
-// lock, possibly in a fault handler: it reads the owner's storage only, takes no lock and never touches guest memory.
+// lock, possibly in a fault handler: it reads the owner's storage only, never touches guest memory, and takes only
+// locks that no thread holds while it touches guest memory (vk_memory.c mirror_fetch waits for the GPU there).
 typedef void (*MemFetch)(void *ctx, uint64_t a, uint64_t n, void *dst);
 int mem_hold(uint64_t a, uint64_t n, MemFetch fetch, void *ctx);   // 1 held (or still held by the same owner), 0 not:
                                                            // the caller puts the bytes in place itself
