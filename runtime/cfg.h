@@ -29,6 +29,11 @@ const char *cfg_device_profile(void);
 // the profile and saves). deck = 0 does nothing. Marks astralchain.ini with deck_res_migrated = 1. Returns 0 when
 // nothing ran, 1 when only the marker was set, 2 when output_res was reset too. Not thread-safe against cfg_load.
 int cfg_migrate_deck_res(int deck);
+// The one-time Steam Deck removal of a stored anti_aliasing other than off, so the profile's off applies (cfg.c; cfg_init
+// runs it with the profile and saves). deck = 0 does nothing. Marks astralchain.ini with deck_aa_migrated = 1. Returns 0
+// when nothing ran, 1 when only the marker was set, 2 when the anti_aliasing line was removed too. Not thread-safe
+// against cfg_load.
+int cfg_migrate_deck_aa(int deck);
 // The one-time move of a stored aspect = fit or stretch to the default, wide (cfg.c; cfg_init runs it and saves). Marks
 // astralchain.ini with aspect_migrated = 1. Returns 0 when nothing ran, 1 when only the marker was set, 2 when the
 // aspect line was removed too. Not thread-safe against cfg_load.

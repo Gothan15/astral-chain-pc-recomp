@@ -111,7 +111,9 @@ Every guest thread is a host thread. Astral Chain assumes Horizon's scheduler: t
   1280x720, which the present fits into the 1280x800 screen with 40-row bars (`gfx_fit_rect`); the selection happens
   at start, in one exe for desktop and Deck. Decks that rendered 1080p before keep no stored 1080p:
   `cfg_migrate_deck_res` removes, once, an ini `output_res` that renders 1920x1080 and marks the file with
-  `deck_res_migrated = 1`. The game's render targets and window
+  `deck_res_migrated = 1`. The profile also turns the game's SMAA off (`anti_aliasing = off`); `cfg_migrate_deck_aa`
+  removes, once, a stored `anti_aliasing` other than `off` and marks the file with `deck_aa_migrated = 1`, so a
+  `smaa` chosen afterwards stays. The game's render targets and window
   textures come from one budget the graphics configuration sets (main+0x40e0b0: 310 MiB, of which 1080p uses 304),
   carved from the process heap; above 1080p's pixel count `rt_res_budget_w8` raises it with the pixels (`res_budget`:
   the measured 87 MiB and 110 bytes a pixel, 15 % to spare) and `res_heap_extra_bytes` grows the application pool by

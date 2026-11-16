@@ -39,7 +39,7 @@ static const char *const known[] = {
     "BAR_ELIDE", "BAR_NARROW",
     "BIND_ZL", "BIND_ZR", "BLOCK_VIEWS_3D", "CLEAR_LOAD", "CLOTH_REALTIME", "COLOR_BRIGHTNESS", "COLOR_CONTRAST", "COLOR_GAMMA",
     "COLOR_PRESET", "COLOR_SATURATION", "CONTACT_DEBUG", "CONTACT_SHADOWS", "CORE_DIAG", "CPU_BOOST", "CPU_BOOST_SPIN_US", "CRIT", "CRIT_OUT",
-    "DECK_RES_MIGRATED", "DESC_TEMPLATE", "DEVICE_PROFILE", "DLAA", "DLAA_JITTER", "DLAA_MV", "DLAA_MVDEBUG", "DLAA_OBJMV", "DLAA_TIMES", "DLSS", "DRAW_DISTANCE", "DRAW_DISTANCE_PATCH", "DUMP", "DUMP_AUTO", "DUMP_BUF", "DUMP_DIR", "DUMP_DRAWS",
+    "DECK_AA_MIGRATED", "DECK_RES_MIGRATED", "DESC_TEMPLATE", "DEVICE_PROFILE", "DLAA", "DLAA_JITTER", "DLAA_MV", "DLAA_MVDEBUG", "DLAA_OBJMV", "DLAA_TIMES", "DLSS", "DRAW_DISTANCE", "DRAW_DISTANCE_PATCH", "DUMP", "DUMP_AUTO", "DUMP_BUF", "DUMP_DIR", "DUMP_DRAWS",
     "DUMP_KEY", "DUMP_LOG", "DUMP_N", "DUMP_SKIP_RUNS", "DUMP_TEX", "DUMP_UBO", "DYN_DELTA", "EXEFS", "FEEDBACK", "FIX_C0", "FIX_ZERO", "FLIGHT", "FLIGHT_AT", "FLIGHT_DIR", "FLIGHT_FRAMES",
     "FLIGHT_SPIKE_MS", "FLIGHT_THUMBS", "FOV", "FOV_PATCH", "FPS", "FREEZE_IDLE", "FREE_CORES",
     "FULLSCREEN", "FXAA", "GPL", "GPL_DRAW_BUILD", "GPU", "GPU_INDEX", "GPU_NAME", "GPU_PASSES", "HDR", "HDR_GAME_NITS",
@@ -78,7 +78,7 @@ static const struct { const char *key, *section; } sections[] = {
     {"HDR_UI_NITS", "display"}, {"HDR_HUE", "display"}, {"SHADOW_RES", "display"},
     {"ANTI_ALIASING", "display"}, {"UPSCALING", "display"}, {"UPSCALING_QUALITY", "display"}, {"DLAA", "display"},
     {"DLSS", "display"}, {"XESS", "display"},
-    {"DEVICE_PROFILE", "display"}, {"DECK_RES_MIGRATED", "display"}, {"ASPECT_MIGRATED", "display"}, {"ASSUME_FOCUS", "display"},
+    {"DEVICE_PROFILE", "display"}, {"DECK_RES_MIGRATED", "display"}, {"DECK_AA_MIGRATED", "display"}, {"ASPECT_MIGRATED", "display"}, {"ASSUME_FOCUS", "display"},
     {"SHADOW_SCALE", "display"}, {"SHADOW_RANGE", "display"}, {"CONTACT_SHADOWS", "display"}, {"AO", "display"},
     {"PCSS", "display"},
     {"MODS_DIR", "mods"}, {"MODS_ORDER", "mods"}, {"MODS_DISABLED", "mods"}, {"MODS_REBUILD", "mods"},
@@ -401,13 +401,18 @@ int cfg_load(const char *path) {
 // controller and takes its handheld render-target sizes and performance mode (ov_system.c ov_handheld);
 // no CPU boost (platform/linux.c plat_cpu_boost): the CPU and the GPU share one power limit (15 W) there, and a 1.6.0
 // session in the headquarters showed the CPU drawing 9.1 W against the GPU's 2.3 W with the GPU 83% busy at 25 fps:
-// the GPU ran out of power, not the CPU of frequency, and the boost would move more of the budget to the CPU.
+// the GPU ran out of power, not the CPU of frequency, and the boost would move more of the budget to the CPU;
+// the game's SMAA off (anti_aliasing = off: its edge and weight passes are skipped and the blend pass copies the
+// composite, see vk_dlaa.c vk_dlaa_skip_draw), which spares the GPU, the side of the shared power limit that runs out.
+// A player who wants it back picks SMAA in the menu or sets anti_aliasing = smaa; cfg_migrate_deck_aa moves a stored
+// line out of the way once.
 static const struct { const char *key, *value; } DECK[] = {
     {"FULLSCREEN", "1"}, {"WINDOW_SIZE", "1280x800"}, {"OUTPUT_RES", "1280x720"}, {"RENDER_SCALE", "game"},
     {"VK_PRESENT", "fifo"}, {"FPS", "30"}, {"OPERATION_MODE", "handheld"},
     {"ASTC_BC", "bc1"}, {"TEX_MIP_SKIP", "1024"}, {"TEX_CACHE_MB", "512"}, {"TEX_VRAM_PRESSURE", "70"}, {"ANISO", "game"},
     {"SHADOW_RES", "512"}, {"SHADOW_SCALE", "1"}, {"SHADOW_RANGE", "100"}, {"CONTACT_SHADOWS", "0"}, {"PCSS", "0"},
     {"DRAW_DISTANCE", "100"}, {"LIB_PREBUILD_KEEP", "512"}, {"CPU_BOOST", "0"},
+    {"ANTI_ALIASING", "off"},
 };
 static int profile = -1;   // 0 none, 1 Steam Deck
 
@@ -872,6 +877,41 @@ int cfg_migrate_deck_res(int deck) {
     return reset ? 2 : 1;
 }
 
+// ---- Steam Deck: the game's SMAA is off by default (the profile's anti_aliasing = off). Up to 1.19.0 it was on, so a
+// file may carry anti_aliasing = smaa, written by the menu, by hand or by migrate_upscaling's rewrite of the old
+// layout, and that line would keep the SMAA on against the new default. Once, on a Deck, a stored anti_aliasing other
+// than off is removed so the profile's value applies. The marker deck_aa_migrated = 1 goes into the file whether or
+// not a line moved, so a smaa picked afterwards stays, and a fresh install is left alone. The environment's
+// AC_ANTI_ALIASING is a choice for one launch and is not looked at. Off the Deck (deck = 0) nothing is read or
+// written. Returns 0 when nothing ran (not a Deck, or already done), 1 when only the marker was set, 2 when the
+// anti_aliasing line was removed as well; the caller saves.
+int cfg_migrate_deck_aa(int deck) {
+    if (!deck) return 0;
+    plat_mutex_lock(&set_lock);
+    CfgEntry *mark = NULL, *aa = NULL;
+    for (int i = 0; i < n_entries; i++) {
+        if (!strcmp(entries[i].key, "DECK_AA_MIGRATED")) mark = &entries[i];
+        if (!strcmp(entries[i].key, "ANTI_ALIASING")) aa = &entries[i];
+    }
+    if (mark && mark->value && strcmp(mark->value, "0")) {
+        plat_mutex_unlock(&set_lock);
+        return 0;
+    }
+    int reset = aa && aa->value && !aa->removed && strcmp(aa->value, "off");
+    if (reset) {
+        rt_log("cfg: Steam Deck: astralchain.ini anti_aliasing = %s dates from when the profile kept the game's SMAA on; "
+               "removed once so the profile's anti_aliasing = off applies (deck_aa_migrated = 1 marks it done: smaa "
+               "picked again stays)", aa->value);
+        __atomic_store_n(&aa->value, NULL, __ATOMIC_RELEASE);   // the old string stays for readers
+        aa->dirty = 0;
+        aa->removed = 1;   // cfg_save_to deletes the line
+        __atomic_add_fetch(&version, 1, __ATOMIC_RELEASE);
+    }
+    plat_mutex_unlock(&set_lock);
+    cfg_set(PREFIX "DECK_AA_MIGRATED", "1");
+    return reset ? 2 : 1;
+}
+
 // ---- the picture's shape: one move to wide. Up to 1.11.0 aspect was fit or stretch; wide, which fills a window wider
 // or taller than 16:9 with a view of its shape and is the same as fit in a 16:9 one, is the default since. A fit or stretch line in
 // astralchain.ini was chosen when there was no wide to choose, so it is removed once and the default applies. The
@@ -935,7 +975,8 @@ void cfg_init(void) {
                "turns it off)");
     // Saved at once, but no file is made only for the marker: without astralchain.ini it stays pending in memory and goes
     // in with the first save that makes the file (a menu change, F11), the only way a stored output_res can appear.
-    int moved = cfg_migrate_deck_res(profile_of()), shape = cfg_migrate_aspect();
+    int moved = cfg_migrate_deck_res(profile_of()), shape = cfg_migrate_aspect(), edges = cfg_migrate_deck_aa(profile_of());
     if (moved < shape) moved = shape;
+    if (moved < edges) moved = edges;
     if (moved == 2 || (moved == 1 && find_ini() && plat_file_exists(ini_path))) cfg_save();
 }

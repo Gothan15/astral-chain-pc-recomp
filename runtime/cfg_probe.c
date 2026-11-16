@@ -619,6 +619,47 @@ int probe_cfg(void) {
     if (got && (got_n != sizeof deck_fresh_done - 1 || memcmp(got, deck_fresh_done, got_n)))
         fprintf(stderr, "---- saved:\n%s\n----\n", got);
     free(got);
+    // The Steam Deck's one-time removal of a stored anti_aliasing other than off (cfg.c cfg_migrate_deck_aa), so the
+    // profile's off applies. The profile's own value is not read here: the profile is fixed by the first cfg_get.
+    static const char aa_deck_smaa[] = "[display]\nanti_aliasing = smaa\n";
+    static const char aa_deck_done[] = "[display]\ndeck_aa_migrated = 1\n";
+    CHECK(plat_file_write(path, aa_deck_smaa, sizeof aa_deck_smaa - 1) && cfg_load(path) == 1 && cfg_migrate_deck_aa(0) == 0 &&
+              cfg_is_set("AC_ANTI_ALIASING") && cfg_smaa() && cfg_save_to(path) == 1,
+          "deck aa migration: off the Deck nothing runs");
+    got = plat_file_read(path, &got_n);
+    CHECK(got && got_n == sizeof aa_deck_smaa - 1 && !memcmp(got, aa_deck_smaa, got_n),
+          "deck aa migration: off the Deck the file stays");
+    free(got);
+    CHECK(cfg_load(path) == 1 && cfg_migrate_deck_aa(1) == 2 && !cfg_is_set("AC_ANTI_ALIASING") && cfg_save_to(path) == 1,
+          "deck aa migration: a stored smaa is removed on a Deck");
+    got = plat_file_read(path, &got_n);
+    CHECK(got && got_n == sizeof aa_deck_done - 1 && !memcmp(got, aa_deck_done, got_n),
+          "deck aa migration: the anti_aliasing line leaves the file, the marker comes in");
+    if (got && (got_n != sizeof aa_deck_done - 1 || memcmp(got, aa_deck_done, got_n)))
+        fprintf(stderr, "---- saved:\n%s\n----\n", got);
+    free(got);
+    CHECK(cfg_load(path) == 1 && cfg_migrate_deck_aa(1) == 0, "deck aa migration: runs once");
+    cfg_set("AC_ANTI_ALIASING", "smaa");   // the player turns it back on
+    CHECK(cfg_save_to(path) == 1 && cfg_load(path) == 1 && cfg_migrate_deck_aa(1) == 0 && EQ(cfg_get("AC_ANTI_ALIASING"), "smaa") &&
+              cfg_smaa(),
+          "deck aa migration: smaa picked after the move stays");
+    static const char aa_deck_off[] = "[display]\nanti_aliasing = off\n";
+    CHECK(plat_file_write(path, aa_deck_off, sizeof aa_deck_off - 1) && cfg_load(path) == 1 && cfg_migrate_deck_aa(1) == 1 &&
+              EQ(cfg_get("AC_ANTI_ALIASING"), "off"),
+          "deck aa migration: an off line stays, the marker only");
+    static const char aa_deck_fresh[] = "[display]\n# anti_aliasing = smaa\n";
+    static const char aa_deck_fresh_done[] = "[display]\n# anti_aliasing = smaa\ndeck_aa_migrated = 1\n";
+    plat_setenv("AC_ANTI_ALIASING", "smaa");
+    CHECK(plat_file_write(path, aa_deck_fresh, sizeof aa_deck_fresh - 1) && cfg_load(path) == 1 && cfg_migrate_deck_aa(1) == 1 &&
+              EQ(cfg_get("AC_ANTI_ALIASING"), "smaa") && cfg_save_to(path) == 1,
+          "deck aa migration: a fresh file gets the marker only, the environment's anti_aliasing is left alone");
+    plat_setenv("AC_ANTI_ALIASING", NULL);
+    got = plat_file_read(path, &got_n);
+    CHECK(got && got_n == sizeof aa_deck_fresh_done - 1 && !memcmp(got, aa_deck_fresh_done, got_n),
+          "deck aa migration: a fresh file keeps its lines and gains the marker");
+    if (got && (got_n != sizeof aa_deck_fresh_done - 1 || memcmp(got, aa_deck_fresh_done, got_n)))
+        fprintf(stderr, "---- saved:\n%s\n----\n", got);
+    free(got);
     plat_file_delete(path);
     cfg_load("cfg-probe-missing.ini");
     int listed = 0;

@@ -258,7 +258,7 @@
 # upscaler that can (FSR 3 at worst) takes over until a restart. With output_res = auto an upscaler from the start also
 # raises the game resolution to the screen's.
 # upscaling_quality = native
-# The game's own anti-aliasing, for when no upscaler runs: smaa (the default) or off.
+# The game's own anti-aliasing, for when no upscaler runs: smaa (the default) or off (the default on the Steam Deck).
 # anti_aliasing = smaa
 # Up to 1.10.1 one setting, anti_aliasing = smaa | dlaa | xess | fsr3, chose the scene's anti-aliasing (and before it
 # dlaa = 1 / xess = 1): dlaa, xess and fsr3 are read as upscaling = dlss, xess or fsr3 with upscaling_quality = native,
