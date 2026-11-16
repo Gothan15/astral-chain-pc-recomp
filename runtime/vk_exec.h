@@ -22,6 +22,8 @@ enum {
     VK_EXEC_DIRTY_ALL = (1 << 5) - 1,
 };
 
+#define VK_EXEC_CLEARS 16   // whole-target clears kept for the next pass (VkExec.pclear)
+
 // One render target of OP_SET_RT, resolved to its vk_texture.c image for the current command buffer.
 typedef struct {
     const tex_t *tex;                    // payload copy (lives for the run); NULL: no target in this slot
@@ -96,7 +98,37 @@ typedef struct VkExec {
     // ---- internal to vk_exec.c
     void *views;                         // image views created for this command buffer (freed at its fence)
     int nviews, cap_views;
-    int barrier_at;                      // recorded right after the last full barrier (-1: none yet)
+    int barrier_at;                      // recorded right after the last barrier, full or narrow (-1: none yet)
+    int bar_prev;                        // VK_BAR_* of that barrier (VK_BAR_N: none yet in this submission)
+    // Whole-target clears recorded outside a pass (vk_exec.c clear_color, clear_ds) wait here: the next pass that
+    // attaches the subresource clears it with its load op, and anything else recorded first records them as image
+    // clears (vk_exec_clears_flush). Empty at the end of every submission.
+    struct VkExecClear {
+        VkImage image;
+        const tex_t *tex;
+        VkImageAspectFlags aspect;       // colour, or the depth and stencil aspects cleared
+        uint32_t level, base_layer, layers;
+        VkClearValue v;
+    } pclear[VK_EXEC_CLEARS];
+    int npclear;
+    uint32_t rt_serial, pass_rt;         // bumped when OP_SET_RT changes the targets; rt_serial of the last pass begun
+
+    // The pass chain (vk_exec.c "the pass chain"): what was recorded since the last barrier, so that a pass begin can
+    // take a barrier of attachment writes only, or none.
+    uint32_t sync_epoch;                 // bumped by every barrier recorded; the stamps of VkTexImage compare to it
+    int chain_at;                        // `recorded` right after the last barrier or pass end: a pass begin that finds
+                                         // `recorded` there follows nothing but passes since the last barrier
+    uint8_t chain_other;                 // a draw since the last barrier wrote a storage buffer or image: the next
+                                         // barrier is a full one
+    uint8_t bar_narrow;                  // the last barrier recorded was a narrow one
+    uint8_t pass_how;                    // VK_PASS_*: the barrier the open pass began behind
+    uint8_t pass_force;                  // the next pass begin takes a barrier (a restart for a hazard)
+    uint8_t pass_hinted, hint_hit;       // the open pass took its barrier for its hint; a draw confirmed the hint
+    uint32_t hint_epoch;                 // sync_epoch before that barrier
+    uint64_t rt_hash, last_rt_hash;      // hash of rt; of the targets of the pass before the last target change
+    uint64_t pass_key;                   // names a pass by its targets and those of the pass before (the hints)
+    const void *sy_vs, *sy_fs;           // vk_exec_draw.c chain_draw's memo: the shaders, texture bind serial and pass
+    uint32_t sy_serial, sy_pass;         // serial of the last scan
 
     // Feedback loops (vk.h VkCtx.feedback, vk_exec_draw.c feedback_prepare). Learned targets are attached in
     // ATTACHMENT_FEEDBACK_LOOP_OPTIMAL_EXT; they stay in it across consecutive passes and go back to GENERAL at the next
@@ -112,14 +144,45 @@ typedef struct VkExec {
     uint32_t tex_serial, pass_serial;    // bumped by every texture or image bind and pass begin
 } VkExec;
 
-// Begins dynamic rendering with the current targets unless a pass is open (a full memory barrier precedes it). Call
-// before a draw or an attachment clear.
+// What asks for a barrier (vk_exec_barrier's src): a pass begin, a whole-target clear outside a pass, a dispatch,
+// a copy or fill (vk_exec_xfer.c), the game's own nvnCommandBufferBarrier, an inline uniform update, texture work at
+// the replay's position (vk_exec_inline_begin), a host pass (vk_ao.c, vk_dlaa.c), the end of the submission.
+// AC_TRACE=perf counts the barriers by source (vk_exec.c bar_log).
+enum { VK_BAR_PASS, VK_BAR_CLEAR, VK_BAR_DISPATCH, VK_BAR_COPY, VK_BAR_GAME, VK_BAR_UPDATE, VK_BAR_INLINE, VK_BAR_HOST,
+       VK_BAR_END, VK_BAR_N };
+// What ends an open pass (vk_exec_pass_end_why): a barrier of source VK_BAR_*, or one of these.
+enum { VK_END_TARGETS = VK_BAR_N,        // OP_SET_RT with other targets
+       VK_END_AREA,                      // a pass without attachments whose render area grows
+       VK_END_FEEDBACK,                  // a feedback-loop restart (vk_exec_draw.c feedback_prepare)
+       VK_END_CHAIN,                     // a restart behind a barrier the pass chain left out (vk_exec_chain_draw)
+       VK_END_OTHER, VK_END_N };
+// The barrier a pass began behind (VkExec.pass_how): all commands and all memory, attachment writes only, none.
+enum { VK_PASS_FULL, VK_PASS_NARROW, VK_PASS_NONE };
+// Begins dynamic rendering with the current targets unless a pass is open. A barrier precedes it: a full one, or
+// what the pass chain (vk_exec.c) finds enough after passes that only wrote attachments. Call before a draw or an
+// attachment clear.
 void vk_exec_pass_begin(VkExec *ex);
+// The pass chain (vk_exec.c). vk_exec_chain_on: 0 off; bit 0: the storage writes of draws are tracked (AC_BAR_NARROW or
+// AC_BAR_ELIDE is not 0); bit 1: the images draws sample too (AC_BAR_ELIDE is not 0).
+// vk_exec_chain_draw: a draw of the open pass, before anything of it is recorded. writes: its shaders write a storage
+// buffer or image; unsynced: it samples an image a pass wrote since the last barrier. Restarts the pass behind the
+// barrier the draw needs and returns 1 (the caller looks at the draw again), else 0.
+int vk_exec_chain_on(void);
+int vk_exec_chain_draw(VkExec *ex, int writes, int unsynced);
+// A draw samples levels [l0, l1) and layers [a0, a1) of img: stamps them read since the last barrier; 1 when a pass
+// had them attached, or memory they alias, since then.
+int vk_exec_chain_sampled(VkExec *ex, const VkTexImage *img, uint32_t l0, uint32_t l1, uint32_t a0, uint32_t a1);
+// Records the whole-target clears that wait for a pass (VkExec.pclear) as image clears behind one full barrier. Every
+// vk_exec_barrier does it first; host work that orders itself with its own barriers calls it before reading or writing
+// a game image (vk_contact.c).
+void vk_exec_clears_flush(VkExec *ex);
 // Ends the open pass (no-op without one) and marks its targets GPU-written. Call before copies and dispatches.
-void vk_exec_pass_end(VkExec *ex);
+// why: VK_BAR_* or VK_END_*, counted under AC_TRACE=perf.
+void vk_exec_pass_end_why(VkExec *ex, int why);
+static inline void vk_exec_pass_end(VkExec *ex) { vk_exec_pass_end_why(ex, VK_END_OTHER); }
 // Full memory barrier (all commands, all memory); ends the open pass first. Copies and dispatches order themselves with
-// it. Skipped when nothing was recorded since the last one.
-void vk_exec_barrier(VkExec *ex);
+// it. Skipped when nothing was recorded since the last one. src: VK_BAR_*.
+void vk_exec_barrier(VkExec *ex, int src);
 // vk_texture.c (AC_TEX_ALIAS): commands that must run at the replay's current position. vk_exec_inline_begin returns
 // the command buffer being recorded after a full barrier (an open pass is ended; *reopen says so), or VK_NULL_HANDLE
 // when this thread is not recording a replay. vk_exec_inline_end begins the pass again when it was open.

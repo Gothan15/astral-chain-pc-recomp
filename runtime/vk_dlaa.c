@@ -857,7 +857,7 @@ static int motion(VkExec *ex, uint32_t ow, uint32_t oh) {
     uint32_t w = t->width, h = t->height;
     VkCommandBuffer cb = ex->cb;
     if (ow == w && oh == h && !blit_ok(t->format)) return 0;
-    vk_exec_barrier(ex);   // what drew the scene is done (no pass is open here)
+    vk_exec_barrier(ex, VK_BAR_HOST);   // what drew the scene is done (no pass is open here)
     struct Size *e = size_for(cb, w, h, ow, oh);
     if (!e) {
         rt_log("dlaa: work image creation failed (%ux%u to %ux%u)", w, h, ow, oh);
@@ -901,7 +901,7 @@ static int resolve(VkExec *ex, const VkExecTarget *src) {
     // linear scene light (the light target), or the composite with HDR output, which keeps highlights above 1
     int hdr = !up || vk_hdr_wanted();
     VkCommandBuffer cb = ex->cb;
-    if (up) vk_exec_barrier(ex);   // the composite and SMAA's passes are done (no pass is open here)
+    if (up) vk_exec_barrier(ex, VK_BAR_HOST);   // the composite and SMAA's passes are done (no pass is open here)
     VkImageView zv = vk_exec_target_view(z->img, z->format, VK_IMAGE_VIEW_TYPE_2D, VK_IMAGE_ASPECT_DEPTH_BIT, z->level,
                                          z->base_layer, 1, 0);
     VkImageView cv = vk_exec_target_view(t->img, t->format, VK_IMAGE_VIEW_TYPE_2D, VK_IMAGE_ASPECT_COLOR_BIT, t->level,

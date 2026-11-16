@@ -1133,7 +1133,7 @@ static VkDescriptorBufferInfo ssbo_info(VkExec *ex, int st, const GfxShaderRes *
 //   pass restarts once with it in ATTACHMENT_FEEDBACK_LOOP_OPTIMAL_EXT, and from then on its passes attach it in that
 //   layout, its descriptors carry that layout, the draws that sample it use a pipeline with the feedback flag
 //   (VkPipeState.feedback) and a by-region barrier precedes such a draw.
-// - VK_FEEDBACK_RESTART: the pass ends and restarts behind the full barrier (vk_exec_pass_begin).
+// - VK_FEEDBACK_RESTART: the pass ends and restarts behind a barrier (vk_exec_pass_begin).
 static int in_fbl(const VkExec *ex, VkImage img) {
     for (int i = 0; i < ex->nfbl; i++)
         if (ex->fbl_img[i] == img) return 1;
@@ -1180,13 +1180,15 @@ static int td_mode(void) {
 // texture bindings change the whole-scan memo below, but the handles they bind were mostly looked up before, in this
 // pass or an earlier one. Direct-mapped.
 #define FM_N 8192
-static struct { uint64_t h, tok; uint32_t gen; SubRange r; } FM[FM_N];
+static struct { uint64_t h, tok; uint32_t gen; SubRange r; const VkTexImage *img; } FM[FM_N];
 
-static SubRange sampled_sub(uint64_t h) {   // texture lock held
+// *img: the texture's image, whose stamps the pass chain reads (chain_scan); it lives as long as the slot resolves
+// the same (slot_still).
+static SubRange sampled_sub(uint64_t h, const VkTexImage **img) {   // texture lock held
     view_t v;
     int hv;
-    const VkTexImage *img = vk_texture_by_id_locked((int)(h & 0xfffff), &v, &hv);
-    return img ? sub_of(img, &v, hv) : (SubRange){0};
+    *img = vk_texture_by_id_locked((int)(h & 0xfffff), &v, &hv);
+    return *img ? sub_of(*img, &v, hv) : (SubRange){0};
 }
 
 // Attachments of the open pass the fragment shader fs samples; kept while the shader, the texture bindings and the
@@ -1206,8 +1208,9 @@ static uint32_t feedback_scan(VkExec *ex, const GfxShader *fs) {
             if (memo && f->h == h && slot_still(&f->gen, f->tok, h, gen)) {
                 if (memo == 2) {
                     if (!locked) vk_texture_lock(), locked = 1;
-                    SubRange c = sampled_sub(h);
-                    if (memcmp(&c, &f->r, sizeof c))
+                    const VkTexImage *ci;
+                    SubRange c = sampled_sub(h, &ci);
+                    if (memcmp(&c, &f->r, sizeof c) || ci != f->img)
                         rt_fatal("vk_exec: feedback memo of handle %#llx differs from a lookup", (unsigned long long)h);
                 }
                 m |= attached_as(ex, &f->r);
@@ -1215,9 +1218,10 @@ static uint32_t feedback_scan(VkExec *ex, const GfxShader *fs) {
             }
             uint64_t tok = token_of(h);   // before the lookup
             if (!locked) vk_texture_lock(), locked = 1;
-            SubRange sr = sampled_sub(h);
+            const VkTexImage *img;
+            SubRange sr = sampled_sub(h, &img);
             m |= attached_as(ex, &sr);
-            if (tok) *f = (typeof(*f)){.h = h, .tok = tok, .gen = gen, .r = sr};
+            if (tok) *f = (typeof(*f)){.h = h, .tok = tok, .gen = gen, .r = sr, .img = img};
             else f->h = 0;
         }
     if (locked) vk_texture_unlock();
@@ -1239,11 +1243,77 @@ static uint32_t feedback_prepare(VkExec *ex, const GfxShader *fs) {
                 const VkExecTarget *t = i < 8 ? &ex->color[i] : &ex->depth;
                 if ((d >> i & 1) && t->img && t->img->fb_usage) ((VkTexImage *)t->img)->fb_learned = 1;
             }
-        vk_exec_pass_end(ex);
-        vk_exec_pass_begin(ex);   // learned targets now in the feedback layout; the full barrier cleared fb_dirty
+        ex->pass_force = 1;   // the pass chain: this begin takes its barrier
+        vk_exec_pass_end_why(ex, VK_END_FEEDBACK);
+        vk_exec_pass_begin(ex);   // learned targets now in the feedback layout; the barrier cleared fb_dirty
         vk_exec_frame.fb_restarts++;
     }
     return mode == VK_FEEDBACK_LAYOUT ? m & ex->fbl_mask : 0;
+}
+
+// ---- the pass chain's view of a draw (vk_exec.c "the pass chain")
+
+// Whether a shader writes memory other than attachments: a storage buffer it writes, or any storage image.
+static int stage_writes(const GfxShader *s) {
+    const GfxShaderRes *res;
+    if (!s) return 0;
+    if (gfx_shader_resources(s, GFX_RES_IMG, &res) > 0) return 1;
+    int n = gfx_shader_resources(s, GFX_RES_SSBO, &res);
+    for (int i = 0; i < n; i++)
+        if (res[i].flags & 1) return 1;
+    return 0;
+}
+
+// The textures stage st's shader s samples go to the pass chain (vk_exec_chain_sampled). Returns 1 when one of them,
+// or memory it aliases, was attached to a pass that ended since the last barrier; one attached to a pass that ended
+// before the barrier a hinted pass took confirms the hint.
+static int chain_scan(VkExec *ex, const GfxShader *s, int st, uint32_t gen, int *locked) {
+    const GfxShaderRes *res;
+    int n = s ? gfx_shader_resources(s, GFX_RES_TEX, &res) : 0, hit = 0, memo = td_mode();
+    for (int r = 0; r < n; r++)
+        for (int k = 0; k < (res[r].count ? res[r].count : 1); k++) {
+            int slot = res[r].slot + k;
+            uint64_t h = slot >= 0 && slot < 128 ? ex->tex[st][slot] : 0;
+            if (!h) continue;
+            typeof(FM[0]) *f = &FM[(h * 0x9E3779B97F4A7C15ull) >> 51];
+            const VkTexImage *img;
+            SubRange sr;
+            if (memo && f->h == h && slot_still(&f->gen, f->tok, h, gen)) {
+                img = f->img, sr = f->r;
+            } else {
+                uint64_t tok = token_of(h);   // before the lookup
+                if (!*locked) vk_texture_lock(), *locked = 1;
+                sr = sampled_sub(h, &img);
+                if (tok) *f = (typeof(*f)){.h = h, .tok = tok, .gen = gen, .r = sr, .img = img};
+                else f->h = 0;
+            }
+            if (!img) continue;
+            if (ex->pass_hinted && img->sync_w == ex->hint_epoch) ex->hint_hit = 1;
+            hit |= vk_exec_chain_sampled(ex, img, sr.l0, sr.l1, sr.a0, sr.a1);
+        }
+    return hit;
+}
+
+// A draw of the open pass with shaders vs and fs, before anything of it is recorded: tells the pass chain what it
+// writes beyond its attachments and whether it samples an image a pass wrote since the last barrier; the chain
+// restarts the pass behind a barrier when it must, and the draw is looked at again under the new epoch. The scan of
+// the sampled images is kept while the shaders, the texture bindings and the pass stay the same.
+static void chain_draw(VkExec *ex, const GfxShader *vs, const GfxShader *fs) {
+    static struct { const GfxShader *vs, *fs; int writes; } W;
+    int on = vk_exec_chain_on();
+    if (!on) return;
+    if (W.vs != vs || W.fs != fs) W.vs = vs, W.fs = fs, W.writes = stage_writes(vs) || stage_writes(fs);
+    for (int again = 0; again < 2; again++) {
+        int unsynced = 0;
+        if ((on & 2) && !(ex->sy_vs == vs && ex->sy_fs == fs && ex->sy_serial == ex->tex_serial && ex->sy_pass == ex->pass_serial)) {
+            uint32_t gen = vk_texture_slots_gen();   // before any lookup
+            int locked = 0;
+            unsynced = chain_scan(ex, vs, NVN_STAGE_VS, gen, &locked) | chain_scan(ex, fs, NVN_STAGE_FS, gen, &locked);
+            if (locked) vk_texture_unlock();
+            ex->sy_vs = vs, ex->sy_fs = fs, ex->sy_serial = ex->tex_serial, ex->sy_pass = ex->pass_serial;
+        }
+        if (!vk_exec_chain_draw(ex, W.writes, unsynced)) return;
+    }
 }
 
 // By-region barrier inside the pass: earlier attachment writes become visible to this draw's fragment shader reads.
@@ -2328,7 +2398,7 @@ static int prepare_draw(VkExec *ex, int prim, int32_t count, int restart) {
     if (ex->pass_noatt) {   // no attachment: the pass covers this draw's viewport or scissor, reopened when it needs more
         uint32_t w, h;
         vk_exec_noatt_dims(ex, &w, &h);
-        if (ex->in_pass && (w > ex->pass_w || h > ex->pass_h)) vk_exec_pass_end(ex);
+        if (ex->in_pass && (w > ex->pass_w || h > ex->pass_h)) vk_exec_pass_end_why(ex, VK_END_AREA);
         if (!ex->in_pass) ex->rt_resolved = 0;
     }
     if (!ex->in_pass) ex->dirty |= VK_EXEC_DIRTY_VIEWPORT | VK_EXEC_DIRTY_SCISSOR;
@@ -2380,6 +2450,7 @@ static int prepare_draw(VkExec *ex, int prim, int32_t count, int restart) {
     }
     if (!vs || (has_fs && !fs)) return drop_draw(ex, VK_DROP_OTHER, "a shader failed to translate");
     if (vk_dlaa_skip_draw(ex, fs)) return drop_draw(ex, VK_DROP_OTHER, "SMAA set aside for the temporal AA");   // vk_dlaa.c
+    chain_draw(ex, vs, fs);   // may restart the pass behind a barrier: before the feedback state of the pass is read
     uint32_t fbl = feedback_prepare(ex, fs);
     VkPipeState s = ex->pipe;
     // AC_FORCE_BLEND=<prog>: debug switch, the enemy-death effect (prog 268) is opaque at 1x and 2x; force
@@ -3154,7 +3225,7 @@ static void op_dispatch(VkExec *ex, const p_dispatch *d) {
     const VkPipeInfo *info = NULL;
     VkPipeline p = vk_pipeline_compute(cs, &info);
     if (!p || !info) return warn_once(W_PIPELINE, "a compute pipeline could not be created: dispatches with it are skipped");
-    vk_exec_barrier(ex);   // ends the pass; earlier writes are visible to the shader
+    vk_exec_barrier(ex, VK_BAR_DISPATCH);   // ends the pass; earlier writes are visible to the shader
     bind_pipeline(ex, VK_PIPELINE_BIND_POINT_COMPUTE, p);
     c0_dim[0] = (uint32_t)d->x, c0_dim[1] = (uint32_t)d->y, c0_dim[2] = (uint32_t)d->z;
     twin_dispatch = 1;
@@ -3180,7 +3251,7 @@ static void op_dispatch_ind(VkExec *ex, const p_dispatch_ind *d) {
     const VkPipeInfo *info = NULL;
     VkPipeline p = vk_pipeline_compute(cs, &info);
     if (!p || !info) return warn_once(W_PIPELINE, "a compute pipeline could not be created: dispatches with it are skipped");
-    vk_exec_barrier(ex);
+    vk_exec_barrier(ex, VK_BAR_DISPATCH);
     VK_MEM_USE(ip, sizeof(VkDispatchIndirectCommand));
     bind_pipeline(ex, VK_PIPELINE_BIND_POINT_COMPUTE, p);
     c0_dim[0] = c0_dim[1] = c0_dim[2] = 0;
@@ -3192,7 +3263,7 @@ static void op_dispatch_ind(VkExec *ex, const p_dispatch_ind *d) {
         VkBufferCopy cp = {ip.offset, B.c0_off[2] + 0x200, sizeof(VkDispatchIndirectCommand)};
         vkCmdCopyBuffer(ex->cb, ip.buffer, B.c0_buf[2], 1, &cp);
         ex->recorded++;
-        vk_exec_barrier(ex);
+        vk_exec_barrier(ex, VK_BAR_DISPATCH);
         B.c0_valid[2] = 0;   // the range no longer holds B.c0[2]
     }
     vkCmdDispatchIndirect(ex->cb, ip.buffer, ip.offset);
@@ -3207,7 +3278,7 @@ static void op_update_ub(VkExec *ex, const p_update_ub *u) {
     VkMemSpan sp;
     if (!vk_mem_resolve(u->dst, u->size, &sp)) return warn_once(W_UB, "UpdateUniformBuffer to %#llx is not backed: dropped", (unsigned long long)u->dst);
     cb_res(ex);
-    vk_exec_barrier(ex);   // earlier draws finished with the old contents
+    vk_exec_barrier(ex, VK_BAR_UPDATE);   // earlier draws finished with the old contents
     VkBuffer b;
     VkDeviceSize o;
     memcpy(scratch(ex, u->size, &b, &o), u->data, u->size);

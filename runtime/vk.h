@@ -403,6 +403,13 @@ typedef struct {
     uint8_t skip;                  // AC_TEX_MIP_SKIP: the game's levels below this one are not in the image (vk_texture.c
                                    // mip_skip_of). Image level i holds the game's level i + skip; width, height and
                                    // levels above are the image's.
+    uint64_t mem_size;             // bound: the bytes of pool memory from addr the image is bound over (its memory
+                                   // requirements); images over overlapping bytes alias each other
+    uint32_t sync_w, sync_r;       // the pass chain (vk_exec.c, replay thread only): VkExec.sync_epoch when a pass last
+                                   // ended with the image attached, and when a draw last sampled it. Equal to the
+                                   // current epoch: since the last barrier.
+    uint32_t sync_wsub[4], sync_rsub[4];   // levels [0, 1) and layers [2, 3) covering what was attached, and sampled,
+                                           // in that epoch
 } VkTexImage;
 // The image level that holds the game's level `lv` of t; -1 for a level AC_TEX_MIP_SKIP left out of the image.
 static inline int vk_tex_level(const VkTexImage *t, uint32_t lv) { return lv < t->skip ? -1 : (int)(lv - t->skip); }

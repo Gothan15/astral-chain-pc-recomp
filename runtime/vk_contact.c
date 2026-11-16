@@ -135,6 +135,7 @@ void vk_contact_flush(VkExec *ex) {
         rt_log("vk: contact shadows on a %ux%u scene, sun toward %.3f %.3f %.3f (view space), far %g", C.w, C.h,
                pcv[4], pcv[5], pcv[6], zfar);
     }
+    vk_exec_clears_flush(ex);   // a clear of the scene that waits for its pass comes before the march
     mem_barrier(cb);   // the compose passes' writes, before the march reads and writes them
     VkDescriptorImageInfo ii = {C.sampler, in, VK_IMAGE_LAYOUT_GENERAL}, oi = {VK_NULL_HANDLE, out, VK_IMAGE_LAYOUT_GENERAL};
     VkWriteDescriptorSet w[2] = {

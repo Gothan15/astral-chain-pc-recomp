@@ -2,15 +2,16 @@
 // one submission into its command buffer, keeps render targets and fixed-function state, opens and closes dynamic
 // rendering passes and records clears and barriers. Draws, binds and dispatches go to vk_exec_op_draw
 // (vk_exec_draw.c); copies, counters, events and conditional rendering to vk_exec_op_xfer (vk_exec_xfer.c). Images
-// stay in VK_IMAGE_LAYOUT_GENERAL (vk_texture.c); full memory barriers order passes, clears and whatever those two
-// record between them.
+// stay in VK_IMAGE_LAYOUT_GENERAL (vk_texture.c); memory barriers order passes, clears and whatever those two record
+// between them: full ones (all commands, all memory) everywhere but between passes that only wrote attachments,
+// where "the pass chain" below records a narrower one or none.
 //
 // The op loop (END / BEGIN / JUMP / CALL, which ops are pure state, the state defaults, render targets kept until they
 // change, clears skipped while rendering is disabled) follows MacNativeGames
 // games/totk/third_party/d2r_gfx/gfx/nvn/nvn_mtl.m:10588-10700, 7409-7460, 5449-5457
 // (https://github.com/ly05010419/MacNativeGames @ b75be8cfa704df3701e86130c8ced268e79d6b11, MIT, Copyright (c) 2026
 // jhaizhou). Pass begin and end (GENERAL-layout attachments, LOAD/STORE, render area from the smallest attachment, a
-// full barrier before each pass), the scissor clip and attachment clears follow LAS Recomp
+// barrier before a pass), the scissor clip and attachment clears follow LAS Recomp
 // runtime/nvn/vulkan/exec.c:855-1149, 3553-3778 (https://github.com/peiikai/LASRecomp @
 // da35b83a9611d046a9a681aae668d7085954d37f, MIT, Copyright (c) 2026 Peiikai).
 #include <math.h>
@@ -22,6 +23,7 @@
 #include "cfg.h"
 #include "host.h"
 #include "nvn_api.h"
+#include "nvn_hmap.h"
 #include "nvn_tex.h"
 #include "platform/platform.h"
 #include "tex.h"
@@ -120,6 +122,7 @@ static void state_reset(VkExec *ex) {
     ex->depth_range[1] = 1.0f;
     vk_pipe_state_defaults(&ex->pipe);
     ex->barrier_at = -1;
+    ex->bar_prev = VK_BAR_N;
 }
 
 // ---- render targets
@@ -563,10 +566,226 @@ static VkImageMemoryBarrier2 layout_barrier(VkImage img, VkImageAspectFlags aspe
                                    .subresourceRange = {aspect, 0, VK_REMAINING_MIP_LEVELS, 0, VK_REMAINING_ARRAY_LAYERS}};
 }
 
-// Full barrier. The images in the feedback layout become want[] (pass begin) or none (every other barrier): the others
-// go back to GENERAL and the new ones leave it, in the same command.
-static void barrier_to(VkExec *ex, const VkImage *want, const VkImageAspectFlags *wasp, int nwant) {
-    vk_exec_pass_end(ex);
+// AC_TRACE=perf: the barriers of the replay by what asked for them, summed over the submissions between two logs
+// (bar_log). The source of the barrier before names the work recorded between the two: a pass after VK_BAR_PASS, a
+// clear after VK_BAR_CLEAR, and so on.
+static struct {
+    uint64_t rec[VK_BAR_N][VK_BAR_N + 1];   // recorded: [source][source of the one before; VK_BAR_N: the first]
+    uint64_t skipped[VK_BAR_N];             // asked for with nothing recorded since the last barrier
+    uint64_t ended[VK_END_N];               // open passes ended, by what ended them
+    uint64_t passes, same_rt;               // passes begun; those on the targets of the pass before (a restart)
+    uint64_t game, game_in_pass;            // OP_BARRIER ops; those inside an open pass
+    uint64_t clears_load, clears_image;     // whole-target clears: folded into a pass's load op, recorded as image clears
+    uint64_t narrow, elided;                // pass begins behind a narrow barrier (counted in rec too), behind none
+    uint64_t need_read, need_hint;          // chain_need: an attachment sampled since the last barrier, a hinted pass
+    uint64_t need_write, need_alias;        // an attachment attached to a pass since then, aliasing memory either way
+    uint64_t restart_read, restart_write;   // vk_exec_chain_draw: restarts for a sampled image, for a storage write
+    uint64_t hint_drop;                     // hints a pass did not confirm
+    struct { int32_t bits; uint64_t n; } game_bits[8];   // their NVNbarrierBits values
+} BC;
+
+static const char *const bar_name[VK_END_N] = {"pass", "clear", "dispatch", "copy", "game", "update", "inline", "host",
+                                               "end", "targets", "area", "feedback", "chain", "other"};
+
+static void bar_log(uint64_t subs) {
+    double k = 1.0 / (double)subs;
+    char buf[1024];
+    size_t o = 0;
+    uint64_t all = 0;
+    for (int s = 0; s < VK_BAR_N; s++) {
+        uint64_t n = 0;
+        for (int p = 0; p <= VK_BAR_N; p++) n += BC.rec[s][p];
+        all += n;
+        if ((!n && !BC.skipped[s]) || o > sizeof buf - 320) continue;
+        o += (size_t)snprintf(buf + o, sizeof buf - o, "%s%s %.1f (", o ? "; " : "", bar_name[s], (double)n * k);
+        for (int p = 0; p <= VK_BAR_N; p++)
+            if (BC.rec[s][p])
+                o += (size_t)snprintf(buf + o, sizeof buf - o, "after %s %.1f, ", p < VK_BAR_N ? bar_name[p] : "nothing",
+                                      (double)BC.rec[s][p] * k);
+        o += (size_t)snprintf(buf + o, sizeof buf - o, "skipped %.1f)", (double)BC.skipped[s] * k);
+    }
+    rt_log("perf: barriers per submission %.1f by source: %s", (double)all * k, buf);
+    if (vk_exec_chain_on())
+        rt_log("perf: pass chain per submission: pass begins behind a narrow barrier %.1f, behind none %.1f; barriers kept "
+               "for an attachment attached since the last one %.1f, sampled %.1f, aliasing either %.1f, for a hint %.1f; "
+               "passes restarted for a sampled image %.1f, for a storage write %.1f; hints dropped %.1f",
+               (double)BC.narrow * k, (double)BC.elided * k, (double)BC.need_write * k, (double)BC.need_read * k,
+               (double)BC.need_alias * k, (double)BC.need_hint * k,
+               (double)BC.restart_read * k, (double)BC.restart_write * k, (double)BC.hint_drop * k);
+    o = 0, buf[0] = 0;
+    for (int e = 0; e < VK_END_N; e++)
+        if (BC.ended[e]) o += (size_t)snprintf(buf + o, sizeof buf - o, "%s%s %.1f", o ? ", " : "", bar_name[e], (double)BC.ended[e] * k);
+    char bits[256] = "";
+    size_t b = 0;
+    for (int i = 0; i < 8 && BC.game_bits[i].n; i++)
+        b += (size_t)snprintf(bits + b, sizeof bits - b, " %#x x%.1f", (unsigned)BC.game_bits[i].bits, (double)BC.game_bits[i].n * k);
+    rt_log("perf: passes per submission %.1f (%.1f on the targets of the pass before), ended by: %s; game barriers %.1f "
+           "(%.1f in a pass), bits:%s; whole-target clears: %.1f as load ops, %.1f as image clears",
+           (double)BC.passes * k, (double)BC.same_rt * k, buf, (double)BC.game * k, (double)BC.game_in_pass * k, bits,
+           (double)BC.clears_load * k, (double)BC.clears_image * k);
+    memset(&BC, 0, sizeof BC);
+}
+
+// ---- the pass chain
+// Every image stays in GENERAL, so a pass begin needs a barrier only for what it touches of the work recorded since
+// the last one. Measured in Harmony Square on an Arc 140T at 1080p: 135 of the 173 full barriers of a frame were pass
+// begins behind a pass, and leaving the memory barriers of all pass begins out took 1.13 ms of the 7.7 ms of GPU time
+// a frame (a wrong picture: the ceiling). Two steps take most of it back:
+// - AC_BAR_NARROW (default 1): a pass begin that follows nothing but passes which wrote attachments only takes a
+//   barrier whose source is the attachment writes (and stages) of those passes instead of every write of every
+//   command; its destination stays every later command and memory access. Same orderings for what was recorded; the
+//   driver waits for and flushes less (0.25 ms of 7.4 a frame there, A/B in one run).
+// - AC_BAR_ELIDE (default 1): such a pass begin takes no barrier at all when it touches nothing those passes touched.
+//   0.27 ms of 7.2 a frame there on top of the narrow barriers; with them and the clears kept for the next pass
+//   (clear_later), 0.55 ms of 7.4 (7 %), and 173 barriers a frame become 64, 49 of them narrow.
+// The chain is what was recorded since the last barrier: chain_at says it is passes only, chain_other that one of
+// their draws wrote a storage buffer or image (then the next barrier is a full one, as is every barrier of another
+// source). Images carry two stamps of sync_epoch, which every recorded barrier bumps: sync_w, set when a pass ends
+// with the image attached, and sync_r, set when a draw samples it (vk_exec_draw.c chain_draw), each with the levels
+// and layers that covers (their union within the epoch: the shadow cascades are layers of one image drawn pass after
+// pass, a mip chain levels of one image). An image bound over pool memory (VkTexImage.bound) may share its bytes with
+// another image, so those also go into two lists of memory ranges, attached and sampled since the last barrier (CR
+// below), compared by address with the other images.
+// What the elision relies on: Maxwell's texture and shader caches do not see ROP writes, so NVN has the game call
+// nvnCommandBufferBarrier (INVALIDATE_TEXTURE, INVALIDATE_SHADER) before it samples or loads what it rendered
+// (docs/maxwell.md 1.9), and the replay records that call as a full barrier. What Maxwell orders by itself are the
+// ROP's accesses: a pass may draw over, load or test against what an earlier pass stored. Vulkan orders attachment
+// accesses only inside one render pass instance, so the chain tracks those: a pass begins without a barrier only
+// when none of its attachments (nor memory they alias) was attached to a pass or sampled since the last barrier.
+// Reads the game does not announce are still looked for: a draw that samples an image written since the last
+// barrier, or writes storage in a pass that began without a barrier, restarts the pass behind the barrier it needs
+// (vk_exec_chain_draw), as a feedback loop does. A pass
+// restarted for a sampled image is remembered (the hints) and takes its barrier at its begin from then on. A pass is
+// named by its targets, the targets of the pass before and how many passes of the submission had that pair before
+// it: the frame draws several passes on the same pair of targets (blur ping-pong), only some of which read the other.
+// A hinted pass none of whose draws sampled an image written before its barrier counts against the hint, which goes
+// after HINT_KEEP such passes in a row, so that a pass which needs its barrier one frame in two keeps it.
+// The first synchronization scope of a narrow barrier holds every earlier attachment write and, as execution, the
+// logically earlier stages of those draws (vertex and fragment shaders), so it also orders their reads before any
+// later write. Not seen by the elision: a buffer read (uniform, storage, vertex, index) of an attachment's pool bytes
+// that the game does not precede with its barrier; the narrow barrier keeps every later access in its second scope.
+static int chain_knob(int elide) {
+    static int mode[2] = {-1, -1};
+    if (mode[elide] < 0) {
+        mode[elide] = rt_knob(elide ? "BAR_ELIDE" : "BAR_NARROW", "1");
+        if (mode[elide] != 1)
+            rt_log("vk_exec: pass begins %s: %s (AC_BAR_%s)", elide ? "without a barrier where no hazard is known"
+                                                                    : "behind a barrier of attachment writes only",
+                   mode[elide] == 2 ? "in the B blocks" : mode[elide] ? "on" : "off", elide ? "ELIDE" : "NARROW");
+    }
+    return mode[elide];
+}
+
+int vk_exec_chain_on(void) { return (chain_knob(0) || chain_knob(1) ? 1 : 0) | (chain_knob(1) ? 2 : 0); }
+
+#define HINT_SETS 1024
+#define HINT_WAYS 4
+#define HINT_KEEP 16
+// Passes that took a restart for a sampled image, in sets of HINT_WAYS: a frame has some thirty of them, and two in
+// one direct-mapped slot would evict each other every frame (measured: 2 restarts a frame for good).
+static struct { uint64_t key; uint32_t left; } hints[HINT_SETS][HINT_WAYS];
+static uint8_t pair_n[256];   // passes of this submission per pair of targets, direct-mapped by the pair's hash
+
+// The hint of pass key, or NULL. add: the way to put it in when it has none (an empty one, else the one closest to
+// going).
+static typeof(hints[0][0]) *hint_find(uint64_t key, int add) {
+    typeof(hints[0][0]) *set = hints[key * 0x9E3779B97F4A7C15ull >> 54], *victim = &set[0];
+    for (int w = 0; w < HINT_WAYS; w++) {
+        if (set[w].key == key) return &set[w];
+        if (!set[w].key || (victim->key && set[w].left < victim->left)) victim = &set[w];
+    }
+    return add ? victim : NULL;
+}
+
+// Pool memory ranges of bound images since the last barrier: [0] attached to a pass that ended, [1] sampled. A full
+// list counts as covering everything.
+#define CR_N 64
+static struct { uint64_t lo[CR_N], hi[CR_N]; const VkTexImage *img[CR_N]; int n, full; } CR[2];
+
+static void cr_reset(void) { CR[0].n = CR[0].full = CR[1].n = CR[1].full = 0; }
+
+static void cr_add(int k, const VkTexImage *img) {
+    if (CR[k].n == CR_N) { CR[k].full = 1; return; }
+    CR[k].lo[CR[k].n] = img->addr, CR[k].hi[CR[k].n] = img->addr + img->mem_size, CR[k].img[CR[k].n++] = img;
+}
+
+// Another image of list k over bytes img is bound over (img itself is compared by subresource).
+static int cr_hits(int k, const VkTexImage *img) {
+    if (!img->bound || !img->mem_size) return 0;
+    if (CR[k].full) return 1;
+    uint64_t lo = img->addr, hi = img->addr + img->mem_size;
+    for (int i = 0; i < CR[k].n; i++)
+        if (CR[k].img[i] != img && CR[k].lo[i] < hi && lo < CR[k].hi[i]) return 1;
+    return 0;
+}
+
+// Levels and layers: s[0..1] levels, s[2..3] layers. A 3D image's attachments name depth planes where its sampled
+// views name its one layer: both cover every layer.
+static void sub_set(uint32_t *s, const VkTexImage *img, uint32_t l0, uint32_t l1, uint32_t a0, uint32_t a1) {
+    if (img->type == VK_IMAGE_TYPE_3D) a0 = 0, a1 = UINT32_MAX;
+    s[0] = l0, s[1] = l1, s[2] = a0, s[3] = a1;
+}
+
+static int sub_meets(const uint32_t *u, const uint32_t *s) { return u[0] < s[1] && s[0] < u[1] && u[2] < s[3] && s[2] < u[3]; }
+
+// Stamps s into the image's subresources of this epoch (u, at stamp *at): the first one of the epoch replaces them,
+// the others widen them. Returns 1 for the first.
+static int sub_note(uint32_t *at, uint32_t *u, const uint32_t *s, uint32_t ep) {
+    if (*at != ep) {
+        *at = ep;
+        memcpy(u, s, 4 * sizeof *u);
+        return 1;
+    }
+    if (s[0] < u[0]) u[0] = s[0];
+    if (s[1] > u[1]) u[1] = s[1];
+    if (s[2] < u[2]) u[2] = s[2];
+    if (s[3] > u[3]) u[3] = s[3];
+    return 0;
+}
+
+static void target_sub(const VkExecTarget *t, uint32_t *s) {
+    sub_set(s, t->img, t->level, t->level + 1, t->base_layer, t->base_layer + t->layers);
+}
+
+int vk_exec_chain_sampled(VkExec *ex, const VkTexImage *img, uint32_t l0, uint32_t l1, uint32_t a0, uint32_t a1) {
+    uint32_t ep = ex->sync_epoch, s[4];
+    VkTexImage *m = (VkTexImage *)img;
+    sub_set(s, img, l0, l1, a0, a1);
+    int hit = (img->sync_w == ep && sub_meets(img->sync_wsub, s)) || (CR[0].n + CR[0].full && cr_hits(0, img));
+    if (sub_note(&m->sync_r, m->sync_rsub, s, ep) && img->bound && img->mem_size) cr_add(1, img);
+    return hit;
+}
+
+// Whether the pass about to begin on the resolved targets needs its barrier although nothing but passes was recorded
+// since the last one: an attachment, or memory it aliases, was attached to one of those passes or sampled by their
+// draws, or the pass took a restart before (a hint).
+static int chain_need(VkExec *ex) {
+    uint32_t ep = ex->sync_epoch;
+    for (int i = 0; i < 9; i++) {
+        const VkExecTarget *t = i < 8 ? &ex->color[i] : &ex->depth;
+        if (!t->image || !t->img) continue;
+        const VkTexImage *img = t->img;
+        uint32_t s[4];
+        target_sub(t, s);
+        if (img->sync_w == ep && sub_meets(img->sync_wsub, s)) return BC.need_write++, 1;
+        if (img->sync_r == ep && sub_meets(img->sync_rsub, s)) return BC.need_read++, 1;
+        if (cr_hits(0, img) || cr_hits(1, img)) return BC.need_alias++, 1;
+    }
+    if (ex->pass_key && hint_find(ex->pass_key, 0)) {
+        ex->pass_hinted = 1;
+        ex->hint_epoch = ex->sync_epoch;
+        return BC.need_hint++, 1;
+    }
+    return 0;
+}
+
+// A barrier of kind VK_PASS_* (a pass begin may ask for a narrow one or none; anything else is VK_PASS_FULL). The
+// images in the feedback layout become want[] (pass begin) or none (every other barrier): the others go back to
+// GENERAL and the new ones leave it, in the same command, and that barrier is a full one. Returns the kind of the
+// barrier the caller's commands follow.
+static int barrier_to(VkExec *ex, int src, int kind, const VkImage *want, const VkImageAspectFlags *wasp, int nwant) {
+    vk_exec_pass_end_why(ex, src);
+    if (ex->npclear && src != VK_BAR_PASS) vk_exec_clears_flush(ex);   // a pass begin folds or flushes them itself
     VkImageMemoryBarrier2 ib[18];
     uint32_t n = 0;
     for (int i = 0; i < ex->nfbl; i++)
@@ -578,20 +797,142 @@ static void barrier_to(VkExec *ex, const VkImage *want, const VkImageAspectFlags
             ib[n++] = layout_barrier(want[i], wasp[i], VK_IMAGE_LAYOUT_GENERAL, VK_IMAGE_LAYOUT_ATTACHMENT_FEEDBACK_LOOP_OPTIMAL_EXT);
     for (int i = 0; i < nwant; i++) ex->fbl_img[i] = want[i], ex->fbl_aspect[i] = wasp[i];
     ex->nfbl = nwant;
-    if (ex->barrier_at == ex->recorded && !n) return;
+    if (ex->barrier_at == ex->recorded && !n) {
+        BC.skipped[src]++;
+        return ex->bar_narrow ? VK_PASS_NARROW : VK_PASS_FULL;
+    }
+    if (n) kind = VK_PASS_FULL;
+    if (kind == VK_PASS_NONE) return BC.elided++, VK_PASS_NONE;
+    BC.rec[src][ex->bar_prev]++;
+    BC.narrow += kind == VK_PASS_NARROW;
+    ex->bar_prev = src;
     vk_exec_frame.fb_layouts += n;
     VkMemoryBarrier2 mb = {.sType = VK_STRUCTURE_TYPE_MEMORY_BARRIER_2,
                            .srcStageMask = VK_PIPELINE_STAGE_2_ALL_COMMANDS_BIT,
                            .srcAccessMask = VK_ACCESS_2_MEMORY_WRITE_BIT,
                            .dstStageMask = VK_PIPELINE_STAGE_2_ALL_COMMANDS_BIT,
                            .dstAccessMask = VK_ACCESS_2_MEMORY_READ_BIT | VK_ACCESS_2_MEMORY_WRITE_BIT};
+    if (kind == VK_PASS_NARROW) {
+        mb.srcStageMask = VK_PIPELINE_STAGE_2_COLOR_ATTACHMENT_OUTPUT_BIT | VK_PIPELINE_STAGE_2_EARLY_FRAGMENT_TESTS_BIT |
+                          VK_PIPELINE_STAGE_2_LATE_FRAGMENT_TESTS_BIT;
+        mb.srcAccessMask = VK_ACCESS_2_COLOR_ATTACHMENT_WRITE_BIT | VK_ACCESS_2_DEPTH_STENCIL_ATTACHMENT_WRITE_BIT;
+    }
     VkDependencyInfo di = {.sType = VK_STRUCTURE_TYPE_DEPENDENCY_INFO, .memoryBarrierCount = 1, .pMemoryBarriers = &mb,
                            .imageMemoryBarrierCount = n, .pImageMemoryBarriers = ib};
     vkCmdPipelineBarrier2(ex->cb, &di);
     ex->barrier_at = ++ex->recorded;
+    ex->chain_at = ex->recorded;
+    ex->chain_other = 0;
+    ex->bar_narrow = kind == VK_PASS_NARROW;
+    if (!++ex->sync_epoch) ex->sync_epoch = 1;   // 0 is an image that was never stamped
+    cr_reset();
+    return kind;
 }
 
-void vk_exec_barrier(VkExec *ex) { barrier_to(ex, NULL, NULL, 0); }
+int vk_exec_chain_draw(VkExec *ex, int writes, int unsynced) {
+    if (writes) ex->chain_other = 1;
+    if (!unsynced && !(writes && ex->pass_how == VK_PASS_NONE)) return 0;
+    uint64_t key = ex->pass_key;
+    ex->pass_force = 1;
+    vk_exec_pass_end_why(ex, VK_END_CHAIN);
+    vk_exec_pass_begin(ex);   // behind a narrow barrier for a sampled image, a full one for a storage write (chain_other)
+    if (unsynced) {
+        BC.restart_read++;
+        if (key) *hint_find(key, 1) = (typeof(hints[0][0])){key, HINT_KEEP};
+    } else {
+        BC.restart_write++;
+    }
+    return 1;
+}
+
+void vk_exec_barrier(VkExec *ex, int src) { barrier_to(ex, src, VK_PASS_FULL, NULL, NULL, 0); }
+
+// ---- whole-target clears kept for the next pass
+// The game clears a target and then draws into it: SetRenderTargets, ClearColor, ClearDepthStencil, draws. Recorded as
+// they come, each clear was a full barrier and a vkCmdClear*Image, and the pass after it began behind another full
+// barrier and loaded the cleared texels (in Harmony Square: 29 of the 173 full barriers of a frame, and a write plus a
+// read of every cleared target). A clear of a whole subresource outside a pass waits in VkExec.pclear instead; the
+// pass that attaches that subresource over its whole render area takes it as VK_ATTACHMENT_LOAD_OP_CLEAR. Whatever
+// else would be recorded first (a barrier of any other source, a pass that does not attach it, the end of the
+// submission) records the waiting clears as image clears behind one barrier, so nothing reads or writes the image
+// between the game's clear and ours.
+
+void vk_exec_clears_flush(VkExec *ex) {
+    int n = ex->npclear;
+    if (!n) return;
+    ex->npclear = 0;   // first: the barrier below flushes
+    barrier_to(ex, VK_BAR_CLEAR, VK_PASS_FULL, NULL, NULL, 0);
+    for (int i = 0; i < n; i++) {
+        const struct VkExecClear *p = &ex->pclear[i];
+        VkImageSubresourceRange r = {p->aspect, p->level, 1, p->base_layer, p->layers};
+        if (p->aspect & VK_IMAGE_ASPECT_COLOR_BIT) vkCmdClearColorImage(ex->cb, p->image, VK_IMAGE_LAYOUT_GENERAL, &p->v.color, 1, &r);
+        else vkCmdClearDepthStencilImage(ex->cb, p->image, VK_IMAGE_LAYOUT_GENERAL, &p->v.depthStencil, 1, &r);
+        ex->recorded++;
+        vk_texture_gpu_written(p->tex);
+        BC.clears_image++;
+    }
+}
+
+// A whole-target clear waits for the next pass. A later clear of the same subresource replaces the value of the
+// aspects it clears.
+static void clear_later(VkExec *ex, const VkExecTarget *t, VkImageAspectFlags aspect, const VkClearValue *v) {
+    struct VkExecClear *p = NULL;
+    for (int i = 0; i < ex->npclear && !p; i++) {
+        struct VkExecClear *q = &ex->pclear[i];
+        if (q->image != t->image || q->level != t->level) continue;
+        if (q->base_layer == t->base_layer && q->layers == t->layers) {
+            p = q;
+        } else if (q->base_layer < t->base_layer + t->layers && t->base_layer < q->base_layer + q->layers) {
+            // other layers of the level that share some with a waiting clear (an array, then one of its layers): the
+            // waiting ones are recorded first, so the two clears keep their order behind separate barriers
+            vk_exec_clears_flush(ex);
+            break;
+        }
+    }
+    if (!p) {
+        if (ex->npclear == VK_EXEC_CLEARS) vk_exec_clears_flush(ex);
+        p = &ex->pclear[ex->npclear++];
+        *p = (struct VkExecClear){.image = t->image, .tex = t->tex, .level = t->level, .base_layer = t->base_layer,
+                                  .layers = t->layers};
+    }
+    if (aspect & VK_IMAGE_ASPECT_COLOR_BIT) p->v.color = v->color;
+    if (aspect & VK_IMAGE_ASPECT_DEPTH_BIT) p->v.depthStencil.depth = v->depthStencil.depth;
+    if (aspect & VK_IMAGE_ASPECT_STENCIL_BIT) p->v.depthStencil.stencil = v->depthStencil.stencil;
+    p->aspect |= aspect;
+}
+
+// At a pass begin, targets resolved: a waiting clear becomes a load op when it clears an attachment of this pass over
+// the pass's whole area and layers; the others are recorded as image clears first, since the pass may sample them.
+// Returns the attachments to clear (bit i colour i, bit 8 depth, bit 9 stencil), their values in v[0..8] (8: depth
+// and stencil).
+static uint32_t clears_fold(VkExec *ex, VkClearValue v[9]) {
+    uint32_t m = 0;
+    int keep = 0;
+    for (int i = 0; i < ex->npclear; i++) {
+        const struct VkExecClear *p = &ex->pclear[i];
+        int slot = -1;
+        for (int k = 0; k < 9 && slot < 0; k++) {
+            const VkExecTarget *t = k < 8 ? &ex->color[k] : &ex->depth;
+            if ((k < 8 && (uint32_t)k >= ex->pass_ncolor) || t->image != p->image || t->level != p->level ||
+                t->base_layer != p->base_layer || t->layers != p->layers)
+                continue;
+            if (t->width != ex->pass_w || t->height != ex->pass_h || t->layers != ex->pass_layers) continue;
+            if (k < 8 ? !(p->aspect & VK_IMAGE_ASPECT_COLOR_BIT) || (m >> k & 1) : (p->aspect & ~t->aspect) != 0) continue;
+            slot = k;
+        }
+        if (slot < 0) {
+            ex->pclear[keep++] = *p;
+            continue;
+        }
+        if (slot < 8) m |= 1u << slot;
+        else m |= (p->aspect & VK_IMAGE_ASPECT_DEPTH_BIT ? 0x100u : 0) | (p->aspect & VK_IMAGE_ASPECT_STENCIL_BIT ? 0x200u : 0);
+        v[slot] = p->v;
+        BC.clears_load++;
+    }
+    ex->npclear = keep;
+    vk_exec_clears_flush(ex);
+    return m;
+}
 
 void vk_exec_pass_begin(VkExec *ex) {
     if (ex->in_pass) return;
@@ -611,10 +952,29 @@ void vk_exec_pass_begin(VkExec *ex) {
         if (has_image(want, nwant, t->image)) continue;
         want[nwant] = t->image, wasp[nwant++] = i < 8 ? VK_IMAGE_ASPECT_COLOR_BIT : t->img->aspect;
     }
-    barrier_to(ex, want, wasp, nwant);   // passes, clears, copies and dispatches see each other's results
+    VkClearValue clv[9];
+    uint32_t cl = ex->npclear ? clears_fold(ex, clv) : 0;   // before the barrier: clears that do not fold are recorded
+    if (ex->pass_rt != ex->rt_serial && (vk_exec_chain_on() & 2)) {   // other targets than the pass before: its name
+        uint64_t pair = ex->last_rt_hash * 0x9E3779B97F4A7C15ull ^ ex->rt_hash;
+        ex->pass_key = (pair + pair_n[pair >> 56]++ * 0xD6E8FEB86659FD93ull) | 1;
+        ex->last_rt_hash = ex->rt_hash;
+    }
+    // The barrier: a full one, unless nothing but passes that wrote attachments only was recorded since the last
+    // barrier (the pass chain)
+    int kind = VK_PASS_FULL, chain = vk_exec_chain_on();
+    ex->pass_hinted = ex->hint_hit = 0;
+    if (chain && !ex->chain_other && ex->recorded == ex->chain_at && !vk_dump_armed) {
+        if (RT_KNOB_ON(chain_knob(0))) kind = VK_PASS_NARROW;
+        if (RT_KNOB_ON(chain_knob(1)) && !ex->pass_force && !chain_need(ex)) kind = VK_PASS_NONE;
+    }
+    ex->pass_force = 0;
+    ex->pass_how = (uint8_t)barrier_to(ex, VK_BAR_PASS, kind, want, wasp, nwant);
+    BC.passes++;
+    if (ex->pass_rt == ex->rt_serial) BC.same_rt++;
+    ex->pass_rt = ex->rt_serial;
     if (vk_gpuprof_on()) vk_gpuprof_mark(ex, 1, 0);
     ex->fbl_mask = fbl;
-    ex->fb_dirty = 0;
+    ex->fb_dirty = (cl & 0xff) | (cl & 0x300 ? 0x100u : 0);   // a load-op clear writes its attachment in this pass
     ex->pass_serial++;
     VkRenderingAttachmentInfo ca[8], da = {0}, sa = {0};
     for (uint32_t i = 0; i < ex->pass_ncolor; i++) {
@@ -623,8 +983,10 @@ void vk_exec_pass_begin(VkExec *ex) {
         if (!t->image) continue;
         ca[i].imageView = view_of(ex, t);
         ca[i].imageLayout = fbl >> i & 1 ? VK_IMAGE_LAYOUT_ATTACHMENT_FEEDBACK_LOOP_OPTIMAL_EXT : VK_IMAGE_LAYOUT_GENERAL;
-        ca[i].loadOp = VK_ATTACHMENT_LOAD_OP_LOAD;
-        ca[i].storeOp = VK_ATTACHMENT_STORE_OP_STORE;    }
+        ca[i].loadOp = cl >> i & 1 ? VK_ATTACHMENT_LOAD_OP_CLEAR : VK_ATTACHMENT_LOAD_OP_LOAD;
+        ca[i].storeOp = VK_ATTACHMENT_STORE_OP_STORE;
+        if (cl >> i & 1) ca[i].clearValue = clv[i];
+    }
     const VkExecTarget *d = &ex->depth;
     if (d->image) {
         VkRenderingAttachmentInfo a = {.sType = VK_STRUCTURE_TYPE_RENDERING_ATTACHMENT_INFO, .imageView = view_of(ex, d),
@@ -633,6 +995,8 @@ void vk_exec_pass_begin(VkExec *ex) {
                                        .loadOp = VK_ATTACHMENT_LOAD_OP_LOAD, .storeOp = VK_ATTACHMENT_STORE_OP_STORE};
         if (d->aspect & VK_IMAGE_ASPECT_DEPTH_BIT) da = a;
         if (d->aspect & VK_IMAGE_ASPECT_STENCIL_BIT) sa = a;
+        if (cl & 0x100) da.loadOp = VK_ATTACHMENT_LOAD_OP_CLEAR, da.clearValue = clv[8];
+        if (cl & 0x200) sa.loadOp = VK_ATTACHMENT_LOAD_OP_CLEAR, sa.clearValue = clv[8];
     }
     VkRenderingInfo ri = {.sType = VK_STRUCTURE_TYPE_RENDERING_INFO, .renderArea = {{0, 0}, {ex->pass_w, ex->pass_h}},
                           .layerCount = ex->pass_layers, .colorAttachmentCount = ex->pass_ncolor,
@@ -645,12 +1009,30 @@ void vk_exec_pass_begin(VkExec *ex) {
     ex->in_pass = 1;
 }
 
-void vk_exec_pass_end(VkExec *ex) {
+void vk_exec_pass_end_why(VkExec *ex, int why) {
     if (!ex->in_pass) return;
+    BC.ended[why]++;
     vk_exec_oq_pass_end(ex);
     vkCmdEndRendering(ex->cb);
     ex->recorded++;
     ex->in_pass = 0;
+    ex->chain_at = ex->recorded;   // the pass chain: whatever is recorded from here on that is not a pass breaks it
+    if (vk_exec_chain_on() & 2) {
+        for (int i = 0; i < 9; i++) {
+            const VkExecTarget *t = i < 8 ? &ex->color[i] : &ex->depth;
+            if (!t->image || !t->img) continue;
+            VkTexImage *m = (VkTexImage *)t->img;
+            uint32_t s[4];
+            target_sub(t, s);
+            if (sub_note(&m->sync_w, m->sync_wsub, s, ex->sync_epoch) && m->bound && m->mem_size) cr_add(0, m);
+        }
+        typeof(hints[0][0]) *hs = ex->pass_hinted ? hint_find(ex->pass_key, 0) : NULL;
+        if (hs) {
+            if (ex->hint_hit) hs->left = HINT_KEEP;
+            else if (!--hs->left) hs->key = 0, BC.hint_drop++;
+        }
+        ex->pass_hinted = 0;
+    }
     for (int i = 0; i < ex->pass_ncolor && i < 8; i++)   // stand-ins of 3D BC targets go to their textures
         if (ex->color[i].image && ex->color[i].img && ex->color[i].img->image != ex->color[i].image)
             bc_copy_back(ex, &ex->color[i]);
@@ -667,7 +1049,7 @@ VkCommandBuffer vk_exec_inline_begin(int *reopen) {
     *reopen = 0;
     if (!x_here || !ex->cb) return VK_NULL_HANDLE;
     *reopen = ex->in_pass;
-    vk_exec_barrier(ex);   // ends the pass; feedback-layout targets go back to GENERAL
+    vk_exec_barrier(ex, VK_BAR_INLINE);   // ends the pass; feedback-layout targets go back to GENERAL
     return ex->cb;
 }
 
@@ -711,7 +1093,9 @@ VkRect2D vk_exec_scissor(const VkExec *ex) {
 // ---- clears
 
 // Outside a pass, a clear of a whole target (no narrower scissor, the target as large as the render area) clears the
-// image directly instead of opening a pass for it.
+// image directly instead of opening a pass for it: at once (clear_color, a view of another format than the image's:
+// an image clear writes the value in the image's format, a load op in the view's) or kept for the next pass's load op
+// (clear_later).
 static int whole_target(const VkExec *ex, const VkExecTarget *t) {
     // vkCmdClear*Image addresses a 3D level whole, not one depth plane: slices of a 3D target clear in a pass; it
     // cannot clear a compressed image: views of BC blocks clear in a pass too
@@ -719,6 +1103,14 @@ static int whole_target(const VkExec *ex, const VkExecTarget *t) {
     if (!ex->has_scissor) return 1;
     const p_scissor *s = &ex->scissor;
     return s->x <= 0 && s->y <= 0 && (int64_t)s->x + s->w >= t->width && (int64_t)s->y + s->h >= t->height;
+}
+
+// AC_CLEAR_LOAD (default 1; 0 records every whole-target clear at once, as before; ab alternates with the AC_AB
+// blocks): whole-target clears wait for the next pass's load op (clear_later).
+static int clears_later_on(void) {
+    static int mode = -1;
+    if (mode < 0) mode = rt_knob("CLEAR_LOAD", "1");
+    return RT_KNOB_ON(mode);
 }
 
 static void clear_attachment(VkExec *ex, const VkClearAttachment *a) {
@@ -749,11 +1141,16 @@ static void clear_color(VkExec *ex, const p_clear_color *c) {
     VkClearColorValue cv;
     memcpy(cv.float32, c->rgba, sizeof cv.float32);   // integer targets: the payload's bits as the front end stored them
     if (whole_target(ex, t)) {
-        vk_exec_barrier(ex);
+        if (clears_later_on() && t->img && t->format == t->img->format) {
+            clear_later(ex, t, VK_IMAGE_ASPECT_COLOR_BIT, &(VkClearValue){.color = cv});
+            return;
+        }
+        vk_exec_barrier(ex, VK_BAR_CLEAR);
         VkImageSubresourceRange r = {VK_IMAGE_ASPECT_COLOR_BIT, t->level, 1, t->base_layer, t->layers};
         vkCmdClearColorImage(ex->cb, t->image, VK_IMAGE_LAYOUT_GENERAL, &cv, 1, &r);
         ex->recorded++;
         vk_texture_gpu_written(t->tex);
+        BC.clears_image++;
         return;
     }
     VkClearAttachment a = {.aspectMask = VK_IMAGE_ASPECT_COLOR_BIT, .colorAttachment = (uint32_t)i};
@@ -777,11 +1174,16 @@ static void clear_ds(VkExec *ex, const p_clear_ds *c) {
     float d = c->depth < 0.0f ? 0.0f : c->depth > 1.0f ? 1.0f : c->depth;
     VkClearDepthStencilValue v = {d, (uint32_t)c->stencil & 0xff};
     if (whole_target(ex, t)) {
-        vk_exec_barrier(ex);
+        if (clears_later_on()) {
+            clear_later(ex, t, asp, &(VkClearValue){.depthStencil = v});
+            return;
+        }
+        vk_exec_barrier(ex, VK_BAR_CLEAR);
         VkImageSubresourceRange r = {asp, t->level, 1, t->base_layer, t->layers};
         vkCmdClearDepthStencilImage(ex->cb, t->image, VK_IMAGE_LAYOUT_GENERAL, &v, 1, &r);
         ex->recorded++;
         vk_texture_gpu_written(t->tex);
+        BC.clears_image++;
         return;
     }
     VkClearAttachment a = {.aspectMask = asp};
@@ -793,9 +1195,11 @@ static void clear_ds(VkExec *ex, const p_clear_ds *c) {
 
 static void set_rt(VkExec *ex, const p_set_rt *r) {
     if (!memcmp(&ex->rt, r, sizeof *r)) return;   // the same targets again: the pass goes on
-    vk_exec_pass_end(ex);
+    vk_exec_pass_end_why(ex, VK_END_TARGETS);
     ex->rt = *r;
     ex->rt_resolved = 0;
+    ex->rt_serial++;
+    if (vk_exec_chain_on() & 2) ex->rt_hash = nvn_hm_hash(r, sizeof *r);
 }
 
 // ---- command buffer parts
@@ -896,7 +1300,17 @@ static void walk(VkExec *ex, const op_hdr *h, int depth) {
         case OP_COPY_STRIDE: ex->copy_stride = ((const p_copy_stride *)a)->stride; break;
         case OP_SET_TEX_POOL: ex->tex_pool = ((const p_set_pool *)a)->pool, ex->tex_serial++; break;
         case OP_SET_SAMP_POOL: ex->samp_pool = ((const p_set_pool *)a)->pool; break;
-        case OP_BARRIER: vk_exec_barrier(ex); break;
+        case OP_BARRIER: {
+            int32_t bits = ((const p_barrier *)a)->bits;
+            BC.game++, BC.game_in_pass += ex->in_pass != 0;
+            for (int i = 0; i < 8; i++)
+                if (!BC.game_bits[i].n || BC.game_bits[i].bits == bits) {
+                    BC.game_bits[i].bits = bits, BC.game_bits[i].n++;
+                    break;
+                }
+            vk_exec_barrier(ex, VK_BAR_GAME);
+            break;
+        }
         case OP_DRAW: case OP_DRAW_IDX: case OP_DISPATCH: case OP_UPDATE_UB: case OP_DRAW_IDX_IND: case OP_DISPATCH_IND:
             if (h->op == OP_DRAW || h->op == OP_DRAW_IDX || h->op == OP_DRAW_IDX_IND) vk_exec_frame.draws_seen++, split_draws++;
             if (h->op == OP_DISPATCH || h->op == OP_DISPATCH_IND) vk_exec_frame.dispatches++, split_draws++;
@@ -935,6 +1349,11 @@ int vk_exec_record(VkCommandBuffer cb, const uint64_t *handles, int n, uint64_t 
     ex->rt_resolved = 0;   // images may have changed since the last command buffer
     ex->nviews = 0;
     ex->barrier_at = -1;
+    ex->bar_prev = VK_BAR_N;
+    ex->chain_at = -1, ex->chain_other = 0, ex->bar_narrow = 0, ex->pass_force = 0;   // the first pass begins behind a full barrier
+    memset(pair_n, 0, sizeof pair_n);
+    if (!++ex->sync_epoch) ex->sync_epoch = 1;
+    cr_reset();
     ex->nfbl = 0;   // the previous command buffer ended with a full barrier: every image is in GENERAL
     vk_exec_frame.submits++;
     split_draws = part_start = 0;
@@ -946,9 +1365,10 @@ int vk_exec_record(VkCommandBuffer cb, const uint64_t *handles, int n, uint64_t 
         if (!handles[i]) rt_fatal("vk: command handle %d of a submission is null", i);
         walk(ex, nvn_op_first(handles[i]), 0);
     }
-    vk_exec_pass_end(ex);
+    vk_exec_pass_end_why(ex, VK_BAR_END);
+    vk_exec_clears_flush(ex);   // a clear no pass took: the next submission, or the present, sees it
     x_here = 0;
-    if (ex->recorded) vk_exec_barrier(ex);   // later submissions see this one's writes
+    if (ex->recorded) vk_exec_barrier(ex, VK_BAR_END);   // later submissions see this one's writes
     if (n) ex->recorded += vk_mem_mirror_end(ex->cb, fence), vk_usnap_end(fence);   // VRAM mirror bytes the GPU wrote go back to guest memory
     if (n && vk_gpuprof_on()) vk_gpuprof_mark(ex, 5, 0), vk_gpuprof_flush(fence);
     if (ex->nviews) {
@@ -963,6 +1383,7 @@ int vk_exec_record(VkCommandBuffer cb, const uint64_t *handles, int n, uint64_t 
     if (n) n_subs++;
     if ((rt_trace & RT_TRACE_PERF) && n_subs >= 240) {
         rt_log("perf: replay command buffer parts per submission %.2f", (double)(n_subs + n_parts) / (double)n_subs);
+        bar_log(n_subs);
         vk_exec_draw_perf(n_subs);
         n_subs = n_parts = 0;
     }

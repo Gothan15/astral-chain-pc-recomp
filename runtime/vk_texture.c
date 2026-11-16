@@ -257,6 +257,7 @@ static int bind_pool_memory(VkCtx *c, Tex *e, VkImage img, uint64_t guest_size) 
     if (!(req.memoryTypeBits >> info.memoryType & 1)) return 0;
     if (vmaBindImageMemory2(c->vma, sp.alloc, sp.alloc_offset, img, NULL) != VK_SUCCESS) return 0;
     e->bound_to = sp.alloc;
+    e->pub.mem_size = req.size;
     return 1;
 }
 

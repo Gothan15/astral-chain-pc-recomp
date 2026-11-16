@@ -426,8 +426,7 @@ static void copy_buffer_image(VkExec *ex, const p_copy_b2t *p, int to_image) {
     VkMemSpan m;
     if (!buffer_side(ex, &s, p->src, &size, &c, &m, !to_image)) return;
     vk_mem_count(m.cls, to_image ? VK_MUSE_COPY_SRC : VK_MUSE_GPU_WRITE, size);
-    vk_exec_pass_end(ex);
-    vk_exec_barrier(ex);
+    vk_exec_barrier(ex, VK_BAR_COPY);
     if (to_image) vkCmdCopyBufferToImage(ex->cb, m.buffer, s.img->image, VK_IMAGE_LAYOUT_GENERAL, 1, &c);
     else vkCmdCopyImageToBuffer(ex->cb, s.img->image, VK_IMAGE_LAYOUT_GENERAL, m.buffer, 1, &c);
     ex->recorded++;
@@ -459,8 +458,7 @@ static void copy_t2t(VkExec *ex, const p_copy_t2t *p) {
         return;
     }
     VkImageSubresourceLayers sl = sub_layers(&s), dl = sub_layers(&d);
-    vk_exec_pass_end(ex);
-    vk_exec_barrier(ex);
+    vk_exec_barrier(ex, VK_BAR_COPY);
     if (s.img->samples > 1 && d.img->samples == 1) {
         VkImageResolve rv = {sl, sub_offset(&s), dl, sub_offset(&d), sub_extent(&s)};
         vkCmdResolveImage(ex->cb, s.img->image, VK_IMAGE_LAYOUT_GENERAL, d.img->image, VK_IMAGE_LAYOUT_GENERAL, 1, &rv);
@@ -503,7 +501,7 @@ static void copy_b2b(VkExec *ex, const p_copy_b2b *p) {
                       (unsigned long long)p->src, (unsigned long long)p->dst);
             break;
         }
-        if (!started) vk_exec_pass_end(ex), vk_exec_barrier(ex), started = 1;
+        if (!started) vk_exec_barrier(ex, VK_BAR_COPY), started = 1;
         VkBufferCopy bc = {s.offset, d.offset, n};
         vkCmdCopyBuffer(ex->cb, s.buffer, d.buffer, 1, &bc);
         vk_mem_gpu_wrote(&d, n, 0);
@@ -536,7 +534,7 @@ static void clear_buf(VkExec *ex, const p_clear_buf *p) {
         }
         uint64_t n = left < d.avail ? left : d.avail & ~3ull;
         if (!n) break;
-        if (!started) vk_exec_pass_end(ex), vk_exec_barrier(ex), started = 1;
+        if (!started) vk_exec_barrier(ex, VK_BAR_COPY), started = 1;
         VK_MEM_PICK(d, n, 1);
         vkCmdFillBuffer(ex->cb, d.buffer, d.offset, n, p->value);
         vk_mem_gpu_wrote(&d, n, 0);
@@ -588,16 +586,14 @@ static void clear_tex(VkExec *ex, const p_clear_tex *p) {
             return;
         }
         memcpy(&cv, &p->c, sizeof cv);
-        vk_exec_pass_end(ex);
-        vk_exec_barrier(ex);
+        vk_exec_barrier(ex, VK_BAR_COPY);
         vkCmdClearColorImage(ex->cb, img->image, VK_IMAGE_LAYOUT_GENERAL, &cv, 1, &rng);
     } else {
         int both = (img->aspect & VK_IMAGE_ASPECT_DEPTH_BIT) && (img->aspect & VK_IMAGE_ASPECT_STENCIL_BIT);
         VkClearDepthStencilValue dv = {0, 0};
         if (img->aspect & VK_IMAGE_ASPECT_DEPTH_BIT) dv.depth = p->c.f[0];
         if (img->aspect & VK_IMAGE_ASPECT_STENCIL_BIT) dv.stencil = both ? p->c.u[1] : p->c.u[0];
-        vk_exec_pass_end(ex);
-        vk_exec_barrier(ex);
+        vk_exec_barrier(ex, VK_BAR_COPY);
         vkCmdClearDepthStencilImage(ex->cb, img->image, VK_IMAGE_LAYOUT_GENERAL, &dv, 1, &rng);
     }
     ex->recorded++;

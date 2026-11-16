@@ -743,7 +743,7 @@ static void run(VkExec *ex) {
     if (!ap) return;
     // the cascades' debug views go through the apply with its blend off
     VkPipeline ap_view = A.level == 3 && A.rc_view ? apply_pipeline(t->format, 1) : VK_NULL_HANDLE;
-    vk_exec_barrier(ex);   // ends the open pass; what drew the scene is done, feedback-layout targets back in GENERAL
+    vk_exec_barrier(ex, VK_BAR_HOST);   // ends the open pass; what drew the scene is done, feedback-layout targets back in GENERAL
     VkCommandBuffer cb = ex->cb;
     if (!ensure_images(cb, hw, hh)) {
         if (A.fmt_logs++ < 4) rt_log("vk: ambient occlusion: its %ux%u images could not be created", hw, hh);

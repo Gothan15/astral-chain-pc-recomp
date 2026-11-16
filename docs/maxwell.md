@@ -190,7 +190,7 @@ Grep-level look on 2026-10-22, statuses updated 2026-10-26; "saw" is what the gr
     targets at the fragment's pixel; on the RX 9070 the reads returned stale data as ~16x14 px dark rectangles on the
     ground, and the sage spirit next to Link was not drawn. `vk_exec_draw.c` (feedback loops) now detects such a draw:
     with `VK_EXT_attachment_feedback_loop_layout` and `dynamicRenderingLocalRead` the target moves to the feedback
-    layout and a by-region barrier precedes the draw; without them the pass restarts behind a full barrier
+    layout and a by-region barrier precedes the draw; without them the pass restarts behind a barrier
     (`AC_FEEDBACK`). **Fixed.**
 11. **Border colours.** `vk_texture.c` `make_sampler`: custom colour only with `customBorderColorWithoutFormat`, else transparent
     black; integer formats use the float path. Confirm the RX 9070 reports the feature (grass map needs 0.5).
