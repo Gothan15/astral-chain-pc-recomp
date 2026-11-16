@@ -4,7 +4,8 @@
 // system's back end (input_wsys.h: input_win.c with Win32, input_sdl.c with SDL), which also owns the cursor capture.
 // Keys and their map: docs/controls.md.
 // The gamepad also rumbles (input_rumble) and, when it has a gyro and an accelerometer, feeds the six-axis sensor from a
-// thread of its own (input_motion_start). Every SDL call on the gamepad is made under `lock`.
+// thread of its own (input_motion_start). Every SDL call on the gamepad is made under `lock`. In co-op (input_players)
+// a second gamepad is opened and each player reads its own sources (player_pad).
 #include <math.h>
 #include <stdint.h>
 #include <stdlib.h>
@@ -39,6 +40,14 @@ static volatile int32_t pad_kind_shown = PAD_KIND_NONE;   // the open gamepad's 
 static SDL_JoystickID sensor_pad;    // the gamepad whose sensors the motion thread set up, 0 none
 static int sensor_ok;                // ... and it has both sensors, enabled
 static int motion_thread;            // 0 not started, 1 running, -1 off (AC_MOTION=0, no SDL)
+// Co-op (input_players): the number of players the game has, and a second gamepad, opened only while it has two. pad
+// stays the first gamepad (the menu's, the solo controller's, the motion thread's); when it goes away pad2 takes its
+// place. The keyboard and the mouse go to the first player without a gamepad (player_pad).
+static int players = 1;
+static SDL_Gamepad *pad2;
+static uint64_t next_scan2;
+static int pad2_rumble, pad2_east_a, pad2_kind, pad2_layout = -1;
+static unsigned pad2_layout_seen;
 
 // SDL buttons of the gamepad inputs (input_map.h PAD_*), by position; PAD_ZL and PAD_ZR are the triggers (axes).
 static const SDL_GamepadButton pad_sdl[PAD_COUNT] = {
@@ -58,9 +67,10 @@ static const SDL_GamepadButton pad_sdl[PAD_COUNT] = {
 // and its hold are milliseconds of the world clock (frame_step_world_us, game time since the loaded save's first
 // frame), so it lands at the same game time at any frame rate and load length. A timed event shorter than a frame is
 // applied once. In a script with timed lines (a recording) the untimed ones belong before the world clock: they stop
-// when it starts, as the load ends at another tick in each run.
+// when it starts, as the load ends at another tick in each run. "P2" before the button gives the line to co-op's
+// player 2 ("@40000 P2 A 200"); the others are player 1's, which is also the solo controller.
 // at, hold: ticks, or microseconds of the world clock when timed.
-typedef struct { uint64_t at, hold; int bit, stick, timed; int32_t x, y; int logged; char text[48]; } ScriptEv;
+typedef struct { uint64_t at, hold; int bit, stick, timed, player; int32_t x, y; int logged; char text[48]; } ScriptEv;
 static const struct { const char *name; int bit; } script_buttons[] = {
     {"A", B_A}, {"B", B_B}, {"X", B_X}, {"Y", B_Y}, {"LCLICK", B_STICK_L}, {"RCLICK", B_STICK_R}, {"L", B_L}, {"R", B_R},
     {"ZL", B_ZL}, {"ZR", B_ZR}, {"PLUS", B_PLUS}, {"MINUS", B_MINUS}, {"LEFT", B_LEFT}, {"UP", B_UP}, {"RIGHT", B_RIGHT}, {"DOWN", B_DOWN},
@@ -68,6 +78,7 @@ static const struct { const char *name; int bit; } script_buttons[] = {
 static ScriptEv *script_ev;
 static int script_n, script_state;   // 0 not loaded, 1 loaded
 static int script_mixed;             // the script has timed lines: its untimed ones end where the world clock starts
+static int script_p2;                // the script has lines for player 2: player 2 is connected in co-op
 
 static void script_load(void) {
     script_state = 1;
@@ -86,8 +97,15 @@ static void script_load(void) {
         int off = 0, timed = line[0] == '@';
         if (sscanf(line + timed, "%lf %31s%n", &at, name, &off) < 2 || at < 0) continue;
         off += timed;
+        int player = 0, more = 0;
+        if (!strcmp(name, "P1") || !strcmp(name, "P2")) {
+            player = name[1] - '1';
+            if (sscanf(line + off, "%31s%n", name, &more) < 1) continue;
+            off += more;
+        }
         double unit = timed ? 1000.0 : 1.0;   // ms to us, or presents
-        ScriptEv e = {.at = (uint64_t)(at * unit + 0.5), .hold = timed ? 66667 : 4, .bit = -1, .timed = timed};
+        ScriptEv e = {.at = (uint64_t)(at * unit + 0.5), .hold = timed ? 66667 : 4, .bit = -1, .timed = timed,
+                      .player = player};
         long a, b;
         double c;
         if (!strcmp(name, "LSTICK") || !strcmp(name, "RSTICK")) {
@@ -108,20 +126,24 @@ static void script_load(void) {
             script_ev = realloc(script_ev, (size_t)cap * sizeof *script_ev);
             if (!script_ev) { script_n = 0; fclose(f); return; }
         }
+        if (player) snprintf(e.text + strlen(e.text), sizeof e.text - strlen(e.text), " (player 2)");
         script_ev[script_n++] = e;
         script_mixed |= timed;
+        script_p2 |= player;
     }
     fclose(f);
-    rt_log("input: script %s, %d events", path, script_n);
+    rt_log("input: script %s, %d events%s", path, script_n, script_p2 ? ", some for co-op's player 2" : "");
 }
 
-static void script_apply(uint64_t *b, int32_t sl[2], int32_t sr[2]) {
+// player: 0 for the solo controller and co-op's player 1, 1 for player 2.
+static void script_apply(int player, uint64_t *b, int32_t sl[2], int32_t sr[2]) {
     if (!script_state) script_load();
     if (!script_n) return;
     uint64_t fr = __atomic_load_n(&gfx_counters.frames, __ATOMIC_RELAXED), tick = frame_step_ticks();
     int64_t w = frame_step_world_us();
     for (int i = 0; i < script_n; i++) {
         ScriptEv *e = &script_ev[i];
+        if (e->player != player) continue;
         if (e->timed ? w < 0 : script_mixed && w >= 0) continue;
         uint64_t now = e->timed ? (uint64_t)w : tick;
         if (now < e->at || (now >= e->at + e->hold && (e->logged || !e->timed))) continue;
@@ -330,8 +352,8 @@ static float stick_dead_get(int s) {
 }
 
 // One gamepad stick through the dead zone; SDL's Y grows downwards, the Switch's upwards.
-static void stick(SDL_GamepadAxis ax, SDL_GamepadAxis ay, float dead, int32_t out[2]) {
-    input_pad_stick(SDL_GetGamepadAxis(pad, ax), -(int32_t)SDL_GetGamepadAxis(pad, ay), dead, out);
+static void stick(SDL_Gamepad *g, SDL_GamepadAxis ax, SDL_GamepadAxis ay, float dead, int32_t out[2]) {
+    input_pad_stick(SDL_GetGamepadAxis(g, ax), -(int32_t)SDL_GetGamepadAxis(g, ay), dead, out);
 }
 
 // The prompts' kind of an open gamepad: the SDL type first, the face labels for a STANDARD pad that carries
@@ -352,7 +374,20 @@ static int kind_of(SDL_Gamepad *gamepad) {
     return PAD_KIND_NONE;
 }
 
-// Open the first gamepad when none is open or the open one went away; logs once per change.
+// Under lock: a gamepad other than `not`, opened, or NULL. SDL hands out the same handle for a gamepad opened twice.
+static SDL_Gamepad *open_other(SDL_Gamepad *not) {
+    SDL_JoystickID own = not ? SDL_GetGamepadID(not) : 0;
+    SDL_Gamepad *g = NULL;
+    int n = 0;
+    SDL_JoystickID *ids = SDL_GetGamepads(&n);
+    for (int i = 0; ids && i < n && !g; i++)
+        if (ids[i] != own) g = SDL_OpenGamepad(ids[i]);
+    SDL_free(ids);
+    return g;
+}
+
+// Open the first gamepad when none is open or the open one went away (co-op's second gamepad takes its place);
+// logs once per change.
 static void scan_pads(void) {
     if (pad && SDL_GamepadConnected(pad)) return;
     if (pad) {
@@ -362,10 +397,11 @@ static void scan_pads(void) {
         for (int i = 0; i < 4; i++) plat_xchg32(&pad_labels[i], PAD_LABEL_NONE);
         rt_log("input: gamepad disconnected");
     }
-    int n = 0;
-    SDL_JoystickID *ids = SDL_GetGamepads(&n);
-    for (int i = 0; ids && i < n && !pad; i++) pad = SDL_OpenGamepad(ids[i]);
-    SDL_free(ids);
+    if (pad2 && SDL_GamepadConnected(pad2)) {
+        pad = pad2, pad2 = NULL;
+        rt_log("input: the second gamepad becomes the first");
+    } else
+        pad = open_other(NULL);
     if (!pad) return;
     pad_rumble = SDL_GetBooleanProperty(SDL_GetGamepadProperties(pad), SDL_PROP_GAMEPAD_CAP_RUMBLE_BOOLEAN, false);
     pad_east_a = SDL_GetGamepadButtonLabel(pad, SDL_GAMEPAD_BUTTON_EAST) == SDL_GAMEPAD_BUTTON_LABEL_A;
@@ -389,6 +425,29 @@ static void scan_pads(void) {
     int motion = SDL_GamepadHasSensor(pad, SDL_SENSOR_GYRO) && SDL_GamepadHasSensor(pad, SDL_SENSOR_ACCEL);
     rt_log("input: gamepad \"%s\" (%s, %s, east button %s)", SDL_GetGamepadName(pad), pad_rumble ? "rumble" : "no rumble",
            motion ? "gyro and accelerometer" : "no motion sensors", pad_east_a ? "labelled A" : "not labelled A");
+}
+
+// Under lock, co-op: open a second gamepad when none is open or the open one went away; logs once per change.
+static void scan_pad2(void) {
+    if (pad2 && SDL_GamepadConnected(pad2)) return;
+    if (pad2) {
+        SDL_CloseGamepad(pad2), pad2 = NULL;
+        rt_log("input: second gamepad disconnected");
+    }
+    if (!pad || !(pad2 = open_other(pad))) return;
+    pad2_rumble = SDL_GetBooleanProperty(SDL_GetGamepadProperties(pad2), SDL_PROP_GAMEPAD_CAP_RUMBLE_BOOLEAN, false);
+    pad2_east_a = SDL_GetGamepadButtonLabel(pad2, SDL_GAMEPAD_BUTTON_EAST) == SDL_GAMEPAD_BUTTON_LABEL_A;
+    pad2_kind = kind_of(pad2);
+    pad2_layout = -1;
+    rt_log("input: second gamepad \"%s\" (%s, east button %s)", SDL_GetGamepadName(pad2),
+           pad2_rumble ? "rumble" : "no rumble", pad2_east_a ? "labelled A" : "not labelled A");
+}
+
+// Under lock, state 1: scan for gamepads that went away or arrived, at most once a second each.
+static void pads_scan(void) {
+    uint64_t ms = plat_now_ns() / 1000000u;
+    if ((!pad || !SDL_GamepadConnected(pad)) && ms >= next_scan) next_scan = ms + RESCAN_MS, scan_pads();
+    if (players > 1 && (!pad2 || !SDL_GamepadConnected(pad2)) && ms >= next_scan2) next_scan2 = ms + RESCAN_MS, scan_pad2();
 }
 
 // Under lock: the layout of the open gamepad, picked again when a setting or the gamepad changed; logs each change.
@@ -428,6 +487,16 @@ static int pad_layout_get(void) {
     }
     plat_xchg32(&pad_layout_shown, pad_layout);
     return pad_layout;
+}
+
+// The same for co-op's second gamepad, picked by the same rules (not logged: the first gamepad's line names the setting).
+static int pad2_layout_get(void) {
+    unsigned ver = cfg_version();
+    if (pad2_layout >= 0 && ver == pad2_layout_seen) return pad2_layout;
+    pad2_layout_seen = ver;
+    int forced = input_forced_layout();
+    pad2_layout = forced >= 0 ? forced : input_pad_layout_pick(cfg_value("AC_PAD_LAYOUT"), pad2_east_a, pad2_kind);
+    return pad2_layout;
 }
 
 // The AC_BIND_* values last applied, one per line; the tables are built again when one changes (the menu's remapping rows write
@@ -509,27 +578,55 @@ static void pick(int32_t *x, int32_t *y, int32_t kx, int32_t ky) {
     if (b > a) { *x = kx; *y = ky; }
 }
 
-// Under lock, state 1: the open gamepad's inputs by position (pd[PAD_*] != 0 held); 0 without a connected gamepad.
-static int pad_physical(uint8_t pd[PAD_COUNT]) {
-    if ((!pad || !SDL_GamepadConnected(pad)) && plat_now_ns() / 1000000u >= next_scan) { next_scan = plat_now_ns() / 1000000u + RESCAN_MS; scan_pads(); }
-    SDL_UpdateGamepads();
-    if (!pad || !SDL_GamepadConnected(pad)) return 0;
-    for (int p = PAD_SOUTH; p < PAD_ZL; p++) pd[p] = SDL_GetGamepadButton(pad, pad_sdl[p]);
-    pd[PAD_ZL] = SDL_GetGamepadAxis(pad, SDL_GAMEPAD_AXIS_LEFT_TRIGGER) > TRIGGER_ON;
-    pd[PAD_ZR] = SDL_GetGamepadAxis(pad, SDL_GAMEPAD_AXIS_RIGHT_TRIGGER) > TRIGGER_ON;
-    for (int p = PAD_ZR + 1; p < PAD_COUNT; p++) pd[p] = SDL_GetGamepadButton(pad, pad_sdl[p]);   // false without paddles
+// Under lock, state 1: gamepad g's inputs by position (pd[PAD_*] != 0 held); 0 without g connected. The caller has
+// updated the gamepads (pads_update).
+static int pad_buttons(SDL_Gamepad *g, uint8_t pd[PAD_COUNT]) {
+    if (!g || !SDL_GamepadConnected(g)) return 0;
+    for (int p = PAD_SOUTH; p < PAD_ZL; p++) pd[p] = SDL_GetGamepadButton(g, pad_sdl[p]);
+    pd[PAD_ZL] = SDL_GetGamepadAxis(g, SDL_GAMEPAD_AXIS_LEFT_TRIGGER) > TRIGGER_ON;
+    pd[PAD_ZR] = SDL_GetGamepadAxis(g, SDL_GAMEPAD_AXIS_RIGHT_TRIGGER) > TRIGGER_ON;
+    for (int p = PAD_ZR + 1; p < PAD_COUNT; p++) pd[p] = SDL_GetGamepadButton(g, pad_sdl[p]);   // false without paddles
     return 1;
 }
 
-// Under lock, state 1: the open gamepad's buttons (Switch bits after AC_PAD_LAYOUT and the AC_BIND_* lines) and
-// sticks; 0 without a connected gamepad.
-static int pad_read(uint64_t *b, int32_t sl[2], int32_t sr[2]) {
+static void pads_update(void) {
+    pads_scan();
+    SDL_UpdateGamepads();
+}
+
+// Under lock, state 1: the first gamepad's inputs by position; 0 without a connected gamepad.
+static int pad_physical(uint8_t pd[PAD_COUNT]) {
+    pads_update();
+    return pad_buttons(pad, pd);
+}
+
+// Under lock, state 1, after pads_update: gamepad g's buttons (Switch bits after AC_PAD_LAYOUT and the AC_BIND_* lines)
+// and sticks; 0 without g connected.
+static int pad_read_of(SDL_Gamepad *g, uint64_t *b, int32_t sl[2], int32_t sr[2]) {
     uint8_t pd[PAD_COUNT] = {0};
-    if (!pad_physical(pd)) return 0;
-    *b |= input_map_pad_buttons(pd, pad_layout_get());
-    stick(SDL_GAMEPAD_AXIS_LEFTX, SDL_GAMEPAD_AXIS_LEFTY, stick_dead_get(0), sl);
-    stick(SDL_GAMEPAD_AXIS_RIGHTX, SDL_GAMEPAD_AXIS_RIGHTY, stick_dead_get(1), sr);
+    if (!pad_buttons(g, pd)) return 0;
+    *b |= input_map_pad_buttons(pd, g == pad ? pad_layout_get() : pad2_layout_get());
+    stick(g, SDL_GAMEPAD_AXIS_LEFTX, SDL_GAMEPAD_AXIS_LEFTY, stick_dead_get(0), sl);
+    stick(g, SDL_GAMEPAD_AXIS_RIGHTX, SDL_GAMEPAD_AXIS_RIGHTY, stick_dead_get(1), sr);
     return 1;
+}
+
+// Under lock, state 1: the first gamepad's buttons and sticks; 0 without a connected gamepad.
+static int pad_read(uint64_t *b, int32_t sl[2], int32_t sr[2]) {
+    pads_update();
+    return pad_read_of(pad, b, sl, sr);
+}
+
+// Under lock, co-op: player p's gamepad (NULL for none) and in *kb whether the keyboard and the mouse are theirs. The
+// gamepads take the players in order (pad, then pad2), the keyboard the first player without one, or player 1 when
+// both have one. Off (state <= 0, AC_INPUT=none): nothing.
+static SDL_Gamepad *player_pad(int p, int *kb) {
+    SDL_Gamepad *g[2];
+    int n = 0;
+    if (state == 1 && pad && SDL_GamepadConnected(pad)) g[n++] = pad;
+    if (state == 1 && pad2 && SDL_GamepadConnected(pad2)) g[n++] = pad2;
+    *kb = state > 0 && p == (n < 2 ? n : 0);
+    return p < n ? g[p] : NULL;
 }
 
 int input_pad_stick_percent(double pct[2]) {
@@ -547,51 +644,70 @@ int input_pad_stick_percent(double pct[2]) {
     return ok;
 }
 
-static void poll_merged(uint64_t *buttons, int32_t *lx, int32_t *ly, int32_t *rx, int32_t *ry) {
+// Under lock, the window in front: the keyboard's and the mouse's buttons and sticks ORed and picked into b, sl, sr.
+static void kb_read(uint64_t *b, int32_t sl[2], int32_t sr[2]) {
+    uint8_t down[KEY_COUNT] = {0};
+    // Mouse buttons count only while the cursor is captured, and a button already held when the capture began
+    // (the click that refocused the window) is ignored until it is released.
+    static int was_captured;
+    static uint8_t mouse_ignore[KEY_COUNT];
+    int cap = ikb_captured();
+    for (int k = 1; k < KEY_COUNT; k++) {
+        down[k] = ikb_down(k);
+        if (k < KEY_MOUSE_L || k > KEY_MOUSE_X2) continue;
+        if (cap && !was_captured) mouse_ignore[k] = down[k];
+        if (!down[k]) mouse_ignore[k] = 0;
+        if (!cap || mouse_ignore[k]) down[k] = 0;
+    }
+    was_captured = cap;
+    *b |= input_map_buttons(down);
+    int32_t k[2];
+    walk_get();
+    int walk = walk_key != KEY_NONE && down[walk_key];
+    input_map_stick(down, 0, k);
+    if (walk) k[0] = (int32_t)(k[0] * walk_scale), k[1] = (int32_t)(k[1] * walk_scale);
+    pick(&sl[0], &sl[1], k[0], k[1]);
+    input_map_stick(down, 1, k);
+    if (walk) k[0] = (int32_t)(k[0] * walk_scale), k[1] = (int32_t)(k[1] * walk_scale);
+    pick(&sr[0], &sr[1], k[0], k[1]);
+    mouse_camera(k);
+    pick(&sr[0], &sr[1], k[0], k[1]);
+}
+
+// who: -1 the solo controller (the first gamepad, the keyboard and the mouse merged), 0 or 1 a co-op player
+// (player_pad). The recording follows the solo controller, or player 1 in co-op.
+static void poll_merged(int who, uint64_t *buttons, int32_t *lx, int32_t *ly, int32_t *rx, int32_t *ry) {
     uint64_t b = 0;
     int32_t sl[2] = {0, 0}, sr[2] = {0, 0};
     plat_mutex_lock(&lock);
     if (!state) start();
     if (state > 0) {
         binds_refresh();
-        if (state == 1) pad_read(&b, sl, sr);
-        if (ikb_foreground()) {
-            uint8_t down[KEY_COUNT] = {0};
-            // Mouse buttons count only while the cursor is captured, and a button already held when the capture began
-            // (the click that refocused the window) is ignored until it is released.
-            static int was_captured;
-            static uint8_t mouse_ignore[KEY_COUNT];
-            int cap = ikb_captured();
-            for (int k = 1; k < KEY_COUNT; k++) {
-                down[k] = ikb_down(k);
-                if (k < KEY_MOUSE_L || k > KEY_MOUSE_X2) continue;
-                if (cap && !was_captured) mouse_ignore[k] = down[k];
-                if (!down[k]) mouse_ignore[k] = 0;
-                if (!cap || mouse_ignore[k]) down[k] = 0;
-            }
-            was_captured = cap;
-            b |= input_map_buttons(down);
-            int32_t k[2];
-            walk_get();
-            int walk = walk_key != KEY_NONE && down[walk_key];
-            input_map_stick(down, 0, k);
-            if (walk) k[0] = (int32_t)(k[0] * walk_scale), k[1] = (int32_t)(k[1] * walk_scale);
-            pick(&sl[0], &sl[1], k[0], k[1]);
-            input_map_stick(down, 1, k);
-            if (walk) k[0] = (int32_t)(k[0] * walk_scale), k[1] = (int32_t)(k[1] * walk_scale);
-            pick(&sr[0], &sr[1], k[0], k[1]);
-            mouse_camera(k);
-            pick(&sr[0], &sr[1], k[0], k[1]);
+        if (state == 1) pads_update();
+        int kb = who < 0;
+        SDL_Gamepad *g = who < 0 ? pad : player_pad(who, &kb);
+        if (state == 1 && pad_read_of(g, &b, sl, sr) && who >= 0) {
+            // Co-op draws its prompts as places on a Joy-Con held sideways (a dot among four), never as letters, so a
+            // co-op player's face buttons go by place: the swaps of the Xbox layout (A with B, X with Y) and of the
+            // PlayStation one (A with B) are taken back.
+            int layout = g == pad ? pad_layout_get() : pad2_layout_get();
+            uint64_t ab = layout != PAD_LAYOUT_NINTENDO ? 1ull << B_A | 1ull << B_B : 0;
+            uint64_t xy = layout == PAD_LAYOUT_XBOX ? 1ull << B_X | 1ull << B_Y : 0;
+            if ((b & ab) && (b & ab) != ab) b ^= ab;
+            if ((b & xy) && (b & xy) != xy) b ^= xy;
         }
+        if (kb && ikb_foreground()) kb_read(&b, sl, sr);
     }
-    script_apply(&b, sl, sr);
-    rec_apply(b, sl, sr);
-    // Minus and Plus held together (gamepad or keys) open or close the menu and never reach the game
-    static int combo_held, overlay_held;
+    script_apply(who > 0, &b, sl, sr);
+    if (who == (players > 1 ? 0 : -1)) rec_apply(b, sl, sr);
+    // Minus and Plus held together (gamepad or keys) open or close the menu and never reach the game; each source of
+    // polls keeps its own memory of the chord
+    static int combo_held_of[3], overlay_held_of[3];
+    int *combo = &combo_held_of[who + 1], *overlay_held = &overlay_held_of[who + 1];
     int32_t st[4] = {sl[0], sl[1], sr[0], sr[1]};
     // L+R+Minus+Plus step the performance overlay (F10); checked first, so it takes Minus and Plus from the menu's chord
-    int overlay = combo_held ? 0 : input_overlay_gate(&overlay_held, &b);
-    int toggle = input_menu_gate(&combo_held, menu_is_open(), &b, st);
+    int overlay = *combo ? 0 : input_overlay_gate(overlay_held, &b);
+    int toggle = input_menu_gate(combo, menu_is_open(), &b, st);
     sl[0] = st[0], sl[1] = st[1], sr[0] = st[2], sr[1] = st[3];
     plat_mutex_unlock(&lock);
     if (toggle) menu_toggle();
@@ -636,7 +752,7 @@ static int blocked(volatile int32_t *flag, uint64_t buttons, const int32_t *axes
 }
 
 void input_poll(uint64_t *buttons, int32_t *lx, int32_t *ly, int32_t *rx, int32_t *ry) {
-    poll_merged(buttons, lx, ly, rx, ry);
+    poll_merged(-1, buttons, lx, ly, rx, ry);
     const int32_t axes[4] = {*lx, *ly, *rx, *ry};
     int text = blocked(&g_block, *buttons, axes), menu = blocked(&g_menu, *buttons, axes);
     if (!text && !menu) return;
@@ -644,7 +760,44 @@ void input_poll(uint64_t *buttons, int32_t *lx, int32_t *ly, int32_t *rx, int32_
 }
 
 void input_poll_ui(uint64_t *buttons, int32_t *lx, int32_t *ly, int32_t *rx, int32_t *ry) {
-    poll_merged(buttons, lx, ly, rx, ry);
+    poll_merged(-1, buttons, lx, ly, rx, ry);
+}
+
+void input_players(int n) {
+    n = n > 1 ? 2 : 1;
+    plat_mutex_lock(&lock);
+    if (n != players) {
+        players = n;
+        next_scan2 = 0;
+        if (n == 1 && pad2) SDL_CloseGamepad(pad2), pad2 = NULL;
+        rt_log("input: %s", n > 1 ? "two players (co-op): gamepads in order, the keyboard and the mouse to the first "
+                                    "player without one" : "one player again: the first gamepad, the keyboard and the mouse");
+    }
+    plat_mutex_unlock(&lock);
+}
+
+unsigned input_players_connected(void) {
+    plat_mutex_lock(&lock);
+    if (!state) start();
+    if (state == 1) pads_scan();
+    if (!script_state) script_load();
+    int kb;
+    unsigned m = 1u | (player_pad(1, &kb) || kb || script_p2 ? 2u : 0u);   // player 1 is the solo controller: always there
+    plat_mutex_unlock(&lock);
+    return m;
+}
+
+// Player 1 lifts the text entry's and the menu's block (input_poll); player 2 reads nothing while either is set.
+int input_poll_player(int player, uint64_t *buttons, int32_t *lx, int32_t *ly, int32_t *rx, int32_t *ry) {
+    int on = (int)(input_players_connected() >> (player & 1) & 1);
+    *buttons = 0, *lx = *ly = *rx = *ry = 0;
+    if (!on) return 0;
+    poll_merged(player & 1, buttons, lx, ly, rx, ry);
+    const int32_t axes[4] = {*lx, *ly, *rx, *ry};
+    int stop = player & 1 ? g_block || g_menu
+                          : blocked(&g_block, *buttons, axes) | blocked(&g_menu, *buttons, axes);
+    if (stop) *buttons = 0, *lx = *ly = *rx = *ry = 0;
+    return 1;
 }
 
 int input_pad_read(uint64_t *buttons, int32_t *lx, int32_t *ly) {
@@ -775,6 +928,21 @@ int input_rumble(uint16_t low, uint16_t high, uint32_t ms) {
     if (state == 1 && pad && pad_rumble) {
         ok = SDL_RumbleGamepad(pad, low, high, ms);
         if (triggers) SDL_RumbleGamepadTriggers(pad, high, high, ms);   // unsupported pads return false: ignored
+    }
+    plat_mutex_unlock(&lock);
+    return ok;
+}
+
+int input_rumble_player(int player, uint16_t low, uint16_t high, uint32_t ms) {
+    int ok = 0, kb;
+    static int triggers = -1;
+    static unsigned seen;
+    if (triggers < 0 || seen != cfg_version()) seen = cfg_version(), triggers = input_rumble_triggers_enabled();
+    plat_mutex_lock(&lock);
+    SDL_Gamepad *g = player_pad(player & 1, &kb);
+    if (g && (g == pad ? pad_rumble : pad2_rumble)) {
+        ok = SDL_RumbleGamepad(g, low, high, ms);
+        if (triggers) SDL_RumbleGamepadTriggers(g, high, high, ms);
     }
     plat_mutex_unlock(&lock);
     return ok;

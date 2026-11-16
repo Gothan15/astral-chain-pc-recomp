@@ -118,10 +118,14 @@ static Ov ovs[] = {
     {"hid.GetNpadStates.JoyLeft", "_ZN2nn3hid13GetNpadStatesEPNS0_16NpadJoyLeftStateEiRKj"},
     {"hid.GetNpadStates.JoyRight", "_ZN2nn3hid13GetNpadStatesEPNS0_17NpadJoyRightStateEiRKj"},
     {"hid.GetNpadStates.Handheld", "_ZN2nn3hid13GetNpadStatesEPNS0_17NpadHandheldStateEiRKj"},
+    {"hid.GetNpadState.FullKey", "_ZN2nn3hid12GetNpadStateEPNS0_16NpadFullKeyStateERKj"},
+    {"hid.GetNpadState.JoyLeft", "_ZN2nn3hid12GetNpadStateEPNS0_16NpadJoyLeftStateERKj"},
+    {"hid.GetNpadState.JoyRight", "_ZN2nn3hid12GetNpadStateEPNS0_17NpadJoyRightStateERKj"},
     {"hid.SetNpadJoyHoldType", "_ZN2nn3hid18SetNpadJoyHoldTypeENS0_15NpadJoyHoldTypeE"},
     {"hid.DisconnectNpad", "_ZN2nn3hid14DisconnectNpadERKj"},
     {"hid.ShowControllerSupport",
      "_ZN2nn3hid21ShowControllerSupportEPNS0_27ControllerSupportResultInfoERKNS0_20ControllerSupportArgE"},
+    {"hid.ShowControllerSupport.NoResult", "_ZN2nn3hid21ShowControllerSupportERKNS0_20ControllerSupportArgE"},
     {"hid.InitializeMouse", "_ZN2nn3hid15InitializeMouseEv"},
     {"hid.InitializeKeyboard", "_ZN2nn3hid18InitializeKeyboardEv"},
     {"hid.GetMouseStates", "_ZN2nn3hid14GetMouseStatesEPNS0_10MouseStateEi"},
@@ -594,6 +598,39 @@ static void probe_feedback(uint32_t pid, uint32_t style) {
            vh[0], vh[1], sh[0], quarter);
 }
 
+// Co-op as the game sets it up (main+0x9afb10): ids {player 1, player 2}, styles handheld | left | right Joy-Con, then
+// the controller applet for two players. Player 1 is a right Joy-Con, player 2 a left one while it has a source (a
+// gamepad or the keyboard, input_players_connected); the applet succeeds only with both. Back to the solo setup after.
+static void probe_coop(uint32_t pid, uint32_t style) {
+    uint32_t ids[2] = {0, 1}, solo[2] = {0, 0x20}, p[3] = {0, 1, 2};
+    CALL("hid.SetSupportedNpadIdType", U(ids), 2);
+    CALL("hid.SetSupportedNpadStyleSet", 0x1a);
+    unsigned m = input_players_connected();
+    uint32_t s[3];
+    for (int i = 0; i < 3; i++) s[i] = (uint32_t)CALL("hid.GetNpadStyleSet", U(&p[i]));
+    CHECK(s[0] == 0x10 && s[1] == (m & 2 ? 8u : 0) && s[2] == 0,
+          "co-op style sets: players 1-3 %#x %#x %#x (players with a source %#x)", s[0], s[1], s[2], m);
+    uint8_t st[40];
+    uint32_t attr[3];
+    CALL("hid.GetNpadState.JoyRight", U(st), U(&p[0]));
+    memcpy(&attr[0], st + 32, 4);
+    CALL("hid.GetNpadState.FullKey", U(st), U(&p[0]));
+    memcpy(&attr[1], st + 32, 4);
+    CALL("hid.GetNpadState.JoyLeft", U(st), U(&p[0]));
+    memcpy(&attr[2], st + 32, 4);
+    CHECK(attr[0] == 0x11 && attr[1] == 0 && attr[2] == 0,
+          "co-op player 1: right Joy-Con attributes %#x, full-key %#x, left Joy-Con %#x", attr[0], attr[1], attr[2]);
+    uint8_t arg[0x80] = {2, 2};
+    uint32_t r = (uint32_t)CALL("hid.ShowControllerSupport.NoResult", U(arg));
+    CHECK(__builtin_popcount(m) >= 2 ? r == 0 : r == 0x183aca, "co-op controller applet: %#x with players %#x", r, m);
+    CALL("hid.SetSupportedNpadIdType", U(solo), 2);
+    CALL("hid.SetSupportedNpadStyleSet", 7);
+    CHECK((uint32_t)CALL("hid.GetNpadStyleSet", U(&pid)) == style && (uint32_t)CALL("hid.GetNpadStyleSet", U(&p[1])) == 0,
+          "solo again after co-op");
+    printf("hid co-op: player 1 a right Joy-Con, player 2 %s, applet %s, solo again after\n",
+           m & 2 ? "a left Joy-Con" : "without a source", r ? "cancelled" : "accepted");
+}
+
 static void probe_input(void) {
     uint32_t pid = ov_handheld() ? 0x20 : 0, other = ov_handheld() ? 0 : 0x20, ids[2] = {0, 0x20};
     uint32_t style = ov_handheld() ? 2 : 1;
@@ -629,6 +666,7 @@ static void probe_input(void) {
     CHECK((int32_t)CALL("hid.GetMouseStates", U(mouse), 1) == 1, "mouse states");
     CALL("hid.GetKeyboardState", U(kb));
     probe_feedback(pid, style);
+    probe_coop(pid, style);
     CALL("hid.DisconnectNpad", U(&pid));
     CHECK((uint32_t)CALL("hid.GetNpadStyleSet", U(&pid)) == 0, "a disconnected controller keeps its style set");
     printf("hid: one connected %s controller (id %#x), no buttons, no mouse/keyboard input\n",

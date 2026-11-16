@@ -10,6 +10,15 @@ void input_poll(uint64_t *buttons, int32_t *lx, int32_t *ly, int32_t *rx, int32_
 // reports nothing; input_block(0) when it closes: nothing until all buttons and stick directions are released.
 void input_poll_ui(uint64_t *buttons, int32_t *lx, int32_t *ly, int32_t *rx, int32_t *ry);
 void input_block(int on);
+// Co-op (ov_input.c): input_players(2) while the game plays with two players, (1) when it goes back to one. With two,
+// a second gamepad is opened and each player reads its own sources: the gamepads take the players in the order they
+// were opened, the keyboard and the mouse the first player without a gamepad (player 1 when both have one). Under
+// AC_INPUT=none the script feeds the players (its "P2" lines player 2). input_players_connected: bit p for each player
+// with a source now. input_poll_player: player 0 or 1, the same bits and sticks as input_poll (also blocked by the text
+// entry and the menu); 0 and nothing pressed for a player without a source. Any thread.
+void input_players(int n);
+unsigned input_players_connected(void);
+int input_poll_player(int player, uint64_t *buttons, int32_t *lx, int32_t *ly, int32_t *rx, int32_t *ry);
 // The in-game menu (ui/menu.h): input_menu(1) when it opens (input_poll reports nothing, the cursor is released), (0) when
 // it closes (nothing until every button and stick direction is released). Independent of input_block.
 void input_menu(int open);
@@ -68,6 +77,8 @@ int input_cursor_released(void);   // Esc or a non-client activation released th
 // Rumble: SDL_RumbleGamepad on the open gamepad, low (heavy, left) and high (light, right) motor 0..65535 for ms
 // milliseconds. 1 if a gamepad with rumble took it. Callable from any thread.
 int input_rumble(uint16_t low, uint16_t high, uint32_t ms);
+// The same on co-op player 0 or 1's gamepad (input_players); 0 for a player on the keyboard.
+int input_rumble_player(int player, uint16_t low, uint16_t high, uint32_t ms);
 // Motor value for a normalised amplitude: pow(a, curve) * strength, saturated to 0..65535. Pure.
 uint16_t rumble_motor(float a, float curve, float strength);
 // AC_RUMBLE_TRIGGERS=1: input_rumble also drives the impulse triggers (Xbox) with the high motor's value.
