@@ -10,6 +10,7 @@
 //     --probe-nvn, --probe-nvn-tex, --probe-window, --probe-shader, --probe-vkmem, --probe-vkexec    graphics probes
 //     --probe-astc      the compute ASTC decoder against astc_decode_ldr; needs no game files
 //     --probe-xess      Intel XeSS (vk_xess.c) once on synthetic images; passes when libxess.dll is absent
+//     --probe-latency   the low-latency back end (vk_lowlat.c) on a synthetic 60 Hz game, without a window
 //     --boot            run the game to the first NVN call
 //     --seconds S       run the game (implies --boot's start-up) until the world clock (game time since the loaded
 //                       save's first frame) passed S seconds, then exit 0 at that present
@@ -135,13 +136,13 @@ static void parse_trace(void) {
     static const struct { const char *name; unsigned bit; } names[] = {
         {"svc", RT_TRACE_SVC}, {"host", RT_TRACE_HOSTCALL}, {"ipc", RT_TRACE_IPC}, {"fs", RT_TRACE_FS},
         {"gfx", RT_TRACE_GFX}, {"perf", RT_TRACE_PERF}, {"sched", RT_TRACE_SCHED}, {"audio", RT_TRACE_AUDIO},
-        {"present", RT_TRACE_PRESENT}, {"dirty", RT_TRACE_DIRTY}, {"all", ~0u}};
+        {"present", RT_TRACE_PRESENT}, {"dirty", RT_TRACE_DIRTY}, {"latency", RT_TRACE_LATENCY}, {"all", ~0u}};
     for (const char *p = e; *p;) {
         size_t n = strcspn(p, ",");
         int known = 0;
         for (unsigned i = 0; i < sizeof names / sizeof *names; i++)
             if (strlen(names[i].name) == n && !strncmp(p, names[i].name, n)) rt_trace |= names[i].bit, known = 1;
-        if (!known && n) rt_log("AC_TRACE: unknown item '%.*s' (svc, host, ipc, fs, gfx, perf, sched, audio, present, dirty, all)", (int)n, p);
+        if (!known && n) rt_log("AC_TRACE: unknown item '%.*s' (svc, host, ipc, fs, gfx, perf, sched, audio, present, dirty, latency, all)", (int)n, p);
         p += n + (p[n] == ',');
     }
 }
@@ -460,7 +461,7 @@ static int usage(const char *argv0) {
     fprintf(stderr, "usage: %s [--exefs DIR] [--romfs DIR] [--profile DIR] [--selftest | --probe-loader | "
                     "--probe-cfg | --probe-dpi | --probe-mods | --probe-kernel | --probe-ipc | --probe-services | --probe-fs | --probe-gfx-abi | "
                     "--probe-nvn | --probe-nvn-tex | --probe-window | --probe-shader | --probe-vkmem | "
-                    "--probe-vkexec | --probe-astc | --prepare-shaders | --warm-shaders | --boot |--seconds S [--shot PNG]]\n", argv0);
+                    "--probe-vkexec | --probe-astc | --probe-latency | --prepare-shaders | --warm-shaders | --boot |--seconds S [--shot PNG]]\n", argv0);
     return 2;
 }
 
@@ -581,6 +582,7 @@ int main(int argc, char **argv) {
     if (!strcmp(mode, "--probe-astc")) return probe_astc();
     if (!strcmp(mode, "--probe-vkdevice")) return probe_vkdevice();
     if (!strcmp(mode, "--probe-xess")) return probe_xess();
+    if (!strcmp(mode, "--probe-latency")) return probe_latency();
     if (!strcmp(mode, "--prepare-shaders")) return vk_pipeline_prepare_shaders();
     if (!strcmp(mode, "--warm-shaders")) return vk_pipeline_warm_shaders();
     if (!strcmp(mode, "--boot")) { cfg.boot = 1; rt_boot(); return 0; }

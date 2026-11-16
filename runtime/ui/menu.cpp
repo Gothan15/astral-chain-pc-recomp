@@ -63,6 +63,7 @@ void cheats_frame(uint64_t frame);   // cheats.c
 extern "C" int vk_dlaa_choice_state(const char *up);   // vk_dlaa.h: 0 runs, 1 after restart, 2 not available
 extern "C" const char *vk_dlaa_upscaler_name(void);     // vk_dlaa.h: the upscaler that runs for the setting, or NULL
 extern "C" const char *vk_dlaa_running(void);           // vk_dlaa.h: the upscaler's name while it runs, NULL when off
+extern "C" int vk_lowlat_backend(void);                 // vk.h: 0 off, 1 Reflex, 2 Anti-Lag 2, 3 built-in
 bool tab_cheats(float scale);        // ui/cheats_tab.cpp; true: restart into the rebuild
 }
 
@@ -671,6 +672,16 @@ static const char *present_note(void) {
     return note;
 }
 
+// "in use: NVIDIA Reflex" under the Low latency value: the back end that runs (vk_lowlat.c), none while it is off.
+static const char *low_latency_note(void) {
+    static const char *const names[] = {nullptr, "NVIDIA Reflex", "AMD Anti-Lag 2", nullptr};
+    int b = vk_lowlat_backend();
+    if (b <= 0 || b > 3) return nullptr;
+    static char note[96];
+    snprintf(note, sizeof note, menu_text(UI_MENU_PRESENT_IN_USE), names[b] ? names[b] : menu_text(UI_MENU_LOW_LATENCY_BUILTIN));
+    return note;
+}
+
 // ---- the tabs
 // Colour adjustment (vk_color.c): a profile writes the four values (STS78721's presets, issue #136); moving one of them
 // makes the profile Custom.
@@ -707,6 +718,8 @@ static void tab_screen(float scale) {
     row_window_size();
     static const UiTextId present[] = {UI_MENU_PRESENT_MAILBOX, UI_MENU_PRESENT_VSYNC, UI_MENU_PRESENT_IMMEDIATE};
     opt_choice("AC_VK_PRESENT", UI_MENU_PRESENT, present, 3, UI_MENU_PRESENT_DESC, present_note());
+    static const UiTextId lowlat[] = {UI_MENU_LOW_LATENCY_OFF, UI_MENU_LOW_LATENCY_ON, UI_MENU_LOW_LATENCY_BOOST};
+    opt_choice("AC_LOW_LATENCY", UI_MENU_LOW_LATENCY, lowlat, 3, UI_MENU_LOW_LATENCY_DESC, low_latency_note());
     row_gpu();
     static const UiTextId perf[] = {UI_MENU_PERF_OFF, UI_MENU_PERF_FPS, UI_MENU_PERF_FULL};
     opt_choice("AC_PERF_OVERLAY", UI_MENU_PERF_OVERLAY, perf, 3, UI_MENU_PERF_OVERLAY_DESC);

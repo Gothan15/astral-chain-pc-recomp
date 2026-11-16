@@ -43,6 +43,13 @@ static const char *const text_en[UI_TEXT_COUNT] = {
     [UI_MENU_PRESENT] = "Presentation", [UI_MENU_PRESENT_DESC] = "How finished frames reach the screen.",
     [UI_MENU_PRESENT_MAILBOX] = "Mailbox", [UI_MENU_PRESENT_VSYNC] = "VSync", [UI_MENU_PRESENT_IMMEDIATE] = "Immediate",
     [UI_MENU_PRESENT_IN_USE] = "in use: %s",
+    [UI_MENU_LOW_LATENCY] = "Low latency",
+    [UI_MENU_LOW_LATENCY_DESC] = "Starts each frame as late as it can still be shown on time, so the picture answers the "
+                                 "controls sooner. Uses NVIDIA Reflex or AMD Anti-Lag 2 when the driver offers them, the "
+                                 "port's own timing otherwise. Boost: with Reflex the GPU also keeps its clocks up; "
+                                 "otherwise shorter waits, with a dropped frame now and then.",
+    [UI_MENU_LOW_LATENCY_OFF] = "Off", [UI_MENU_LOW_LATENCY_ON] = "On", [UI_MENU_LOW_LATENCY_BOOST] = "Boost",
+    [UI_MENU_LOW_LATENCY_BUILTIN] = "built-in timing",
     [UI_MENU_GPU] = "Graphics card", [UI_MENU_GPU_DESC] = "The Vulkan device that draws the game.",
     [UI_MENU_GPU_AUTO] = "Automatic",
     [UI_MENU_PERF_OVERLAY] = "Performance overlay",
@@ -443,6 +450,13 @@ static const char *const text_ru[UI_TEXT_COUNT] = {
     [UI_MENU_PRESENT_MAILBOX] = "Mailbox", [UI_MENU_PRESENT_VSYNC] = "Вертикальная синхронизация",
     [UI_MENU_PRESENT_IMMEDIATE] = "Без ожидания",
     [UI_MENU_PRESENT_IN_USE] = "сейчас: %s",
+    [UI_MENU_LOW_LATENCY] = "Низкая задержка",
+    [UI_MENU_LOW_LATENCY_DESC] = "Каждый кадр начинается как можно позже, но всё ещё успевает к показу, поэтому картинка "
+                                 "быстрее отвечает на управление. Использует NVIDIA Reflex или AMD Anti-Lag 2, если их "
+                                 "предлагает драйвер, иначе собственную синхронизацию порта. Усиление: с Reflex "
+                                 "видеокарта ещё и держит высокие частоты; иначе ожидание короче, но иногда теряется кадр.",
+    [UI_MENU_LOW_LATENCY_OFF] = "Выкл.", [UI_MENU_LOW_LATENCY_ON] = "Вкл.", [UI_MENU_LOW_LATENCY_BOOST] = "Усиление",
+    [UI_MENU_LOW_LATENCY_BUILTIN] = "встроенная синхронизация",
     [UI_MENU_GPU] = "Видеокарта", [UI_MENU_GPU_DESC] = "Устройство Vulkan, которое рисует игру.",
     [UI_MENU_GPU_AUTO] = "Автоматически",
     [UI_MENU_PERF_OVERLAY] = "Индикатор производительности",
@@ -872,6 +886,14 @@ static const char *const text_pt_br[UI_TEXT_COUNT] = {
     [UI_MENU_PRESENT] = "Apresentação", [UI_MENU_PRESENT_DESC] = "Como os quadros prontos chegam à tela.",
     [UI_MENU_PRESENT_MAILBOX] = "Mailbox", [UI_MENU_PRESENT_VSYNC] = "VSync", [UI_MENU_PRESENT_IMMEDIATE] = "Imediato",
     [UI_MENU_PRESENT_IN_USE] = "em uso: %s",
+    [UI_MENU_LOW_LATENCY] = "Baixa latência",
+    [UI_MENU_LOW_LATENCY_DESC] = "Começa cada quadro o mais tarde possível ainda a tempo de ser exibido, para a imagem "
+                                 "responder antes aos controles. Usa NVIDIA Reflex ou AMD Anti-Lag 2 quando o driver os "
+                                 "oferece; senão, o controle de tempo do próprio port. Turbo: com Reflex a GPU também "
+                                 "mantém o clock alto; nos outros casos, esperas mais curtas, com um quadro perdido de vez "
+                                 "em quando.",
+    [UI_MENU_LOW_LATENCY_OFF] = "Desligado", [UI_MENU_LOW_LATENCY_ON] = "Ligado", [UI_MENU_LOW_LATENCY_BOOST] = "Turbo",
+    [UI_MENU_LOW_LATENCY_BUILTIN] = "controle integrado",
     [UI_MENU_GPU] = "Placa de vídeo", [UI_MENU_GPU_DESC] = "O dispositivo Vulkan que desenha o jogo.",
     [UI_MENU_GPU_AUTO] = "Automática",
     [UI_MENU_PERF_OVERLAY] = "Indicador de desempenho",
@@ -1312,6 +1334,12 @@ static const char *const text_zh_hans[UI_TEXT_COUNT] = {
     [UI_MENU_PRESENT_VSYNC] = "垂直同步",
     [UI_MENU_PRESENT_IMMEDIATE] = "立即",
     [UI_MENU_PRESENT_IN_USE] = "使用中：%s",
+    [UI_MENU_LOW_LATENCY] = "低延迟",
+    [UI_MENU_LOW_LATENCY_DESC] = "让每一帧尽可能晚地开始，同时仍能按时显示，使画面更快响应操作。驱动提供时使用 "
+                                 "NVIDIA Reflex 或 AMD Anti-Lag 2，否则使用移植版自带的计时。加强：使用 Reflex "
+                                 "时显卡还会保持高频率；其他情况下等待更短，偶尔会丢一帧。",
+    [UI_MENU_LOW_LATENCY_OFF] = "关", [UI_MENU_LOW_LATENCY_ON] = "开", [UI_MENU_LOW_LATENCY_BOOST] = "加强",
+    [UI_MENU_LOW_LATENCY_BUILTIN] = "内置计时",
     [UI_MENU_GPU] = "显卡",
     [UI_MENU_GPU_DESC] = "用于渲染游戏的 Vulkan 设备。",
     [UI_MENU_GPU_AUTO] = "自动",

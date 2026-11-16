@@ -33,6 +33,8 @@ Report problems as issues, following [CONTRIBUTING.md](CONTRIBUTING.md).
   DLSS on RTX cards (with `nvngx_dlss.dll` next to `astralchain.exe`), Intel XeSS on most recent GPUs, AMD FSR 3 on any
   GPU; the HUD stays at full resolution
 - Anisotropic texture filtering up to 16x, for sharp ground into the distance
+- Low latency mode: NVIDIA Reflex or AMD Anti-Lag 2 where the driver offers them, the port's own frame timing on any
+  other GPU (Intel, Steam Deck); about a third less time from the controller to the screen at 60 fps, half at 30
 - In-game settings menu (F1) and performance overlay (F10)
 - No-HUD mode for screenshots and videos: F12 (or the menu's Game tab) hides the gauges, map, prompts and markers
   during play and shows them again; the menus stay

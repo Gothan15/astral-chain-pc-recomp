@@ -114,7 +114,7 @@ TOOLS_FILES = ['build_game.py', 'build_shaders.py', 'check_content.py', 'exefs_p
 TOOLS_DIRS = ['data']   # data/: the expected hashes of the base game and the update
 RUNTIME_SUFFIXES = {'.h', '.inc', '.ico'}   # .ico: the installer window icon
 
-PROBES = ['--probe-kernel', '--probe-vkexec', '--probe-nvn-tex', '--probe-shader', '--probe-xess']
+PROBES = ['--probe-kernel', '--probe-vkexec', '--probe-nvn-tex', '--probe-shader', '--probe-xess', '--probe-latency']
 
 
 def sha256_file(path):

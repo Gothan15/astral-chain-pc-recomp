@@ -41,6 +41,7 @@ typedef struct {
     int presharp;           // the upscaled scene was sharpened before the HUD (vk_dlaa.c): the present copies it
     float shape;            // the shape the frame is shown in (resolution.c res_wide_tick), 0 for the picture's own
     uint64_t frame, at, queued, value;
+    uint64_t lid;           // the low-latency frame it shows (vk_lowlat.c), 0 when they are not followed
 } PresentJob;
 
 static PlatMutex pl = PLAT_MUTEX_INIT;
@@ -67,6 +68,8 @@ static void present_main(void *arg) {
         plat_cond_broadcast(&pcv);
         plat_mutex_unlock(&pl);
         if (flight_on) vk_thumbs_frame(j.frame);
+        vk_present_frame_id(j.lid);                  // the blit's present, and the submission after it, are the frame's
+        vk_lowlat_submit_frame(j.lid);
         vk_hdr_set_scene(j.scene, j.scene_format);   // read by the HDR encode in this blit
         vk_fsr_presharp_set(j.presharp);             // and by FSR's step in it
         vk_present_shape_set(j.shape);               // and where the picture goes in the window
@@ -75,6 +78,7 @@ static void present_main(void *arg) {
         if (j.value && f != j.value)
             rt_fatal("vk: the present of frame %llu signalled %llu, queued as %llu", (unsigned long long)j.frame,
                      (unsigned long long)f, (unsigned long long)j.value);
+        vk_lowlat_frame_gpu(j.lid, f);          // the frame is on the GPU up to that value
         plat_mutex_lock(&pl);
         busy = 0;
         plat_cond_broadcast(&pcv);
@@ -109,7 +113,7 @@ void vk_present_drain(void) {
 // The present after the frame count: resolves the image and hands the blit to the present thread. queued: when the game
 // presented; value: the timeline value queued for this present (asynchronous replay), 0 for the next one (synchronous).
 static void present_image(const tex_t *t, const int crop[4], uint64_t at_ns, uint64_t queued, uint64_t frame,
-                          uint64_t value, float shape) {
+                          uint64_t value, float shape, uint64_t lid) {
     static volatile int32_t n_skipped;
     vk_exec_frame_log(t, frame);
     int presharp = vk_dlaa_frame();
@@ -135,7 +139,7 @@ static void present_image(const tex_t *t, const int crop[4], uint64_t at_ns, uin
                img->scale);
     }
     PresentJob j = {.image = img->image, .format = img->format, .w = (int)img->width, .h = (int)img->height, .frame = frame,
-                    .at = at_ns, .queued = queued, .value = value, .presharp = presharp, .shape = shape};
+                    .at = at_ns, .queued = queued, .value = value, .presharp = presharp, .shape = shape, .lid = lid};
     vk_hdr_present_source(img, &j.scene, &j.scene_format);   // AC_HDR: the scene the game drew into it, same size
     if (crop) {
         j.has_crop = 1;
@@ -161,6 +165,7 @@ typedef struct {
     int kind, n, has_crop, crop[4];
     float shape;        // RI_PRESENT: the frame's shape, taken when the game presented (PresentJob)
     uint64_t value, submit_no, at, queued;
+    uint64_t lid;       // the low-latency frame the game was on when it queued the item (vk_lowlat.c)
     uint64_t *h;
     const tex_t *tex;   // RI_RELEASE: a copy the item owns (the game may reuse the object's memory)
 } ReplayItem;
@@ -226,6 +231,7 @@ static void replay_main(void *arg) {
         plat_cond_broadcast(&rcv);
         plat_mutex_unlock(&rl);
         if (it.kind == RI_SUBMIT) {
+            vk_lowlat_submit_frame(it.lid);   // the replay submits the frame the game was on when it queued it
             uint64_t f = submit_sync(it.h, it.n);
             if (f != it.value)
                 rt_fatal("vk: replayed submission signalled %llu, queued as %llu", (unsigned long long)f,
@@ -237,7 +243,7 @@ static void replay_main(void *arg) {
             free((void *)it.tex);
         } else {
             uint64_t frame = __atomic_add_fetch(&gfx_counters.frames, 1, __ATOMIC_RELAXED);
-            present_image(it.tex, it.has_crop ? it.crop : NULL, it.at, it.queued, frame, it.value, it.shape);
+            present_image(it.tex, it.has_crop ? it.crop : NULL, it.at, it.queued, frame, it.value, it.shape, it.lid);
         }
         plat_mutex_lock(&rl);
         if (it.kind == RI_SUBMIT) r_submit_done = it.submit_no;
@@ -346,7 +352,7 @@ static void vk_be_present(const tex_t *t, const int crop[4], uint64_t at_ns) {
     if (!gfx_replay_async()) {
         uint64_t frame = __atomic_add_fetch(&gfx_counters.frames, 1, __ATOMIC_RELAXED);
         perf_present(frame);   // before vk_exec_frame_log, which resets the frame's exec counts the flight recorder reads
-        present_image(t, crop, at_ns, kern_now_ns(), frame, 0, shape);
+        present_image(t, crop, at_ns, kern_now_ns(), frame, 0, shape, vk_lowlat_present_id());
         return;
     }
     // Frame bound: the replay thread handled the previous present before this one is queued.
@@ -362,7 +368,8 @@ static void vk_be_present(const tex_t *t, const int crop[4], uint64_t at_ns) {
     uint64_t frame = ++game_frames;
     perf_present(frame);
     if (frame % 1800 == 0) replay_log(frame, 0);
-    ReplayItem it = {.kind = RI_PRESENT, .tex = t, .at = at_ns, .queued = kern_now_ns(), .shape = shape};
+    ReplayItem it = {.kind = RI_PRESENT, .tex = t, .at = at_ns, .queued = kern_now_ns(), .shape = shape,
+                     .lid = vk_lowlat_present_id()};
     if (crop) {
         it.has_crop = 1;
         for (int i = 0; i < 4; i++) it.crop[i] = crop[i];
@@ -409,7 +416,7 @@ static void vk_be_program_release(const prog_t *p) { replay_drain(DR_PROG_RELEAS
 static uint64_t vk_be_submit(const uint64_t *handles, int n) {
     if (!gfx_replay_async()) return submit_sync(handles, n);
     vk_sync_start();
-    ReplayItem it = {.kind = RI_SUBMIT, .n = n, .submit_no = nvn_submit_count()};
+    ReplayItem it = {.kind = RI_SUBMIT, .n = n, .submit_no = nvn_submit_count(), .lid = lowlat_frame()};
     if (n > 0) {
         it.h = malloc(sizeof *it.h * (size_t)n);
         if (!it.h) rt_fatal("vk: out of memory (replay queue)");

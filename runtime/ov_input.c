@@ -13,6 +13,7 @@
 #include <string.h>
 
 #include "cfg.h"
+#include "gfx.h"
 #include "host.h"
 #include "input.h"
 #include "ov.h"
@@ -194,6 +195,7 @@ static int npad_state(uint32_t want, uint32_t id, NpadState *s) {
     int live = !co && want && enabled && allowed && id == pad_id() && want == pad_style() && (styles & want);
     int player = co && id < 2 && want && want == coop_style((int)id) ? (int)id : -1;
     plat_mutex_unlock(&lock);
+    if (live || player >= 0) lowlat_input();   // vk_lowlat.c: the frame's input sample
     if (live) {
         s->attributes = ATTR_CONNECTED;
         input_poll(&s->buttons, &s->lx, &s->ly, &s->rx, &s->ry);

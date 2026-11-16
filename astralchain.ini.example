@@ -138,6 +138,14 @@
 # deck_res_migrated = 1
 # Presentation mode: mailbox (default when the driver offers it, vsync otherwise), fifo (vsync) or immediate.
 # vk_present = mailbox
+# Low latency: off (default), on or boost. The game starts each frame as late as it can still be shown on time, so
+# the picture answers the controls sooner: with NVIDIA Reflex (VK_NV_low_latency2) when the driver offers it, else AMD
+# Anti-Lag 2 (VK_AMD_anti_lag; on Linux from Mesa 26.3), else the port's own timing, which measures how long the
+# last frames took and sleeps the rest. Measured with the latter on an Intel Arc 140T: from the pad read to the
+# present, 33 ms down to about 23 ms at 60 fps, 67 ms down to about 33 ms at 30 fps, with no more dropped frames.
+# boost: with Reflex the GPU also keeps its clocks up; otherwise a smaller safety margin (shorter waits, a dropped
+# frame now and then). The menu shows which one runs. Read at start.
+# low_latency = off
 # Window client area in screen pixels (640x360 to 7680x4320), and borderless fullscreen (on by default). Windows
 # display scaling does not apply: at 150% scale, 1920x1080 covers the area 1280x720 covers at 100%. F11 switches
 # fullscreen and saves it here. Changes while the game runs take effect at once.

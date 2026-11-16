@@ -24,7 +24,7 @@ void rt_vlogf(const char *fmt, va_list ap);
 void rt_log_raw(const char *p, size_t n);
 const char *rt_log_path(void);                  // the log file, NULL when this run writes none
 enum { RT_TRACE_SVC = 1, RT_TRACE_HOSTCALL = 2, RT_TRACE_IPC = 4, RT_TRACE_FS = 8, RT_TRACE_GFX = 16, RT_TRACE_PERF = 32,
-       RT_TRACE_SCHED = 64, RT_TRACE_AUDIO = 128, RT_TRACE_PRESENT = 256, RT_TRACE_DIRTY = 512 };
+       RT_TRACE_SCHED = 64, RT_TRACE_AUDIO = 128, RT_TRACE_PRESENT = 256, RT_TRACE_DIRTY = 512, RT_TRACE_LATENCY = 1024 };
 extern unsigned rt_trace;                       // from AC_TRACE=svc,host,ipc,fs,gfx,perf,sched,audio,present,dirty (or all)
 // prof_win.c: AC_PROFILE=<path> sampling profiler; AC_TRACE=perf frame timing (waits of the render thread)
 // PERF_TEX: texture uploads on the render thread (deswizzle, decode, staging), PERF_ASTC included
@@ -356,6 +356,7 @@ int probe_loader(void), probe_kernel(void), probe_ipc(void), probe_services(void
 int probe_gfx_abi(void);                                   // gfx_abi_probe.c
 int probe_vkdevice(void);                                 // vk_device.c
 int probe_xess(void);                                     // vk_xess.c
+int probe_latency(void);                                  // vk_lowlat.c
 int probe_nvn(void), probe_nvn_tex(void);                  // nvn_probe.c, nvn_tex_probe.c
 int probe_window(void);                                    // gfx_window_probe.c
 int probe_shader(void);                                    // gfx_shader.c

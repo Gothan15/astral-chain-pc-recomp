@@ -93,6 +93,20 @@ Every guest thread is a host thread. Astral Chain assumes Horizon's scheduler: t
 - Vulkan 1.3 back end in place of MacNativeGames' Metal one. At `QueueSubmitCommands` the recorded NVN commands are replayed into Vulkan command buffers (`vk_exec*.c`).
 - Memory pools. Apple's unified memory let MacNativeGames use the game's pools zero-copy. The back end imports the pools as host memory (`VK_EXT_external_memory_host`). On a discrete GPU, pools bound as buffers are mirrored in device-local memory, by the 64 KiB chunks the replay binds, and the pages the CPU wrote in them (write watch, above) are uploaded before a replay; the large storage buffers the shaders write stay in the mirror until the CPU touches them; idle pool regions are made read-only so the write-watch queries skip them (`vk_memory.c`). GPU-rendered textures are written back when the CPU reads them: on a pool invalidate, on a CPU copy, and for small targets once the CPU waits for a fence (`vk_texture.c`).
 - Replay thread. `AC_REPLAY_ASYNC=1` (the default; `=0` turns it off) moves the replay off the submitting thread onto a queue at most one frame behind the game; reads of GPU results wait for the newest writer instead of draining the queue (`vk_backend.c`). It is on because an A/B run on the dev machine with a save load and gameplay showed identical throughput; the waits were under 160 ms over 3,472 frames.
+- Low latency (`low_latency = off|on|boost`, `vk_lowlat.c`, off by default). The pacer lets the game start a frame
+  two periods before its display slot (three window textures), so the pad read for a frame happened 33 ms before its
+  present at 60 fps and 67 ms at 30 fps. A frame starts when the game acquires its window texture
+  (`nvnWindowAcquireTexture`, which reads the pad right after, on the same thread), and an ID follows it to its
+  submissions (`ReplayItem.lid`, a thread-local on the replay and present threads) and its host present
+  (`PresentJob.lid`, `flip_locked`). Three back ends, one at most: NVIDIA Reflex (`VK_NV_low_latency2` with
+  `VK_KHR_present_id`: the driver's sleep before the frame, the six latency markers, the frame's ID on its
+  submissions and present), AMD Anti-Lag 2 (`VK_AMD_anti_lag`: one call before the pad read, frames delimited by the
+  present), else a built-in sleep until the slot minus the work of the last frames (start to blit done on the GPU,
+  DXVK's median-of-three maximum over 32 frames) minus a margin that grows on a missed slot and shrinks back. XeLL
+  has no Vulkan API. On an Arc 140T the built-in sleep took the pad read to present from 33.3 to about 23 ms at 60 fps
+  and from 66.7 to about 33 ms at 30 fps (fifo, the Deck's profile), with no more frames over 25 (50) ms than without
+  it. `AC_TRACE=latency` logs every 600 frames where a frame's time went; `--probe-latency` runs the back end on a
+  synthetic game.
 - Recorder thread. The Vulkan calls the replay makes into its command buffer are made by a thread of their own (`vk_rec.c`, after Savage Wind Recomp and LAS Recomp): each `vkCmd*` copies its arguments into a packet of a ring and the recorder makes the calls in order; calls into other command buffers are made at once; the recorder also ends the command buffer, and the submit waits until it has. In the town on an RX 9070 the replay takes 17% less time on the submitting thread. It is off by default on AMD GPUs, where the driver loses the device or hangs the GPU at startup with it (`AC_VK_RECORDER=1` forces it on, `=0` makes every call on the submitting thread).
 - Uniform snapshot. The game rewrites per-object uniform blocks on other threads soon after it submits the frame
   that reads them, while the replay still records it. At the start of a submission's replay every uniform range it

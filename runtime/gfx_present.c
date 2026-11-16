@@ -148,6 +148,7 @@ static VkDeviceSize g_cap_size;
 static int g_cap_w, g_cap_h, g_cap_valid;
 static int g_flip_on;            // vk_present_blit submitted the blit of swapchain image g_flip_idx; vk_present_flip presents it
 static uint32_t g_flip_idx;
+static uint64_t g_blit_lid, g_flip_lid;   // the low-latency frame (vk_lowlat.c) of the next blit and of the waiting present
 
 // ---- AC_FLIGHT thumbnails (flight.c; g_pl): each present also blits the swapchain image down into slot frame % g_th_n
 // of a host-visible ring. A slot's tag names the frame it holds complete; recording a new frame clears the tag first,
@@ -293,12 +294,17 @@ static void flip_locked(void) {
     if (!g_flip_on) return;
     g_flip_on = 0;
     if (!g_sc) return;
-    VkPresentInfoKHR pi = {.sType = VK_STRUCTURE_TYPE_PRESENT_INFO_KHR, .waitSemaphoreCount = 1,
-                           .pWaitSemaphores = &g_render_done[g_flip_idx], .swapchainCount = 1, .pSwapchains = &g_sc,
-                           .pImageIndices = &g_flip_idx};
+    VkPresentIdKHR pid_info;
+    uint64_t pid;
+    VkPresentInfoKHR pi = {.sType = VK_STRUCTURE_TYPE_PRESENT_INFO_KHR,
+                           .pNext = vk_lowlat_flip_begin(g_flip_lid, &pid_info, &pid),   // Reflex: the frame's present ID
+                           .waitSemaphoreCount = 1, .pWaitSemaphores = &g_render_done[g_flip_idx], .swapchainCount = 1,
+                           .pSwapchains = &g_sc, .pImageIndices = &g_flip_idx};
     vk_queue_lock();
     VkResult r = vkQueuePresentKHR(vk_ctx()->gfx_queue, &pi);
     vk_queue_unlock();
+    vk_lowlat_flip_end(g_flip_lid, pid);
+    g_flip_lid = 0;
     vk_device_fault_report(r);
     if (r == VK_ERROR_OUT_OF_DATE_KHR || r == VK_SUBOPTIMAL_KHR) plat_xchg32(&g_dirty, 1);
 }
@@ -351,6 +357,8 @@ static int create_swapchain(void) {
         .imageSharingMode = VK_SHARING_MODE_EXCLUSIVE, .preTransform = caps.currentTransform,
         .compositeAlpha = VK_COMPOSITE_ALPHA_OPAQUE_BIT_KHR, .presentMode = pick_present_mode(c->phys), .clipped = VK_TRUE,
         .oldSwapchain = old};
+    VkSwapchainLatencyCreateInfoNV lat;
+    vk_lowlat_swapchain_info(&lat, &ci);   // Reflex: the swapchain takes part in the driver's latency sleep
     VkResult r = vkCreateSwapchainKHR(c->device, &ci, NULL, &g_sc);
     if (r != VK_SUCCESS) {
         rt_log("gfx: vkCreateSwapchainKHR failed (%d)", (int)r);
@@ -363,6 +371,7 @@ static int create_swapchain(void) {
         if (g_sc_view[i]) vkDestroyImageView(c->device, g_sc_view[i], NULL);
         g_sc_view[i] = VK_NULL_HANDLE;
     }
+    vk_lowlat_swapchain(g_sc);   // before the old one goes: the markers name the new one from here on
     if (old) vkDestroySwapchainKHR(c->device, old, NULL);
     g_sc_fmt = sf.format;
     g_sc_hdr = hdr;
@@ -759,6 +768,8 @@ static void present_image(VkImage src, VkImageLayout layout, VkFormat fmt, int w
     if (r == VK_SUCCESS) {
         g_flip_on = 1;
         g_flip_idx = idx;
+        g_flip_lid = g_blit_lid;   // the present carries the frame of its blit
+        g_blit_lid = 0;
         if (!defer) flip_locked();
     } else {
         vk_device_fault_report(r);
@@ -789,6 +800,20 @@ void vk_present_blit(VkImage src, VkImageLayout layout, VkFormat fmt, int w, int
 void vk_present_flip(void) {
     plat_rmutex_lock(&g_pl);
     flip_locked();
+    plat_rmutex_unlock(&g_pl);
+}
+
+VkSwapchainKHR vk_present_lock(void) {
+    plat_rmutex_lock(&g_pl);
+    return g_sc;
+}
+
+void vk_present_unlock(void) { plat_rmutex_unlock(&g_pl); }
+
+void vk_present_frame_id(uint64_t id) {
+    if (!id) return;   // the low-latency frames are not followed
+    plat_rmutex_lock(&g_pl);
+    g_blit_lid = id;
     plat_rmutex_unlock(&g_pl);
 }
 
@@ -827,6 +852,7 @@ void gfx_window_release_vk(void) {
             g_sc_view[i] = VK_NULL_HANDLE;
         }
         if (g_pool) vkDestroyCommandPool(c->device, g_pool, NULL);
+        vk_lowlat_swapchain(VK_NULL_HANDLE);
         if (g_sc) vkDestroySwapchainKHR(c->device, g_sc, NULL);
         if (g_surface) vkDestroySurfaceKHR(c->instance, g_surface, NULL);
         g_sc = VK_NULL_HANDLE; g_surface = VK_NULL_HANDLE; g_pool = VK_NULL_HANDLE; g_sc_n = 0;

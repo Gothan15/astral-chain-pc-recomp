@@ -689,6 +689,7 @@ NVN_API(nvnWindowAcquireTexture) {
         sleep_until(at);
         perf_end(PERF_PACE, p0);
     }
+    lowlat_acquire(idx);   // vk_lowlat.c: the low-latency sleep, then the frame starts
     // The sync means "the display no longer reads this image". Presents are copies queued in submit order, so it is
     // already satisfied: fenced = 3 with fence 0.
     if (s) {
@@ -713,6 +714,7 @@ NVN_API(nvnQueueAcquireTexture) {
         sleep_until(at);
         perf_end(PERF_PACE, p0);
     }
+    lowlat_acquire(idx);
     ret_x(c, NVN_QUEUE_ACQUIRE_TEXTURE_RESULT_SUCCESS);
 }
 
@@ -730,6 +732,7 @@ NVN_API(nvnQueuePresentTexture) {
     const tex_t *t = (const tex_t *)o->tex[idx];
     uint64_t period = present_period(o), now = kern_now_ns();
     uint64_t slot = now + pace(&o->pace, now, period);
+    lowlat_present(idx, slot, period);   // vk_lowlat.c: the frame of this image ends; the back end's present carries it
     gfx_backend()->present(t, o->crop, slot);
     o->ticket[idx] = o->presents;
     o->avail[idx] = slot + period;

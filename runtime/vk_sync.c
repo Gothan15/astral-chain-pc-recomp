@@ -368,12 +368,14 @@ VkCommandBuffer vk_sync_split(void) {
     VkCommandBuffer pro = prologue(c, cur_fence);
     VkCommandBufferSubmitInfo cbi[2] = {{.sType = VK_STRUCTURE_TYPE_COMMAND_BUFFER_SUBMIT_INFO, .commandBuffer = pro},
                                         {.sType = VK_STRUCTURE_TYPE_COMMAND_BUFFER_SUBMIT_INFO, .commandBuffer = cb}};
-    VkSubmitInfo2 si = {.sType = VK_STRUCTURE_TYPE_SUBMIT_INFO_2, .commandBufferInfoCount = pro ? 2 : 1,
-                        .pCommandBufferInfos = pro ? cbi : cbi + 1};
+    VkLatencySubmissionPresentIdNV lat;
+    VkSubmitInfo2 si = {.sType = VK_STRUCTURE_TYPE_SUBMIT_INFO_2, .pNext = vk_lowlat_submit_info(&lat, 1),
+                        .commandBufferInfoCount = pro ? 2 : 1, .pCommandBufferInfos = pro ? cbi : cbi + 1};
     ts_submitted();
     vk_queue_lock();
     VkResult r = vkQueueSubmit2(c->gfx_queue, 1, &si, VK_NULL_HANDLE);
     vk_queue_unlock();
+    if (si.pNext) vk_lowlat_submit_done(&lat, 1);
     if (r != VK_SUCCESS) {
         vk_device_fault_report(r);
         rt_fatal("vk: vkQueueSubmit2 of a part of value %llu failed (%d)", (unsigned long long)cur_fence, (int)r);
@@ -430,7 +432,8 @@ uint64_t vk_sync_submit(const uint64_t *handles, int n) {
                                         {.sType = VK_STRUCTURE_TYPE_COMMAND_BUFFER_SUBMIT_INFO, .commandBuffer = s->cb}};
     VkSemaphoreSubmitInfo sig = {.sType = VK_STRUCTURE_TYPE_SEMAPHORE_SUBMIT_INFO, .semaphore = c->timeline,
                                  .value = fence, .stageMask = VK_PIPELINE_STAGE_2_ALL_COMMANDS_BIT};
-    VkSubmitInfo2 si = {.sType = VK_STRUCTURE_TYPE_SUBMIT_INFO_2,
+    VkLatencySubmissionPresentIdNV lat;   // Reflex: the frame this submission belongs to
+    VkSubmitInfo2 si = {.sType = VK_STRUCTURE_TYPE_SUBMIT_INFO_2, .pNext = vk_lowlat_submit_info(&lat, recorded),
                         .commandBufferInfoCount = (pro ? 1u : 0u) + (recorded ? 1u : 0u),
                         .pCommandBufferInfos = pro ? cbi : cbi + 1, .signalSemaphoreInfoCount = 1,
                         .pSignalSemaphoreInfos = &sig};
@@ -438,6 +441,7 @@ uint64_t vk_sync_submit(const uint64_t *handles, int n) {
     vk_queue_lock();
     VkResult r = vkQueueSubmit2(c->gfx_queue, 1, &si, VK_NULL_HANDLE);
     vk_queue_unlock();
+    if (si.pNext) vk_lowlat_submit_done(&lat, recorded);
     if (r != VK_SUCCESS) {
         vk_device_fault_report(r);
         rt_fatal("vk: vkQueueSubmit2 of value %llu failed (%d)", (unsigned long long)fence, (int)r);

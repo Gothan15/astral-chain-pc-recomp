@@ -87,6 +87,18 @@
             "defaults": {"display/hdr": "0"}
         },
         {
+            "id": "low_latency",
+            "label": "Low latency",
+            "help": "Less time from the controller to the screen: NVIDIA Reflex or AMD Anti-Lag 2 when the driver offers them, the port's own frame timing otherwise. Boost waits less, at the cost of an occasional dropped frame (with Reflex: the GPU keeps its clocks up).",
+            "group": "Display",
+            "choices": [
+                {"label": "Off", "set": {"display/low_latency": "off"}},
+                {"label": "On", "set": {"display/low_latency": "on"}},
+                {"label": "Boost", "set": {"display/low_latency": "boost"}}
+            ],
+            "defaults": {"display/low_latency": "off"}
+        },
+        {
             "id": "fps",
             "label": "Frame rate",
             "help": "60 runs the game's 60 fps patch. 30 is the game's own rate on the Switch, for slower PCs.",

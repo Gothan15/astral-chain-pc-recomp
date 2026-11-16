@@ -23,6 +23,12 @@ uint64_t gfx_vsync_ticks(void);                            // ticks since start
 uint64_t gfx_vsync_time_ns(uint64_t tick);                 // kern_now_ns() time of a tick (pacing)
 double gfx_window_refresh_hz(void);                        // refresh rate of the window's monitor; 0 unknown
 int gfx_window_focused(void);
+// Low latency (vk_lowlat.c, AC_LOW_LATENCY): the NVN front end and the input service mark a frame's stages. Each
+// returns at once with the setting off and AC_TRACE=latency unset.
+void lowlat_acquire(int image);                            // the window image is acquired: the sleep, then a new frame
+void lowlat_input(void);                                   // before the game's pad read
+void lowlat_present(int image, uint64_t slot, uint64_t period);   // the game presents image: its slot, the pacer's period
+uint64_t lowlat_frame(void);                               // the frame the game builds now (0 when not followed)
 
 // ---- shader service client (gfx_shader.c)
 enum { GFX_STAGE_VS, GFX_STAGE_TCS, GFX_STAGE_TES, GFX_STAGE_GS, GFX_STAGE_FS, GFX_STAGE_CS };

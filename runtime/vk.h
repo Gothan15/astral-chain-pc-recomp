@@ -41,7 +41,9 @@ typedef struct VkCtx {
         has_robustness2, has_buffer_device_address, has_fragment_shader_interlock, has_buffer_marker,
         has_astc_ldr,                       // textureCompressionASTC_LDR (enabled when reported)
         has_calibrated,                     // VK_KHR/EXT_calibrated_timestamps (GPU idle split in the perf line)
-        has_hdr_metadata;                   // VK_EXT_hdr_metadata (vk_hdr.c vk_hdr_metadata)
+        has_hdr_metadata,                   // VK_EXT_hdr_metadata (vk_hdr.c vk_hdr_metadata)
+        has_nv_low_latency2,                // VK_NV_low_latency2 + VK_KHR_present_id (vk_lowlat.c, Reflex)
+        has_amd_anti_lag;                   // VK_AMD_anti_lag (vk_lowlat.c, Anti-Lag 2)
     // Feedback loops (maxwell.md 1.9, vk_exec_draw.c feedback_prepare): a draw samples a target of its open pass that
     // an earlier draw of the pass wrote. AC_FEEDBACK=0: VK_FEEDBACK_OFF (sampled in GENERAL without a barrier, the
     // old behaviour); VK_FEEDBACK_LAYOUT with VK_EXT_attachment_feedback_loop_layout and dynamicRenderingLocalRead
@@ -151,6 +153,32 @@ void vk_contact_release(void);   // before the device goes away
 void vk_ao_frame(void);     // at each present: the setting read again when it changed, the frame's state reset
 void vk_ao_release(void);   // before the device goes away
 void vk_present_flip(void);
+// The present lock, for calls that need the swapchain synchronised with the acquire and the present (vk_lowlat.c's
+// Reflex sleep): returns the swapchain, VK_NULL_HANDLE when there is none; vk_present_unlock in either case.
+VkSwapchainKHR vk_present_lock(void);
+void vk_present_unlock(void);
+void vk_present_frame_id(uint64_t id);   // the present thread, before a blit: the low-latency frame it shows
+
+// ---- low latency (vk_lowlat.c, AC_LOW_LATENCY): NVIDIA Reflex, AMD Anti-Lag 2 or the built-in sleep
+int vk_lowlat_mode(void);                 // 0 off, 1 on, 2 boost
+int vk_lowlat_wants_reflex(void);         // vk_device.c: enable VK_NV_low_latency2 and VK_KHR_present_id when present
+int vk_lowlat_wants_antilag(void);        // and VK_AMD_anti_lag
+void vk_lowlat_init(VkCtx *c);            // after the device was made: picks the back end
+void vk_lowlat_release(VkCtx *c);         // before the device goes away
+int vk_lowlat_backend(void);              // 0 off, 1 Reflex, 2 Anti-Lag 2, 3 built-in
+const char *vk_lowlat_backend_name(void);
+uint64_t vk_lowlat_present_id(void);      // the game's thread, in its present: the frame presented (0: none)
+void vk_lowlat_submit_frame(uint64_t id); // the replay and present threads: the frame of the work they submit next
+void vk_lowlat_frame_gpu(uint64_t id, uint64_t value);   // frame id's blit signals timeline value
+// vk_sync.c, around each vkQueueSubmit2: the VkSubmitInfo2 pNext for Reflex (NULL otherwise) and its markers
+const void *vk_lowlat_submit_info(VkLatencySubmissionPresentIdNV *s, int recorded);
+void vk_lowlat_submit_done(const VkLatencySubmissionPresentIdNV *s, int recorded);
+// gfx_present.c, present lock held: the swapchain create info's latency struct, the new swapchain (before the old one
+// is destroyed; VK_NULL_HANDLE when it goes away), and around vkQueuePresentKHR of frame id (0 for none).
+void vk_lowlat_swapchain_info(VkSwapchainLatencyCreateInfoNV *li, VkSwapchainCreateInfoKHR *ci);
+void vk_lowlat_swapchain(VkSwapchainKHR sc);
+const void *vk_lowlat_flip_begin(uint64_t id, VkPresentIdKHR *pi, uint64_t *pid);
+void vk_lowlat_flip_end(uint64_t id, uint64_t pid);
 // Every submission to ctx->gfx_queue (and xfer_queue when shared) takes this lock; vk_present_image and the swapchain
 // rebuild do. Recursive.
 void vk_queue_lock(void);

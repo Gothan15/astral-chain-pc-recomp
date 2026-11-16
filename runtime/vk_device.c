@@ -231,6 +231,8 @@ typedef struct {
     VkPhysicalDeviceAttachmentFeedbackLoopLayoutFeaturesEXT fbl;
     VkPhysicalDeviceDynamicRenderingLocalReadFeaturesKHR lr;
     VkPhysicalDeviceMutableDescriptorTypeFeaturesEXT mut;   // XeSS (vk_xess.c) only
+    VkPhysicalDevicePresentIdFeaturesKHR pid;               // Reflex (vk_lowlat.c) only
+    VkPhysicalDeviceAntiLagFeaturesAMD antilag;             // Anti-Lag 2 (vk_lowlat.c) only
 } FeatureChain;
 
 static int create_device(void) {
@@ -238,7 +240,7 @@ static int create_device(void) {
     vkEnumerateDeviceExtensionProperties(g_vk.phys, NULL, &ne, NULL);
     VkExtensionProperties *ep = calloc(ne ? ne : 1, sizeof *ep);
     vkEnumerateDeviceExtensionProperties(g_vk.phys, NULL, &ne, ep);
-    const char *ext[80];
+    const char *ext[88];
     uint32_t n_ext = 0;
     for (size_t i = 0; i < sizeof k_required_ext / sizeof *k_required_ext; i++) ext[n_ext++] = k_required_ext[i];
 
@@ -289,6 +291,19 @@ static int create_device(void) {
     }
     // GPU breadcrumbs for a lost device (vk_crumbs.c): AMD's drivers and RADV report it.
     if (has_ext(ep, ne, VK_AMD_BUFFER_MARKER_EXTENSION_NAME)) { g_vk.has_buffer_marker = 1; ext[n_ext++] = VK_AMD_BUFFER_MARKER_EXTENSION_NAME; }
+    // Low latency (vk_lowlat.c), only with AC_LOW_LATENCY on: Reflex where the driver has it, else Anti-Lag 2. Reflex
+    // needs present IDs (VK_KHR_present_id) and timeline semaphores (required above); its extension has no feature.
+    if (vk_lowlat_wants_reflex() && has_ext(ep, ne, VK_NV_LOW_LATENCY_2_EXTENSION_NAME) &&
+        has_ext(ep, ne, VK_KHR_PRESENT_ID_EXTENSION_NAME)) {
+        g_vk.has_nv_low_latency2 = 1;
+        ext[n_ext++] = VK_KHR_PRESENT_ID_EXTENSION_NAME;
+        ext[n_ext++] = VK_NV_LOW_LATENCY_2_EXTENSION_NAME;
+        CHAIN(pid, VK_STRUCTURE_TYPE_PHYSICAL_DEVICE_PRESENT_ID_FEATURES_KHR);
+    } else if (vk_lowlat_wants_antilag() && has_ext(ep, ne, VK_AMD_ANTI_LAG_EXTENSION_NAME)) {
+        g_vk.has_amd_anti_lag = 1;
+        ext[n_ext++] = VK_AMD_ANTI_LAG_EXTENSION_NAME;
+        CHAIN(antilag, VK_STRUCTURE_TYPE_PHYSICAL_DEVICE_ANTI_LAG_FEATURES_AMD);
+    }
     // Graphics pipeline library: chained last so it can be dropped again when vk_caps_gpl declines it.
     void **gpl_link = NULL;
     if (has_ext(ep, ne, VK_KHR_PIPELINE_LIBRARY_EXTENSION_NAME) && has_ext(ep, ne, VK_EXT_GRAPHICS_PIPELINE_LIBRARY_EXTENSION_NAME)) {
@@ -325,6 +340,8 @@ static int create_device(void) {
     else if (!h->textureCompressionBC) miss = "textureCompressionBC";
     if (miss) { rt_log("vk: required feature missing on %s: %s", g_vk.props.deviceName, miss); free(c); return 0; }
     if (!c->fault.deviceFault) g_vk.has_device_fault = 0;   // vkGetDeviceFaultInfoEXT needs the feature, not just the extension
+    if (g_vk.has_nv_low_latency2 && !c->pid.presentId) g_vk.has_nv_low_latency2 = 0;   // the extension alone is not enough
+    if (g_vk.has_amd_anti_lag && !c->antilag.antiLag) g_vk.has_amd_anti_lag = 0;
     g_vk.has_buffer_device_address = c->f12.bufferDeviceAddress;
     g_vk.has_astc_ldr = h->textureCompressionASTC_LDR;
     {
@@ -381,6 +398,7 @@ static int create_device(void) {
         return 0;
     }
     vk_crumbs_init(&g_vk);
+    vk_lowlat_init(&g_vk);
     return 1;
 }
 
@@ -392,6 +410,7 @@ static void destroy_all(void) {
     if (g_vk.device) vk_astc_release();
     if (g_vk.device) vk_crumbs_release();
     if (g_vk.device) vk_dlaa_release();
+    if (g_vk.device) vk_lowlat_release(&g_vk);
     if (g_vk.timeline) vkDestroySemaphore(g_vk.device, g_vk.timeline, NULL);
     vk_headroom_stop();
     if (g_vk.vma) vmaDestroyAllocator(g_vk.vma);
@@ -533,11 +552,11 @@ int probe_vkdevice(void) {
            c->device_index, c->props.deviceName, VK_API_VERSION_MAJOR(v), VK_API_VERSION_MINOR(v), VK_API_VERSION_PATCH(v),
            c->gfx_family, c->xfer_family, c->xfer_shared ? " (shared queue)" : "", c->min_imported_host_alignment);
     printf("probe-vkdevice: optional: custom_border=%d eds=%d eds2=%d eds3=%d vertex_input=%d cond_render=%d xfb=%d provoking=%d "
-           "robustness2=%d fault=%d budget=%d bda=%d interlock=%d validation=%d\n",
+           "robustness2=%d fault=%d budget=%d bda=%d interlock=%d nv_low_latency2=%d amd_anti_lag=%d validation=%d\n",
            c->has_custom_border_color, c->has_eds, c->has_eds2, c->has_eds3, c->has_vertex_input_dynamic_state,
            c->has_conditional_rendering, c->has_transform_feedback, c->has_provoking_vertex, c->has_robustness2,
            c->has_device_fault, c->has_memory_budget, c->has_buffer_device_address, c->has_fragment_shader_interlock,
-           c->validation);
+           c->has_nv_low_latency2, c->has_amd_anti_lag, c->validation);
     vk_shutdown();
     printf("probe-vkdevice: %s (validation errors %ld)\n", g_errors_total ? "FAILED" : "passed", g_errors_total);
     return g_errors_total ? 1 : 0;
