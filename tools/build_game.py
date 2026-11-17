@@ -61,6 +61,7 @@ import ctypes.wintypes as wt   # the job-object structures below; importing it w
 import hashlib
 import json
 import os
+import re
 import shutil
 import subprocess
 import sys
@@ -96,11 +97,13 @@ SDL3_DLLS = [UCRT / 'SDL3.dll', UCRT / 'libiconv-2.dll', UCRT / 'libopus-0.dll']
 # Flags for generated code as LAS Recomp builds it (Makefile GENFLAGS, Windows), plus -march for the FP/SIMD lowering.
 # --cpu v2 replaces the level for CPUs without AVX2/FMA; runtime/fma.c then supplies the correctly rounded fma the
 # lowering needs (runtime/simd.h).
-# -O1 and no higher: at -O2 the release's clang 21.1.8 builds a game whose video decoder draws corrupt blocks and green
-# dots (title screen, cutscenes, the screens of the headquarters), although the differential tests pass with it; the
-# 1.7.0 build of 2026-11-10 shipped that way. clang 23 showed no fault at -O2, where the process took 7.6% fewer cycles
-# a frame: worth another try once the miscompiled function is found, with a picture check under the release compiler.
-GEN_FLAGS = ['-O1', '-fno-strict-aliasing', '-Wno-return-type', '-Wno-unused-label', '-fvisibility=hidden',
+# -O2, with clang 22 or newer. clang 21.1.8 at -O2 builds a game whose video decoder draws corrupt blocks and green
+# dots (the title screen; the differential tests pass with it, and the 3D scenes looked the same), so the 1.7.0 release
+# of 2026-11-10 went back to -O1. With clang 23.1.5 the same scene is clean at -O2, and the render thread is busy 5.9%
+# less of the frame (14.8 against 15.8 ms, a Z1 Extreme limited to 15 W, town, two runs each). main() builds at -O1
+# with a compiler older than MIN_O2_CLANG, or with --gen-o1.
+MIN_O2_CLANG = 22
+GEN_FLAGS = ['-O2', '-fno-strict-aliasing', '-Wno-return-type', '-Wno-unused-label', '-fvisibility=hidden',
              '-march=x86-64-v3']
 RT_FLAGS = ['-O2', '-g', '-Wall', '-fno-strict-aliasing', '-march=x86-64-v3']
 
@@ -727,6 +730,16 @@ def mib(n):
     return f'{n / (1 << 20):,.1f} MiB'
 
 
+def clang_major():
+    """The major version of the clang that compiles (CLANG --version), None when it does not say."""
+    try:
+        out = subprocess.run([str(CLANG), '--version'], capture_output=True, text=True, timeout=30).stdout
+    except (OSError, subprocess.SubprocessError):
+        return None
+    m = re.search(r'clang version (\d+)', out)
+    return int(m.group(1)) if m else None
+
+
 def main():
     ap = argparse.ArgumentParser(description=__doc__.splitlines()[0])
     ap.add_argument('--version', default='v101', help='game version (default v101: 1.0.1)')
@@ -765,6 +778,8 @@ def main():
                     help=f'build only <out>/{LIB_NAME} from runtime/ (no generated C, no astralchain.exe)')
     ap.add_argument('--runtime-lib', type=Path, help=f'link against this {LIB_NAME} instead of compiling runtime/ '
                                                     f'({", ".join(sorted(INSTALL_SIDE))} and modules.c still compile)')
+    ap.add_argument('--gen-o1', action='store_true',
+                    help=f'compile the generated code at -O1 (default -O2, which needs clang {MIN_O2_CLANG} or newer)')
     ap.add_argument('--expected', type=Path,
                     help='expected hashes (default tools/data/expected-<display version>.json)')
     args = ap.parse_args()
@@ -820,6 +835,12 @@ def main():
                      + ' (docs/building.md)')
     if not (gen / 'layout.json').is_file():
         sys.exit(f'{gen / "layout.json"} not found: run the generator first')
+    major = clang_major()
+    if args.gen_o1 or (major is not None and major < MIN_O2_CLANG):
+        GEN_FLAGS[GEN_FLAGS.index('-O2')] = '-O1'
+        if not args.gen_o1:
+            print(f'build_game: clang {major} miscompiles the video decoder at -O2: the generated code is built at -O1 '
+                  f'(clang {MIN_O2_CLANG} or newer builds it at -O2)')
 
     layout = read_layout(gen)
     names = [n for n, _, _ in layout]

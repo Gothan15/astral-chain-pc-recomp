@@ -94,6 +94,10 @@ From the repository root, in PowerShell. Every step that depends on the game ver
    `runtime/fma.c`, a correctly rounded software fma the FP lowering needs, and runs slower.
 
    Lifting takes about 15 s, a clean compile about 200 s on 24 threads; later builds recompile only what changed.
+   The generated code is compiled at -O2 with clang 22 or newer, and at -O1 with an older one (or with `--gen-o1`):
+   clang 21.1.8 at -O2 builds a game whose title screen video draws corrupt blocks and green dots, which clang 23.1.5
+   does not. At -O2 the render thread is busy 5.9% less of the frame (a Z1 Extreme limited to 15 W). The Linux release
+   bundles LLVM 23.1.5, the Windows one llvm-mingw 20261020 (LLVM 23.1.4).
    A compiler cache in front of clang shortens it further: with `SCCACHE` set to an sccache executable, `build_game.py`
    writes it into the ninja file ahead of `cc`, and every lift rewrites the generated chunks with the same contents, so
    a second build of the same version hits all of their objects:

@@ -12,7 +12,7 @@ the .NET 10 SDK and Python 3.12+ with Pillow (.venv). The folder holds:
 
     python/    python-build-standalone 3.14 (with tkinter) + the packages of tools/requirements-installer.txt; a .pth
                file puts the folder, tools/ and recomp/ on sys.path
-    llvm/      LLVM 21 (clang, lld, llvm-ar, the clang resource headers) and llvm/sysroot: the files of the sniper SDK
+    llvm/      LLVM 23 (clang, lld, llvm-ar, the clang resource headers) and llvm/sysroot: the files of the sniper SDK
                sysroot the game's compile and link read, nothing else (recorded while building the runtime library)
     runtime/   libacrt.a and libacrt-v2.a (build_game.py --make-runtime-lib --sysroot, x86-64-v3 and v2), the
                runtime headers, romfs.c, patches.c and ov_zstd.c (compiled per install), astralchain.png (the window
@@ -55,14 +55,16 @@ mr.DL = _AC_CACHE / 'dl'
 WORK = mr.WORK
 CHECK = MAIN_ROOT / 'build' / 'release-linux-check'
 
-LLVM_VERSION = '21.1.8'
+# 23.1.5 and not the 21.1.8 of the first releases: clang 21 at -O2 builds a game whose title screen video draws corrupt
+# blocks (tools/build_game.py), and the generated code is built at -O2 since 23.
+LLVM_VERSION = '23.1.5'
 LLVM_MAJOR = LLVM_VERSION.split('.')[0]
 SNIPER = '3.0.20261021.266025'
 SNIPER_URL = 'https://repo.steampowered.com/steamrt-images-sniper/snapshots'
 PINS = {
     'llvm-linux': (f'https://github.com/llvm/llvm-project/releases/download/llvmorg-{LLVM_VERSION}/'
                    f'LLVM-{LLVM_VERSION}-Linux-X64.tar.xz',
-                   'b3b7f2801d15d50736acea3c73982994d025b01c2f035b91ae3b49d1b575732b'),
+                   'f72edb0b36580ece7f52e23858f00c18fad4e87395ea7ad05d7e55c39f8fc78a'),
     'llvm-license': (f'https://raw.githubusercontent.com/llvm/llvm-project/llvmorg-{LLVM_VERSION}/llvm/LICENSE.TXT',
                      '8d85c1057d742e597985c7d4e6320b015a9139385cff4cbae06ffc0ebe89afee'),
     'sniper-sdk': (f'{SNIPER_URL}/{SNIPER}/com.valvesoftware.SteamRuntime.Sdk-amd64%2Ci386-sniper-sysroot.tar.gz',
