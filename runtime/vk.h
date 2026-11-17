@@ -265,10 +265,11 @@ void vk_mem_dirty_submit(void);                   // vk_sync_submit, under its l
 // vk_sync.c records the copies the mirrors' first accesses queued (vk_mem_mirror_pending) into a prologue command
 // buffer with vk_mem_mirror_prologue and submits it right before each part.
 extern int vk_mirror_on;
+extern int vk_need_on;   // shadow storage watches only the pages the GPU used (vk_memory.c, AC_WATCH_USED)
 void vk_mem_use(VkMemSpan *sp, uint64_t n);
 void vk_mem_pick(VkMemSpan *sp, uint64_t n, int write);
-#define VK_MEM_USE(sp, n) do { if (vk_mirror_on && (sp).pool) vk_mem_use(&(sp), (n)); } while (0)
-#define VK_MEM_PICK(sp, n, write) do { if (vk_mirror_on && (sp).pool) vk_mem_pick(&(sp), (n), (write)); } while (0)
+#define VK_MEM_USE(sp, n) do { if ((vk_mirror_on || vk_need_on) && (sp).pool) vk_mem_use(&(sp), (n)); } while (0)
+#define VK_MEM_PICK(sp, n, write) do { if ((vk_mirror_on || vk_need_on) && (sp).pool) vk_mem_pick(&(sp), (n), (write)); } while (0)
 void vk_mem_gpu_wrote(const VkMemSpan *sp, uint64_t size, int stored);
 void vk_mem_lazy_all(int on);   // probes: fills and copies of 1 MiB and up stay in the mirror as shader stores do
 void vk_mem_lazy_stats(uint64_t *fetches, uint64_t *unheld);   // ranges read back for the CPU; written back at a fence

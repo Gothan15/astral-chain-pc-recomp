@@ -317,6 +317,8 @@ int vk_pool_init(pool_t *p) {
     return 1;
 }
 
+static void need_pool_gone(uint64_t addr, uint64_t size);
+
 void vk_pool_fini(pool_t *p) {
     VkCtx *c = vk_ctx();
     if (!c) return;
@@ -340,6 +342,7 @@ void vk_pool_fini(pool_t *p) {
     if (!r) return;
     if (r->smap) shadow_forget(r);
     if (r->kind == POOL_IMPORT) mem_thaw(r->lo, r->size);   // the storage goes back to the guest writable
+    if (vk_need_on && r->kind == POOL_IMPORT) need_pool_gone(r->lo, r->size);
     // Images cut from this range go first; a used buffer or memory waits until the GPU is done with it, since the
     // guest gets the storage back when this returns.
     vk_texture_range_gone(r->lo, r->size, r->alloc);
@@ -758,6 +761,131 @@ static void stamp_gpu_range(uint64_t lo, uint64_t hi, uint32_t g) {
     for (uint64_t a = lo; a < hi; a += 1ull << GEN_PAGE_SHIFT) stamp_gpu_page(a, g);
 }
 
+// ---------------------------------------------------------------- needed pages (AC_WATCH_USED)
+// With shadow storage on an integrated GPU, only the pages something reads through the generation table are watched:
+// the ranges the replay binds or copies from as buffers (vk_mem_use, vk_mem_pick) and the texture storage the checks
+// ask about (vk_mem_changed). Astral Chain keeps CPU-only data in its graphics pools, and its uniform blocks reach the
+// GPU through the snapshots (vk_usnap.c), not the shadows: in the headquarters nearly all of the 2,400 pages it writes
+// a frame are pages no buffer binding reads, and each took a write-protection fault (about 1.2 us on a Z1 Extreme at
+// 15 W, 8.7% of the render thread) and a copy into the shadow for nothing. Watching the needed pages only: 2,360 to
+// 145 faults a frame, 8 to 0.4 MiB copied, the shadow sync 2.7 to 0.6 ms and the replay 8.2 to 6.3 ms a frame,
+// 56.9 to 59.8 fps (15 W, 4 cores / 8 threads, Steam Deck profile, camera turning, two runs each).
+// A page is needed from its first use, for as long as its pool lives: need_mark stamps it then, so the next sync copies
+// it and a texture check sees it changed. The kernel protects a page again only when a query with reset covers it, so a
+// query peeks first (no reset: the pages nobody needs stay written and take no fault again) and resets only the runs
+// of needed pages the peek found written. Writes are never lost: the reset is atomic with its report, and a page that
+// becomes needed between two queries is reported written by the next one.
+// AC_WATCH_USED=0 watches every page of the queried ranges, as before.
+int vk_need_on;
+static uint64_t *need_chunk[GEN_CHUNKS];                   // a bit per page; set and cleared under gen_lock, read without
+static uint16_t reg_need[RT_ADDRESS_LIMIT >> REG_SHIFT];   // gen_lock: needed pages of the 2 MiB region
+static uint32_t reg_arm[RT_ADDRESS_LIMIT >> REG_SHIFT];    // gen_lock: ww_ep of the region's last full reset (freeze_pass)
+static uint64_t need_count;                                // gen_lock: needed pages
+static uint64_t peek_pages[1024];                          // gen_lock
+
+static int need_has(uint64_t a) {
+    if (a >= RT_ADDRESS_LIMIT) return 0;
+    const uint64_t *c = __atomic_load_n(&need_chunk[a >> GEN_CHUNK_SHIFT], __ATOMIC_ACQUIRE);
+    uint64_t p = (a >> GEN_PAGE_SHIFT) & (GEN_PER_CHUNK - 1);
+    return c && (__atomic_load_n(&c[p >> 6], __ATOMIC_RELAXED) >> (p & 63) & 1);
+}
+
+// 1 when every page of [lo, hi) (page aligned, below RT_ADDRESS_LIMIT) is needed; a word of the bitmap at a time.
+static int need_all(uint64_t lo, uint64_t hi) {
+    for (uint64_t a = lo; a < hi;) {
+        const uint64_t *c = __atomic_load_n(&need_chunk[a >> GEN_CHUNK_SHIFT], __ATOMIC_ACQUIRE);
+        if (!c) return 0;
+        uint64_t p = (a >> GEN_PAGE_SHIFT) & (GEN_PER_CHUNK - 1), bit = p & 63, left = (hi - a) >> GEN_PAGE_SHIFT;
+        uint64_t n = 64 - bit < left ? 64 - bit : left;
+        uint64_t mask = (n == 64 ? ~0ull : (1ull << n) - 1) << bit;
+        if ((__atomic_load_n(&c[p >> 6], __ATOMIC_RELAXED) & mask) != mask) return 0;
+        a += n << GEN_PAGE_SHIFT;
+    }
+    return 1;
+}
+
+// gen_lock held exclusively: the pages of [lo, hi) (page aligned) become needed; the new ones are stamped as written.
+static void need_mark(uint64_t lo, uint64_t hi) {
+    uint32_t g = 0;
+    if (hi > RT_ADDRESS_LIMIT) hi = RT_ADDRESS_LIMIT;
+    for (uint64_t a = lo; a < hi; a += 1ull << GEN_PAGE_SHIFT) {
+        if (need_has(a)) continue;
+        uint64_t *c = need_chunk[a >> GEN_CHUNK_SHIFT];
+        if (!c) {
+            c = calloc(GEN_PER_CHUNK / 64, sizeof *c);
+            if (!c) rt_fatal("vk: out of memory for the needed pages");
+            __atomic_store_n(&need_chunk[a >> GEN_CHUNK_SHIFT], c, __ATOMIC_RELEASE);
+        }
+        uint64_t p = (a >> GEN_PAGE_SHIFT) & (GEN_PER_CHUNK - 1);
+        __atomic_or_fetch(&c[p >> 6], 1ull << (p & 63), __ATOMIC_RELAXED);
+        reg_need[a >> REG_SHIFT]++, need_count++;
+        if (!g) g = ++gen_now;
+        stamp_page(a, g);
+    }
+}
+
+// The pages of [addr, addr+size) become needed. The test takes no lock: a bind of a range needed already, every bind
+// but the first, costs a few loads.
+static void need_range(uint64_t addr, uint64_t size) {
+    uint64_t lo = addr & ~0xfffull, hi = (addr + size + 0xfff) & ~0xfffull;
+    if (!size || lo >= RT_ADDRESS_LIMIT) return;
+    if (hi > RT_ADDRESS_LIMIT) hi = RT_ADDRESS_LIMIT;
+    if (need_all(lo, hi)) return;
+    plat_mutex_lock(&gen_lock);
+    need_mark(lo, hi);
+    plat_mutex_unlock(&gen_lock);
+}
+
+// gen_lock held exclusively: the whole pages inside [addr, addr+size) are needed no more (their pool is gone).
+static void need_clear(uint64_t addr, uint64_t size) {
+    uint64_t lo = (addr + 0xfff) & ~0xfffull, hi = (addr + size) & ~0xfffull;
+    if (hi > RT_ADDRESS_LIMIT) hi = RT_ADDRESS_LIMIT;
+    for (uint64_t a = lo; a < hi; a += 1ull << GEN_PAGE_SHIFT) {
+        if (!need_has(a)) continue;
+        uint64_t p = (a >> GEN_PAGE_SHIFT) & (GEN_PER_CHUNK - 1);
+        __atomic_and_fetch(&need_chunk[a >> GEN_CHUNK_SHIFT][p >> 6], ~(1ull << (p & 63)), __ATOMIC_RELAXED);
+        reg_need[a >> REG_SHIFT]--, need_count--;
+    }
+}
+
+static void need_pool_gone(uint64_t addr, uint64_t size) {
+    plat_mutex_lock(&gen_lock);
+    need_clear(addr, size);
+    plat_mutex_unlock(&gen_lock);
+}
+
+// gen_lock held exclusively. Stamps the pages of [lo, hi) written since their last reset with g and resets them; with
+// vk_need_on, the needed ones only. 0: the range is not write-watched.
+static int ww_scan(uint64_t lo, uint64_t hi, uint32_t g) {
+    const uint64_t max = sizeof gen_pages / sizeof *gen_pages;
+    if (!vk_need_on) {
+        for (;;) {
+            uint64_t n = ww_query(lo, hi - lo);
+            if (n == UINT64_MAX) return 0;
+            for (uint64_t k = 0; k < n; k++) stamp_page(gen_pages[k], g);
+            if (n < max) return 1;   // a full answer may have left pages for the next call
+        }
+    }
+    for (uint64_t at = lo; at < hi;) {
+        uint64_t t0 = qpc();
+        uint64_t n = mem_written_peek(at, hi - at, peek_pages, max);
+        ww_ticks += qpc() - t0, ww_calls++, ww_bytes += hi - at;
+        if (n == UINT64_MAX) return 0;
+        for (uint64_t i = 0; i < n;) {
+            uint64_t a = peek_pages[i++];
+            if (!need_has(a)) continue;
+            uint64_t b = a + (1ull << GEN_PAGE_SHIFT);
+            while (i < n && peek_pages[i] == b && need_has(b)) b += 1ull << GEN_PAGE_SHIFT, i++;
+            uint64_t m = ww_query(a, b - a);
+            if (m == UINT64_MAX) return 0;
+            for (uint64_t k = 0; k < m; k++) stamp_page(gen_pages[k], g);
+        }
+        if (n < max) break;
+        at = peek_pages[n - 1] + (1ull << GEN_PAGE_SHIFT);
+    }
+    return 1;
+}
+
 void vk_guest_written(uint64_t addr, uint64_t size) {
     if (!size || nvn_gpu_only(addr)) return;
     uint64_t lo = addr & ~0xfffull, hi = (addr + size + 0xfff) & ~0xfffull;
@@ -787,15 +915,11 @@ int vk_mem_changed(uint64_t addr, uint64_t size, uint32_t since, uint32_t *now) 
     if (!size) { *now = since; return 0; }
     uint64_t lo = addr & ~0xfffull, hi = (addr + size + 0xfff) & ~0xfffull;
     plat_mutex_lock(&gen_lock);
+    if (vk_need_on) need_mark(lo, hi);   // before g: the caller keeps g, and a page needed from now on is older than it
     uint32_t g = ++gen_now;
     int tracked = 1, frozen = 1;
     for (uint64_t a = lo & ~((1ull << REG_SHIFT) - 1); a < hi && frozen; a += 1ull << REG_SHIFT) frozen = mem_frozen(a);
-    while (!frozen) {
-        uint64_t n = ww_query(lo, hi - lo);
-        if (n == UINT64_MAX) { tracked = 0; break; }
-        for (uint64_t k = 0; k < n; k++) stamp_page(gen_pages[k], g);
-        if (n < sizeof gen_pages / sizeof *gen_pages) break;   // a full answer may have left pages for the next call
-    }
+    if (!frozen) tracked = ww_scan(lo, hi, g);
     int changed = 0;
     for (uint64_t a = lo; tracked && a < hi && !changed; a += 1ull << GEN_PAGE_SHIFT) {
         uint32_t *s = gen_slot(a, 0);
@@ -828,22 +952,19 @@ static uint64_t snap_regions(uint64_t r0, uint64_t r1, uint32_t epoch) {
     uint64_t calls = 0;
     for (uint64_t r = r0; r <= r1;) {
         if (snap_at[r] == epoch) { r++; continue; }
-        if (mem_frozen(r << SNAP_SHIFT)) {   // nothing in it changed since its freeze
+        // Nothing in it changed since its freeze, or (vk_need_on) nothing in it is needed: a page that becomes
+        // needed later in the epoch is stamped then (need_mark).
+        if (mem_frozen(r << SNAP_SHIFT) || (vk_need_on && !reg_need[r])) {
             snap_at[r] = epoch, snap_untracked[r] = 0;
             r++;
             continue;
         }
         uint64_t k = r;   // one query over a run of regions not seen in this epoch
-        while (k + 1 <= r1 && snap_at[k + 1] != epoch && !mem_frozen((k + 1) << SNAP_SHIFT)) k++;
+        while (k + 1 <= r1 && snap_at[k + 1] != epoch && !mem_frozen((k + 1) << SNAP_SHIFT) &&
+               (!vk_need_on || reg_need[k + 1])) k++;
         uint64_t a = r << SNAP_SHIFT, b = (k + 1) << SNAP_SHIFT;
-        int tracked = 1;
         if (!g) g = ++gen_now;
-        for (;;) {
-            uint64_t n = ww_query(a, b - a);
-            if (n == UINT64_MAX) { tracked = 0; break; }
-            for (uint64_t j = 0; j < n; j++) stamp_page(gen_pages[j], g);
-            if (n < sizeof gen_pages / sizeof *gen_pages) break;
-        }
+        int tracked = ww_scan(a, b, g);
         calls++;
         for (uint64_t j = r; j <= k; j++) {
             snap_at[j] = epoch, snap_untracked[j] = (uint8_t)!tracked;
@@ -864,6 +985,7 @@ int vk_mem_changed_snap(uint64_t addr, uint64_t size, uint32_t since, uint32_t e
     uint64_t lo = addr & ~0xfffull, hi = (addr + size + 0xfff) & ~0xfffull;
     uint64_t r0 = lo >> SNAP_SHIFT, r1 = (hi - 1) >> SNAP_SHIFT;
     if (!epoch || r1 >= SNAP_REGIONS) return vk_mem_changed(addr, size, since, now);
+    if (vk_need_on) need_range(lo, hi - lo);
     int excl = 0;
     plat_mutex_lock_shared(&gen_lock);
     for (uint64_t r = r0; r <= r1; r++)
@@ -952,14 +1074,7 @@ static uint64_t page_lo(const PoolRec *r) { return r->lo & ~0xfffull; }
 static uint64_t page_hi(const PoolRec *r) { return (r->lo + r->size + 0xfff) & ~0xfffull; }
 
 // gen_lock held exclusively. 0: the range is not write-watched.
-static int query_stamp(uint64_t lo, uint64_t hi, uint32_t g) {
-    for (;;) {
-        uint64_t n = ww_query(lo, hi - lo);
-        if (n == UINT64_MAX) return 0;
-        for (uint64_t k = 0; k < n; k++) stamp_page(gen_pages[k], g);
-        if (n < sizeof gen_pages / sizeof *gen_pages) return 1;
-    }
-}
+static int query_stamp(uint64_t lo, uint64_t hi, uint32_t g) { return ww_scan(lo, hi, g); }
 
 // ---------------------------------------------------------------- shadow storage
 // Where importing guest memory costs too much (Linux: re-protecting pages that amdgpu imported as a userptr
@@ -1237,11 +1352,14 @@ static void shadow_log(uint64_t frame) {
     mem_hold_stats(&held_now, &holds, &fetched);
     rt_log("mem: shadow at frame %llu: %lld pools %.1f MiB; since the last: %llu pool syncs, %llu queries, %.1f MiB "
            "copied in (%llu untracked), %.1f MiB written back, %.1f MiB left in the shadow (%d ranges held, %llu new, "
-           "%llu fetched back), %.2f ms (%.2f ms in queries; %llu regions already snapped), %d GPU writes pending",
+           "%llu fetched back), %.2f ms (%.2f ms in queries; %llu regions already snapped), %d GPU writes pending, "
+           "%.1f MiB of pages watched%s",
            (unsigned long long)frame, (long long)s_live_n, s_live_bytes / 1048576.0, (unsigned long long)s_syncs,
            (unsigned long long)s_queries, s_copied / 1048576.0, (unsigned long long)s_untracked, s_wb_bytes / 1048576.0,
            s_held_bytes / 1048576.0, held_now, (unsigned long long)holds, (unsigned long long)fetched, qpc_ms(s_ticks),
-           qpc_ms(s_qticks), (unsigned long long)s_seen, nspend);
+           qpc_ms(s_qticks), (unsigned long long)s_seen, nspend,
+           vk_need_on ? __atomic_load_n(&need_count, __ATOMIC_RELAXED) * 4096 / 1048576.0 : s_live_bytes / 1048576.0,
+           vk_need_on ? " (AC_WATCH_USED)" : "");
     s_syncs = s_queries = s_copied = s_untracked = s_wb_bytes = s_held_bytes = s_ticks = s_qticks = s_seen = 0;
     plat_mutex_unlock(&shadow_lock);
 }
@@ -1490,6 +1608,11 @@ static void mirror_mode(int discrete) {
     if (shadow_on) rt_log("mem: shadow storage: CPU-visible pools are host-visible copies of guest memory, not imports%s",
                           sh && *sh ? " (AC_SHADOW)" : "");
     if (shadow_on) mirror_lazy = 0;   // the shadow storage holds the same pages for itself (gpu_written)
+    const char *wu = cfg_get("AC_WATCH_USED");
+    vk_need_on = shadow_on && !vk_mirror_on && !(wu && !strcmp(wu, "0"));
+    if (shadow_on && !vk_mirror_on)
+        rt_log("mem: write watch: %s (AC_WATCH_USED)", vk_need_on ? "only the pages the GPU used as buffers or textures"
+                                                                 : "every page of the pools");
     rt_log("mem: mode %s (%s): %s%s%s", mode == 2 ? "verify" : mode ? "mirror" : "import", why,
            mode ? "pools used as buffers get a device-local mirror" : "every CPU-visible pool is imported host memory",
            !mode ? "" : mirror_chunks ? ", filled by the 64 KiB chunks the replay binds"
@@ -2011,8 +2134,17 @@ static void mirror_sync(PoolRec *r) {
     mrep.sync_t += qpc() - t0;
 }
 
+// vk_need_on: the GPU reads n bytes of the pool's shadow from sp on (0: to its end).
+static void shadow_need(const PoolRec *r, uint64_t off, uint64_t n) {
+    uint64_t lim = r->import_hi - r->import_lo;
+    if (!r->smap || off >= lim) return;
+    if (!n || n > lim - off) n = lim - off;
+    need_range(r->import_lo + off, n);
+}
+
 void vk_mem_use(VkMemSpan *sp, uint64_t n) {
     PoolRec *r = sp->pool;
+    if (vk_need_on) { shadow_need(r, sp->offset, n); return; }
     if (r->mstate == MS_NONE) mirror_create(r);
     if (r->mstate != MS_ON) return;
     if (r->acc_sub != msub) mirror_sync(r);
@@ -2022,6 +2154,10 @@ void vk_mem_use(VkMemSpan *sp, uint64_t n) {
 
 void vk_mem_pick(VkMemSpan *sp, uint64_t n, int write) {
     PoolRec *r = sp->pool;
+    if (vk_need_on) {   // a GPU write needs nothing of the CPU's bytes: the pages around it are copied when read
+        if (r && !write) shadow_need(r, sp->offset, n);
+        return;
+    }
     if (!r || r->mstate != MS_ON) return;
     if (r->acc_sub != msub) mirror_sync(r);
     // A read of bytes the mirror never held: the GPU wrote none of them, so the imported buffer has them.
@@ -2135,6 +2271,35 @@ static int wb_flight_overlap(uint64_t a, uint64_t b) {
     return 0;
 }
 
+// gen_lock exclusive, vk_need_on. The queries leave the pages nobody needs written, so they cannot tell whether the
+// CPU still writes them, and freezing a region the game writes every frame costs a fault and a thaw each time (about
+// 60 us). A candidate is therefore reset whole once (every page protected again, the needed ones found written
+// stamped), and frozen at its next candidacy, freeze_idle submissions later, only if no page was written in between:
+// 1 then. A region the CPU still writes is reset again instead, one fault per written page per freeze_idle submissions.
+static int freeze_armed(uint64_t j) {
+    const uint64_t max = sizeof gen_pages / sizeof *gen_pages;
+    uint64_t a = j << REG_SHIFT, b = a + (1ull << REG_SHIFT);
+    if (reg_arm[j] > reg_last[j]) {   // reset since the last stamp: any written page is a write since then
+        uint64_t n = mem_written_peek(a, b - a, peek_pages, 1);
+        ww_calls++, ww_bytes += b - a;
+        if (!n) return 1;
+        if (n == UINT64_MAX) return 0;
+    }
+    uint32_t g = 0;
+    for (;;) {
+        uint64_t n = ww_query(a, b - a);
+        if (n == UINT64_MAX) return 0;
+        for (uint64_t k = 0; k < n; k++)
+            if (need_has(gen_pages[k])) {
+                if (!g) g = ++gen_now;
+                stamp_page(gen_pages[k], g);
+            }
+        if (n < max) break;
+    }
+    reg_arm[j] = ww_ep;   // a stamp above made reg_last the same: not armed, the region is not idle
+    return 0;
+}
+
 // gen_lock exclusive: freezes up to FREEZE_PER_SUB candidate regions still idle. The query after the
 // protection collects the writes made before it took effect.
 static void freeze_pass(void) {
@@ -2143,6 +2308,7 @@ static void freeze_pass(void) {
         if (ww_ep - reg_last[j] < (uint32_t)freeze_idle || mem_frozen(a)) continue;
         if (wb_flight_overlap(a, a + (1ull << REG_SHIFT))) continue;
         done++;
+        if (vk_need_on && !freeze_armed(j)) continue;
         if (!mem_freeze(a)) { n_frz_refused++; continue; }
         query_stamp(a, a + (1ull << REG_SHIFT), ++gen_now);
     }
