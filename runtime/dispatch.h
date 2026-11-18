@@ -1,8 +1,9 @@
 // Guest address -> host function lookup for indirect branches (rt_dispatch, declared in cpu.h).
 //
-// One flat table covers every module's code range: slot (pc - lo) >> 2 holds the host function for a guest
-// function start, as a 32-bit offset from an anchor address. Lookup is one range check and one load. The table is
-// built once by rt_dispatch_init and never written again, so threads read it without locks.
+// One flat table per module covers its code range: slot (pc - base) >> 2 holds the host function for a guest
+// function start, as a 32-bit offset from an anchor address. The tables are built once by rt_dispatch_init and never
+// written again, so threads read them without locks, and each thread keeps the targets it called in a small cache of
+// its own in front of them (dispatch.c "target cache", AC_DISPATCH_CACHE=0 to leave it empty).
 #pragma once
 #include <stdbool.h>
 #include <stdint.h>

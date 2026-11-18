@@ -9,9 +9,13 @@
 // inside a module (rodata, data, bss, alignment) are reserved but never written, so the OS never backs them with RAM.
 //
 // The tables are filled once by rt_dispatch_init and then made read-only, so any number of threads read them without
-// locks or per-thread caches. Host (HLE) functions at addresses outside the modules live in a small hash table that
-// is also fixed at init; they are looked up only after the module tables miss.
+// locks. Host (HLE) functions at addresses outside the modules live in a small hash table that is also fixed at init;
+// they are looked up only after the module tables miss.
+//
+// Each thread keeps the targets it calls in a small cache of its own in front of the tables ("target cache" below):
+// a slot of a table shares its cache line and its page with no other target a thread calls.
 #include "dispatch.h"
+#include "cfg.h"
 #include "host.h"
 #include "platform/platform.h"
 
@@ -34,6 +38,7 @@ static const RtModule *g_mods[MAX_MODULES];   // sorted by base
 static struct { const uint32_t *slot; uint64_t base, slots, bytes; } g_t[MAX_MODULES];   // per-module tables, g_mods order
 static int g_nmods;
 static bool g_ready;
+static bool dc_off;   // AC_DISPATCH_CACHE=0, read by rt_dispatch_init: the threads' target caches stay empty
 static uint64_t g_table_bytes, g_functions, g_lo, g_hi, g_slots;
 
 static struct { uint64_t addr; GuestFn fn; } g_host[HOST_CAP];
@@ -165,6 +170,8 @@ void rt_dispatch_init(const RtModule *mods, int count) {
         g_slots += slots;
         g_functions += m->count;
     }
+    const char *dce = cfg_get("AC_DISPATCH_CACHE");
+    dc_off = dce && !strcmp(dce, "0");
     __atomic_store_n(&g_ready, true, __ATOMIC_RELEASE);
 }
 
@@ -175,6 +182,32 @@ GuestFn rt_dispatch_lookup(uint64_t pc) {
     }
     return g_ready ? host_lookup(pc) : NULL;
 }
+
+// ---------------------------------------------------------------- target cache
+// The module tables hold one slot per 4 guest bytes, so the slots of two functions share a cache line only when the
+// functions start within 64 bytes of each other, and the slots a thread reads are spread over hundreds of pages of
+// a table of 200 MiB. In the town a thread calls 130 to 520 different targets in a million indirect calls, 57 000 to
+// 78 000 calls a frame on each of the three busiest threads: the slots of the targets called many times a frame stay
+// in the L1, those of the others come from memory again every frame, with a page walk (on a Z1 Extreme at 13 W, 29%
+// of the sampled loads of main's table by the game thread came from DRAM after a miss of both TLBs, and rt_dispatch
+// took 2.1% of that thread's cycles).
+// So each thread keeps the targets it called in DC_SIZE entries of its own, 16 KiB: an entry shares its line with
+// three others the same thread calls, and the whole cache takes four pages. Direct mapped on the guest address:
+// simulated on the same scene, 1024 entries answer 99.7% or more of the calls of each of the five busiest threads
+// (512: 98.3 to 99.95%, 4096: 99.9%), with the address folded once (the entries of functions DC_SIZE * 4 bytes apart
+// would collide otherwise: 99.0 to 99.8% at 1024).
+// A key is the guest address rotated right by 2, as the tables index it, so a misaligned address matches no entry. The
+// tables and the host registry never change once sealed, so an entry never goes stale and nothing invalidates the
+// caches. An empty entry must match no address: the key 0 belongs to entry 0 (the address 0, a call through a null
+// pointer, which must reach dispatch_fail), so entry 0 starts with a key of another entry and the others with 0.
+// AC_DISPATCH_CACHE=0 fills no entry: every call takes the tables, as before.
+#define DC_BITS 10
+#define DC_SIZE (1u << DC_BITS)
+typedef struct { uint64_t key; GuestFn fn; } DcEntry;
+static __thread DcEntry dc[DC_SIZE] = {[0] = {.key = 1}};
+
+static inline uint64_t dc_key(uint64_t pc) { return __builtin_rotateright64(pc, 2); }
+static inline DcEntry *dc_entry(uint64_t key) { return &dc[(key ^ (key >> DC_BITS)) & (DC_SIZE - 1)]; }
 
 __attribute__((noinline, noreturn, cold)) static void dispatch_fail(Cpu *c) {
     char at[64], lr[64];
@@ -187,10 +220,26 @@ __attribute__((noinline, noreturn, cold)) static void dispatch_fail(Cpu *c) {
              rt_guest_name(c->x[30], lr, sizeof lr));
 }
 
-// Host functions, and the fatal error. A separate tail call keeps the fast path below free of a stack frame.
-__attribute__((noinline)) static void dispatch_slow(Cpu *c) {
-    GuestFn f = g_ready ? host_lookup(c->pc) : NULL;
-    if (!f) dispatch_fail(c);
+// A target this thread's cache does not hold: the tables, then the host functions, then the fatal error. A separate
+// tail call keeps the fast path below free of a stack frame.
+__attribute__((noinline)) static void dispatch_miss(Cpu *c) {
+    uint64_t pc = c->pc;
+    uint32_t off = 0;
+    for (int i = 0; i < g_nmods && !off; i++) {
+        uint64_t j = __builtin_rotateright64(pc - g_t[i].base, 2);   // a pc outside the module lands far above its slots
+        off = j < g_t[i].slots ? g_t[i].slot[j] : 0;
+    }
+    GuestFn f = off ? (GuestFn)(D.anchor + off) : g_ready ? host_lookup(pc) : NULL;
+    if (__builtin_expect(!f, 0)) dispatch_fail(c);
+    if (g_ready && !dc_off) {   // before the seal a host function may still be registered at an address that has none
+        uint64_t key = dc_key(pc);
+        DcEntry *e = dc_entry(key);
+        // No key with the old function or the new one half written, should anything ever run guest code on this
+        // thread from inside this function: the entry matches nothing meanwhile.
+        e->key = e == dc;
+        e->fn = f;
+        e->key = key;
+    }
     __attribute__((musttail)) return f(c);
 }
 
@@ -206,13 +255,12 @@ static __attribute__((noinline)) void dispatch_preempt(Cpu *c) {
 void rt_dispatch(Cpu *c) {
     if (__builtin_expect(c->thread && kern_preempt_pending(c->thread), 0))
         __attribute__((musttail)) return dispatch_preempt(c);
-    uint32_t off = 0;
-    for (int i = 0; i < g_nmods && !off; i++) {
-        uint64_t j = __builtin_rotateright64(c->pc - g_t[i].base, 2);   // a pc outside the module lands far above its slots
-        off = j < g_t[i].slots ? g_t[i].slot[j] : 0;
-    }
-    if (__builtin_expect(!off, 0)) __attribute__((musttail)) return dispatch_slow(c);
-    GuestFn f = (GuestFn)(D.anchor + off);
+    uint64_t key = dc_key(c->pc);
+    const DcEntry *e = dc_entry(key);
+    GuestFn f = e->fn;
+    __asm__("" : "+r"(f));   // the load stays here, before the test: the compiler otherwise rebuilds the entry's
+                             // address after it (the thread pointer loaded and added) to jump through memory
+    if (__builtin_expect(e->key != key, 0)) __attribute__((musttail)) return dispatch_miss(c);
     __attribute__((musttail)) return f(c);
 }
 
