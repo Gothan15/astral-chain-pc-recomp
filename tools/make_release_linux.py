@@ -116,9 +116,13 @@ def run(cmd, **kw):
 
 
 def tar_extract(name, dest, members, strip=0):
-    """Extract only members (path prefixes inside the archive) of a pinned tarball with the system tar, once."""
+    """Extract only members (path prefixes inside the archive) of a pinned tarball with the system tar, once per pin.
+    The stamp holds the pinned sha256: a stamp alone kept LLVM 21.1.8's unpack after the pin moved to 23.1.5, so the
+    release shipped clang 21 (generated code at -O1) beside a profile converted by llvm-profdata 23, which clang 21
+    cannot read."""
     stamp = dest / '.unpacked'
-    if stamp.is_file():
+    pin = mr.PINS[name][1]
+    if stamp.is_file() and stamp.read_text().strip() == pin:
         return dest
     shutil.rmtree(dest, ignore_errors=True)
     dest.mkdir(parents=True)
@@ -127,7 +131,7 @@ def tar_extract(name, dest, members, strip=0):
     run(['tar', '-xf', path, '-C', dest, f'--strip-components={strip}', '--wildcards', '--no-wildcards-match-slash',
          *members])
     print(f'{name}: unpacked in {time.time() - t0:.0f} s')
-    stamp.write_text('')
+    stamp.write_text(pin)
     return dest
 
 
@@ -216,6 +220,8 @@ def build_llvm(out):
         if r.returncode:
             sys.exit(f'{dst / "bin" / tool} does not start:\n{r.stderr}')
         print(r.stdout.splitlines()[0])
+        if LLVM_VERSION not in r.stdout.splitlines()[0]:
+            sys.exit(f'{dst / "bin" / tool} is not LLVM {LLVM_VERSION}: a stale unpack in {src}?')
     return dst
 
 
