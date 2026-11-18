@@ -43,8 +43,14 @@ trap restore EXIT
 trap 'exit 130' INT TERM HUP
 
 sudo ${SUDO_ASKPASS:+-A} -v || exit 1
-# Lower PL1 first, then PL2/PL3, so the firmware never sees PL1 > PL2.
-for a in "${ATTRS[@]}"; do setlimit "$a" "$WATTS"; done
-echo "power limits set to $WATTS W (was ${OLD[ppt_pl1_spl]}/${OLD[ppt_pl2_sppt]}/${OLD[ppt_pl3_fppt]})" >&2
+# Lower PL1 first, then PL2/PL3, so the firmware never sees PL1 > PL2. PL2 and PL3 have a minimum (15 W on the Ally):
+# a lower value is refused and the boost limits stay at 43 / 53 W, so the clocks start high and fall once the boost
+# window is spent (4.5 GHz down to 1.9 GHz in a minute at 13 W). Each limit is clamped to its minimum instead.
+for a in "${ATTRS[@]}"; do
+    w=$WATTS; min=$(<"$DIR/$a/min_value")
+    (( w < min )) && w=$min
+    setlimit "$a" "$w"
+done
+echo "power limits set to $(<"$DIR/ppt_pl1_spl/current_value")/$(<"$DIR/ppt_pl2_sppt/current_value")/$(<"$DIR/ppt_pl3_fppt/current_value") W (was ${OLD[ppt_pl1_spl]}/${OLD[ppt_pl2_sppt]}/${OLD[ppt_pl3_fppt]})" >&2
 
 taskset -c "$CPUS" "$@"
