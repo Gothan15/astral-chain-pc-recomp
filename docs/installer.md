@@ -142,7 +142,8 @@ python -m installer --base FILE --update FILE --keys FILE --lang CODE --dest DIR
     to be read from stderr; the exit code stays 1.
   - `--lang auto` takes the language `astralchain.ini` of the install folder has (the player may have changed it since
     the install), else the recorded one, else on a first install the game's language for the system's display
-    language (English when the game has none for it, and for Chinese and Korean, whose text needs the Switch fonts).
+    language (English when the game has none for it, and for Chinese and Korean, whose text draws with the Switch fonts the setup
+    does not install).
   - With `--progress-lines` the tools die with the setup (`installer/lifeline.py`), also when the setup's process is
     killed, which no handler sees. On Windows the setup joins a job object that ends its processes when it goes; on
     Linux a small watcher process kills the process group of each tool still running. The next run continues from the

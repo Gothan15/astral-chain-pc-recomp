@@ -968,7 +968,7 @@ class Cleanup(Step):
             remove(stale)
         # The temp folder itself goes once the reporter closed its log (installer/cli.py finish_temp): the generated C,
         # the objects and the logs live in build-cache/.
-        for name in ('check', 'shared-fonts', 'expected-install.json'):
+        for name in ('check', 'expected-install.json'):
             remove(ctx.temp / name)
         romfs_problem(dest / 'romfs', expected_game(ctx))
         write_rebuild_command(ctx)
