@@ -180,7 +180,10 @@ astralchain.ini.example, VERSION  the default ini; the release string (the repos
 
 - SDL3 comes from the upstream release, not MSYS2: MSYS2's DLL imports the LGPL libiconv.
 - Every bundled third-party piece gets a row in `THIRD_PARTY_NOTICES.md`.
-- The release contains nothing game-derived; `make_release.py` runs `tools/check_content.py` over the folder before it
+- The release contains nothing game-derived but, in the Linux release, `tools/data/pgo/<version>.profdata`: the
+  profile the installer compiles the lifted code with (`build_game.py --release-opt`), the names of the lifted
+  functions (`f_<guest address>`) and their branch counts, no code or data of the game (`tools/pgo_profile.py`);
+  `make_release.py` runs `tools/check_content.py` over the folder before it
   finishes, then starts the folder's own installer to see the check step reach the game files and builds every window
   screen in both languages.
 

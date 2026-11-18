@@ -1543,7 +1543,12 @@ int plat_stderr_path(char *out, size_t cap) {
 
 void plat_exit_skip_unload(void) {}   // _exit below runs no library destructors already
 
+// The profile runtime's writer, present only in a build with --pgo-generate (tools/build_game.py): _exit skips the
+// atexit handler that would write the .profraw.
+extern int __llvm_profile_write_file(void) __attribute__((weak));
+
 void plat_exit(int code) {
+    if (__llvm_profile_write_file) __llvm_profile_write_file();
     fflush(stdout);
     fflush(stderr);
     _exit(code);

@@ -53,6 +53,17 @@ Split build. --make-runtime-lib compiles only runtime/ into <out>/libacrt.a (wha
 then compiles only the generated C and the install-time files (modules.c and INSTALL_SIDE, which bake the player's
 game hashes and version in) and links them with that library. The library holds no game-derived data.
 
+Profile-guided optimisation and ThinLTO, generated code only (the runtime keeps its flags). --pgo-generate DIR builds
+a game that writes a .profraw into DIR when it exits (plat_exit calls the profile runtime's writer: _exit skips the
+atexit one); tools/pgo_profile.py merges them into tools/data/pgo/<version>.proftext.xz. --pgo-use PROFILE compiles
+with a profile, --lto thin compiles to bitcode and lets lld optimise across the chunks and do the codegen, with
+--lto-jobs threads and a cache in <out>/thinlto-cache. --release-opt is both, with the version's profile when there
+is one: what the installer builds (Linux; untried with llvm-mingw). Measured on a Z1 Extreme at 13 W on 4 cores,
+town, with a profile of that scene (2026-11-17, three alternating runs each): the guest render thread runs 10.9% fewer
+instructions and 9-11% fewer cycles per frame than a plain build (PGO alone 4.8% fewer instructions, ThinLTO alone
+3.8%; placing the hot functions first in .text alone, nothing). With the sparse profile of a town run and six minutes
+of play, the link takes 100 s at 12 threads and 1.4 GiB, against under a second; the compile is no slower.
+
 Standard library only.
 """
 import argparse
@@ -60,6 +71,7 @@ import ctypes
 import ctypes.wintypes as wt   # the job-object structures below; importing it works on every OS
 import hashlib
 import json
+import lzma
 import os
 import re
 import shutil
@@ -106,6 +118,7 @@ MIN_O2_CLANG = 22
 GEN_FLAGS = ['-O2', '-fno-strict-aliasing', '-Wno-return-type', '-Wno-unused-label', '-fvisibility=hidden',
              '-march=x86-64-v3']
 RT_FLAGS = ['-O2', '-g', '-Wall', '-fno-strict-aliasing', '-march=x86-64-v3']
+GEN_DEPS = []   # the --pgo-use profile, an input of every generated chunk's compile
 
 
 def set_cpu(cpu):
@@ -280,6 +293,9 @@ def c_string(s):
     return '"' + s.replace('\\', '\\\\').replace('"', '\\"') + '"'
 
 
+# Profiles for --pgo-use auto: <version>.proftext.xz in the repository (tools/pgo_profile.py writes it), <version>.profdata
+# in a release folder (tools/make_release.py converts it).
+PGO_DIR = ROOT / 'tools' / 'data' / 'pgo'
 RUNTIME = ROOT / 'runtime'   # --runtime: a copy of runtime/ lets a task build without touching the shared tree
 
 
@@ -399,7 +415,9 @@ def ninja_file(gen, out, mods, pool_depth, skip=(), prebuilt=False, runtime_lib=
         for f in files:
             o = out / 'obj' / mod / (f.stem + '.o')
             if not prebuilt:
-                lines.append(f'build {ninja_path(o)}: cc_gen {ninja_path(f)}')
+                # the profile is a flag path: listed so a new profile recompiles the chunks
+                lines.append(f'build {ninja_path(o)}: cc_gen {ninja_path(f)}' +
+                             (f' | {ninja_path(GEN_DEPS[0])}' if GEN_DEPS else ''))
                 lines.append('  pool = gen')
             objs[mod].append(o)
     rt = []
@@ -638,10 +656,17 @@ def run_measured(cmd, env):
     """Run cmd in its own job object. Returns (exit code, seconds, peak bytes of one process, peak bytes of all).
     Off Windows: the largest resident set of one child process, and 0 for all of them (no job accounting)."""
     if not WIN:
+        # wait4: the peak of this command's process tree alone (RUSAGE_CHILDREN would carry the compile's peak into the
+        # link's report)
         t0 = time.monotonic()
-        code = subprocess.call(cmd, cwd=ROOT, env=env)
-        peak = resource.getrusage(resource.RUSAGE_CHILDREN).ru_maxrss * 1024   # KiB on Linux
-        return code, time.monotonic() - t0, peak, 0
+        proc = subprocess.Popen(cmd, cwd=ROOT, env=env)
+        try:
+            _, status, usage = os.wait4(proc.pid, 0)
+        except KeyboardInterrupt:
+            proc.kill()
+            raise
+        proc.returncode = os.waitstatus_to_exitcode(status)
+        return proc.returncode, time.monotonic() - t0, usage.ru_maxrss * 1024, 0   # KiB on Linux
     k32 = ctypes.WinDLL('kernel32', use_last_error=True)
     k32.CreateJobObjectW.restype = wt.HANDLE
     k32.CreateJobObjectW.argtypes = [ctypes.c_void_p, wt.LPCWSTR]
@@ -740,6 +765,38 @@ def clang_major():
     return int(m.group(1)) if m else None
 
 
+def pgo_profile(arg, version, out):
+    """The indexed profile -fprofile-use reads, for --pgo-use arg; None for auto without a profile of this version.
+    A text profile (.proftext, .proftext.xz: what the repository keeps) becomes out/pgo-<version>.profdata through the
+    llvm-profdata beside clang, redone when the text is newer."""
+    if arg == 'auto':
+        found = [p for p in (PGO_DIR / f'{version}.profdata', PGO_DIR / f'{version}.proftext.xz') if p.is_file()]
+        if not found:
+            return None
+        src = found[0]
+    else:
+        src = Path(arg).resolve()
+        if not src.is_file():
+            sys.exit(f'{src} not found: merge the .profraw files with llvm-profdata merge')
+    if src.suffix == '.profdata':
+        return src
+    dst = out / f'pgo-{version}.profdata'
+    if dst.is_file() and dst.stat().st_mtime >= src.stat().st_mtime:
+        return dst
+    suffix = '.exe' if WIN else ''
+    tool = next((p for p in (CLANG.parent / f'llvm-profdata{suffix}', on_path('llvm-profdata')) if p.is_file()), None)
+    if not tool:
+        sys.exit(f'{src} is a text profile and no llvm-profdata was found beside {CLANG} or on PATH to convert it')
+    text = out / f'pgo-{version}.proftext'
+    out.mkdir(parents=True, exist_ok=True)
+    text.write_bytes(lzma.decompress(src.read_bytes()) if src.suffix == '.xz' else src.read_bytes())
+    code = subprocess.call([str(tool), 'merge', '-o', str(dst), str(text)])
+    text.unlink()
+    if code:
+        sys.exit(f'{tool} merge failed on {src}')
+    return dst
+
+
 def main():
     ap = argparse.ArgumentParser(description=__doc__.splitlines()[0])
     ap.add_argument('--version', default='v101', help='game version (default v101: 1.0.1)')
@@ -782,8 +839,25 @@ def main():
                     help=f'compile the generated code at -O1 (default -O2, which needs clang {MIN_O2_CLANG} or newer)')
     ap.add_argument('--expected', type=Path,
                     help='expected hashes (default tools/data/expected-<display version>.json)')
+    ap.add_argument('--pgo-generate', type=Path, metavar='DIR',
+                    help='instrument the generated code for profile-guided optimisation: the game writes a .profraw '
+                         'into DIR at exit (merge them with llvm-profdata merge)')
+    ap.add_argument('--pgo-atomic', action='store_true',
+                    help='with --pgo-generate: atomic counters (exact on many threads, slower)')
+    ap.add_argument('--pgo-use', metavar='PROFILE',
+                    help='optimise the generated code with this profile: an indexed .profdata (llvm-profdata merge), '
+                         'a .proftext or .proftext.xz (converted with the llvm-profdata beside clang), or auto: '
+                         f'{PGO_DIR.relative_to(ROOT).as_posix()}/<version>.profdata or .proftext.xz, none if '
+                         'neither exists')
+    ap.add_argument('--lto', choices=('thin',), help='ThinLTO across the generated chunks (lld does the codegen)')
+    ap.add_argument('--lto-jobs', type=int, help='ThinLTO backend threads at link (default: the compile jobs)')
+    ap.add_argument('--release-opt', action='store_true',
+                    help='what the installer builds with: --lto thin --pgo-use auto')
     args = ap.parse_args()
     set_cpu(args.cpu)
+    if args.release_opt:
+        args.lto = args.lto or 'thin'
+        args.pgo_use = args.pgo_use or 'auto'
 
     gen = (args.gen or ROOT / 'generated' / args.version).resolve()
     out = (args.out or ROOT / 'build' / args.version).resolve()
@@ -855,6 +929,23 @@ def main():
     cpus = os.cpu_count() or 1
     budget = min(MEM_BUDGET, int(total_ram() * 0.8))
     jobs = args.jobs or max(1, min(cpus, budget // JOB_MEM))
+    # Profile-guided optimisation and ThinLTO touch the generated code only; the runtime keeps RT_FLAGS. The link needs
+    # -fprofile-generate too, for the profile runtime; plat_exit writes the .profraw (it leaves through _exit).
+    if args.pgo_generate:
+        GEN_FLAGS.append(f'-fprofile-generate={cmd_path(args.pgo_generate.resolve())}')
+        if args.pgo_atomic:
+            GEN_FLAGS.append('-fprofile-update=atomic')
+        LINK_FLAGS.append('-fprofile-generate')
+    profile = pgo_profile(args.pgo_use, args.version, out) if args.pgo_use else None
+    if profile:
+        GEN_FLAGS.append(f'-fprofile-use={cmd_path(profile)}')
+        GEN_DEPS.append(profile)
+        print(f'build_game: profile-guided: {below_root(profile)}')
+    if args.lto:
+        # The backend's optimisation level and threads go to lld; its cache keeps relinks after a small change short
+        GEN_FLAGS.append(f'-flto={args.lto}')
+        LINK_FLAGS.extend([f'-flto={args.lto}', '-O2', f'-Wl,--thinlto-jobs={args.lto_jobs or jobs}',
+                           '-Xlinker', f'"--thinlto-cache-dir={(out / "thinlto-cache").as_posix()}"'])
     missing = [n for n in names if n not in hashes]
     if missing:
         sys.exit(f'{expected}: no exefs_sha256 for {missing}')

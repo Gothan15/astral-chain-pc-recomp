@@ -36,6 +36,7 @@ checks and stop at the missing game files) and the window's --selftest.
 import argparse
 import hashlib
 import json
+import lzma
 import os
 import shutil
 import struct
@@ -111,7 +112,7 @@ LLVM_SKIP_SUFFIXES = {'.idl', '.tlb'}
 TOOLS_FILES = ['build_game.py', 'build_shaders.py', 'check_content.py', 'exefs_patches.py', 'extract.py',
                'hostmem.py', 'make_prompts_folders.py', 'pack_shader_cache.py', 'prepare_shaders.py', 'romfs_index.py',
                'shader_census.py']
-TOOLS_DIRS = ['data']   # data/: the expected hashes of the base game and the update
+TOOLS_DIRS = ['data']   # data/: the expected hashes of the base game and the update, pgo/ the profiles
 RUNTIME_SUFFIXES = {'.h', '.inc', '.ico'}   # .ico: the installer window icon
 
 PROBES = ['--probe-kernel', '--probe-vkexec', '--probe-nvn-tex', '--probe-shader', '--probe-xess', '--probe-latency']
@@ -421,13 +422,33 @@ def runtime_lib(out, llvm):
         shutil.copy2(ROOT / 'runtime' / name, rt / name)
 
 
-def build_sources(out):
+def pgo_profiles(out, profdata):
+    """tools/data/pgo/<version>.proftext.xz (the repository's text profiles) -> <version>.profdata in the folder: the
+    installer's clang reads the indexed form and the release ships no llvm-profdata. profdata: the llvm-profdata of
+    the release's LLVM, whose major version reads and writes the same format."""
+    for src in sorted((out / 'tools' / 'data' / 'pgo').glob('*.proftext.xz')):
+        text = src.with_suffix('')
+        text.write_bytes(lzma.decompress(src.read_bytes()))
+        dst = src.parent / (src.name.split('.')[0] + '.profdata')
+        run([profdata, 'merge', '-o', dst, text])
+        text.unlink()
+        src.unlink()
+        print(f'{dst.relative_to(out).as_posix()}: {mib(dst.stat().st_size)}')
+
+
+def build_sources(out, profdata=None):
     copy_tree(ROOT / 'recomp', out / 'recomp', lambda r: not r.endswith(('.py', '.txt')) or '__pycache__' in r)
     for f in TOOLS_FILES:
         (out / 'tools').mkdir(exist_ok=True)
         shutil.copy2(ROOT / 'tools' / f, out / 'tools' / f)
     for d in TOOLS_DIRS:
         copy_tree(ROOT / 'tools' / d, out / 'tools' / d, lambda r: '__pycache__' in r or r.endswith('.md'))
+    # Linux only for now: the installer compiles with the profile and ThinLTO there (--release-opt); on Windows neither
+    # has been tried with llvm-mingw, so the Windows folder ships no profile
+    if profdata:
+        pgo_profiles(out, profdata)
+    else:
+        shutil.rmtree(out / 'tools' / 'data' / 'pgo', ignore_errors=True)
     # The shader variants players met, recorded in play and generated into generated/shader-answers.bin
     # (tools/prepare_shaders.py --recordings); tools/prepare_shaders.py reads them during the prepare step.
     (out / 'data').mkdir(exist_ok=True)

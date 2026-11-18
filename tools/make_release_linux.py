@@ -27,7 +27,9 @@ the .NET 10 SDK and Python 3.12+ with Pillow (.venv). The folder holds:
 the generated C and links build/release-linux-check/astralchain with the folder's tools only, then runs the probes
 beside it. Like tools/make_release.py, both need one game version extracted and lifted first (generated/v101).
 
-The folder contains nothing derived from the game: check_content runs over it before the script finishes, then the
+The folder contains nothing derived from the game but tools/data/pgo/<version>.profdata, the profile the installer
+compiles with (names of lifted functions, f_<guest address>, and their branch counts; tools/pgo_profile.py):
+check_content runs over it before the script finishes, then the
 folder's own python runs a check-only installer pass and the window's --selftest.
 """
 import argparse
@@ -215,6 +217,13 @@ def build_llvm(out):
             sys.exit(f'{dst / "bin" / tool} does not start:\n{r.stderr}')
         print(r.stdout.splitlines()[0])
     return dst
+
+
+def llvm_profdata():
+    """The release LLVM's llvm-profdata, unpacked beside the work folder only: it converts the repository's text
+    profiles at release time (make_release.pgo_profiles) and does not ship."""
+    top = f'LLVM-{LLVM_VERSION}-Linux-X64'
+    return tar_extract('llvm-linux', WORK / 'llvm-profdata', [f'{top}/bin/llvm-profdata'], strip=1) / 'bin' / 'llvm-profdata'
 
 
 def strip(where, tool):
@@ -651,8 +660,8 @@ def prove(out, cpu='v3'):
          '--sysroot', out / 'llvm' / 'sysroot', '--deps', out / 'runtime' / 'deps', '--runtime', out / 'runtime',
          '--runtime-lib', out / 'runtime' / ('libacrt-v2.a' if cpu == 'v2' else 'libacrt.a'),
          '--ninja', out / 'bin' / 'ninja', '--version', version,
-         '--gen', gen, '--out', chk, '--exefs', ext / 'exefs', '--romfs', ext / 'romfs', '--profile', chk / 'profile'],
-        env=env)
+         '--gen', gen, '--out', chk, '--exefs', ext / 'exefs', '--romfs', ext / 'romfs', '--profile', chk / 'profile',
+         '--release-opt'], env=env)
     print(f'prove: build {time.time() - t0:.0f} s')
     # copyfile, not copy2: the check dir may sit on a 9p mount (WSL /mnt/c), whose utime/rename semantics break
     # copystat; only the bytes matter here.
@@ -703,7 +712,7 @@ def main():
     rtlib = runtime_lib(out, llvm, sysroot)
     build_sysroot(out, sysroot, used_sysroot_files(out, llvm, sysroot, rtlib))
     build_python(out, llvm, sysroot)
-    mr.build_sources(out)
+    mr.build_sources(out, llvm_profdata())
     collect_licenses(out, sysroot)
     build_entry(out)
     mr.check_folder(out)
