@@ -15,11 +15,17 @@ stub folds the guest state at the call into a digest and sets the caller-saved r
 whether the emitted code had every register in the Cpu at the call and reads them back after it. Callers of another
 picked function are dropped, as the C side would run that function instead of the stub.
 
+With --abi-trust the functions are emitted as gen.py --abi-trust emits them, from the tables of a lift (--ipa
+<generated dir>/ipa.json, recomp/ipa.py): a caller stores what its callee reads, so the digest of a direct call takes
+the registers the callee reads, the digest of an indirect call the registers an unknown target is taken to read, and
+at the return the test compares the registers a caller reads and the callee-saved ones. A function that calls one
+that never returns is dropped: the emitted code holds nothing ready for after such a call, and the stub returns.
+
 With --patches, the spin waits of the table (recomp/patches.py `spin`) are emitted with their gates, and functions
 that hold one come first (a quarter of the picks at most); a case whose loop does not leave runs into --steps.
 
 Usage: func.py [--exefs DIR] [--modules main,subsdk0,sdk] [--functions N] [--cases K] [--seed S] [--jobs J]
-               [--patches FILE]
+               [--patches FILE] [--abi-trust --ipa FILE]
 """
 import argparse
 import os
@@ -38,6 +44,7 @@ from unicorn import arm64_const as A
 
 from common import BUF, BUF_SIZE, MSYS_BIN, ROOT, Emu, compiler, diff_state, rand_fpcr, rand_v, rand_x, run_harness
 import gen
+import ipa
 import patches
 import vlocals
 from layout import layout
@@ -177,8 +184,9 @@ def check_function(emitter, entry, end):
     return tags
 
 
-def build(work, emitted, jobs, cflags):
-    """Compile the emitted functions with harness.c into work/func[.exe]; tests[k] is emitted[k]."""
+def build(work, emitted, jobs, cflags, masks=None):
+    """Compile the emitted functions with harness.c into work/func[.exe]; tests[k] is emitted[k]. masks: {callee: the
+    registers its stub's digest takes} (--abi-trust)."""
     cc = compiler()
     env = dict(os.environ)
     if os.name == 'nt' and MSYS_BIN.exists():
@@ -203,7 +211,9 @@ def build(work, emitted, jobs, cflags):
     table.write_text('#include "cpu.h"\n' + ''.join(f'void {gen.fname(e)}(Cpu *c);\n' for _, e, _, _ in emitted) +
                      'GuestFn tests[] = {' + ','.join(gen.fname(e) for _, e, _, _ in emitted) + '};\n' +
                      f'int ntests = {len(emitted)};\n' + 'void rt_stub_call(Cpu *c, uint64_t target);\n' +
-                     ''.join(f'void {gen.fname(t)}(Cpu *c) {{ rt_stub_call(c, {hex(t)}ull); }}\n'
+                     'void rt_stub_call_m(Cpu *c, uint64_t target, uint64_t mask);\n' +
+                     ''.join(f'void {gen.fname(t)}(Cpu *c) {{ rt_stub_call(c, {hex(t)}ull); }}\n' if masks is None else
+                             f'void {gen.fname(t)}(Cpu *c) {{ rt_stub_call_m(c, {hex(t)}ull, {hex(masks[t])}ull); }}\n'
                              for t in sorted(called)))
     # fma.c: a --cflags=-march=x86-64-v2 run must exercise the software fma the v2 build links, not the C runtime's.
     srcs += [table, ROOT / 'tests' / 'diff' / 'harness.c', ROOT / 'runtime' / 'fma.c']
@@ -252,7 +262,8 @@ class Runner:
 
     MAX_CALLS = 1000
 
-    def __init__(self, images, buf0, sites):
+    def __init__(self, images, buf0, sites, masks=None, ind_mask=0xFFFFFFFF):
+        self.masks, self.ind_mask = masks, ind_mask   # --abi-trust: the registers a call's digest takes
         self.emu = Emu(images)
         mu = self.emu.mu
         for base, data in images:
@@ -285,12 +296,15 @@ class Runner:
         if (w & 0xFC000000) == 0x94000000:   # BL
             imm = w & 0x03FFFFFF
             target = (a + ((imm - (1 << 26) if imm >> 25 else imm) << 2)) & M64
+            mask = 0xFFFFFFFF if self.masks is None else self.masks.get(target, self.ind_mask)   # not a function: rt_dispatch
         else:                                 # BLR
             target = mu.reg_read(e.xregs[(w >> 5) & 31])
+            mask = self.ind_mask
         mu.reg_write(A.UC_ARM64_REG_X30, a + 4)
         h = ((self.h ^ target) * FNV) & M64
-        for val in list(mu.reg_read_batch(e.xregs)) + [mu.reg_read(A.UC_ARM64_REG_SP)]:
-            h = ((h ^ val) * FNV) & M64
+        for i, val in enumerate(list(mu.reg_read_batch(e.xregs)) + [mu.reg_read(A.UC_ARM64_REG_SP)]):
+            if mask >> i & 1:
+                h = ((h ^ val) * FNV) & M64
         for val in mu.reg_read_batch(e.qregs[:8]):
             h = ((h ^ (val & M64)) * FNV) & M64
             h = ((h ^ (val >> 64)) * FNV) & M64
@@ -350,6 +364,9 @@ def main():
     ap.add_argument('--v-locals', type=int, default=vlocals.LOCALS,
                     help='gen.py --v-locals: V registers per function in locals')
     ap.add_argument('--v-trust', action='store_true', help='gen.py --v-trust: V8-V15 not reloaded after a call')
+    ap.add_argument('--abi-trust', action='store_true',
+                    help='gen.py --abi-trust: every register a local, synced where the other side reads it')
+    ap.add_argument('--ipa', type=Path, help='with --abi-trust: ipa.json of a gen.py --abi-trust lift of --exefs')
     ap.add_argument('--work', type=Path, default=ROOT / 'build' / 'test' / 'func',
                     help='work directory (chunks, harness, images); one per concurrent run')
     args = ap.parse_args()
@@ -362,6 +379,10 @@ def main():
     images, emitted, tags = [], [], []
     mods = layout(args.exefs)
     table = patches.load(args.patches, mods) if args.patches else patches.Table()
+    if args.abi_trust and not args.ipa:
+        raise SystemExit('--abi-trust needs --ipa <generated dir>/ipa.json')
+    T = ipa.Tables.load(args.ipa) if args.abi_trust else None
+    trust = {'abi_trust': True, 'ipa': T} if T else {}
     for name, base, _ in mods:
         if name not in want:
             continue
@@ -370,21 +391,26 @@ def main():
         img.write_bytes(mod.image)
         images.append((base, img, mod.image))
         picks, emitter = pick_functions(name, mod, args.functions, r, table.spins_for(name, base),
-                                        v_locals=args.v_locals, v_trust=args.v_trust)
+                                        v_locals=args.v_locals, v_trust=args.v_trust, **trust)
+        if T:
+            picks = [p for p in picks if not any(T.NORET[t] for t in callees(emitter, p[0], p[1]))]
         for entry, end, t in picks:
             emitted.append((name, entry, end, emitter))
             tags.append(t)
     print(f'picked {len(emitted)} functions ({time.time() - t0:.0f}s)', flush=True)
 
     t1 = time.time()
-    exe = build(work, emitted, args.jobs, args.cflags)
+    masks = None
+    if T:
+        masks = {t: T.inn(t) for _, entry, end, emitter in emitted for t in callees(emitter, entry, end)}
+    exe = build(work, emitted, args.jobs, args.cflags, masks)
     print(f'compiled ({time.time() - t1:.0f}s)', flush=True)
 
     buf0 = make_buffer(r)
     sites = set()
     for _, entry, end, emitter in emitted:
         sites.update(call_sites(emitter.mod, entry, end))
-    runner = Runner([(base, data) for base, _, data in images], buf0, sites)
+    runner = Runner([(base, data) for base, _, data in images], buf0, sites, masks, ipa.IND_USE if T else 0xFFFFFFFF)
     cases, expect, tested, skipped = [], [], set(), 0
     t2 = time.time()
     for k, (name, entry, end, _) in enumerate(emitted):
@@ -402,7 +428,8 @@ def main():
           flush=True)
 
     t3 = time.time()
-    recs, err = run_harness(exe, work, buf0, cases, [(base, img) for base, img, _ in images], stubs=True)
+    recs, err = run_harness(exe, work, buf0, cases, [(base, img) for base, img, _ in images],
+                            stubs=ipa.IND_USE if T else True)
     print(f'harness: {len(recs)} of {len(cases)} cases ({time.time() - t3:.0f}s)')
     if err:
         k = cases[len(recs)][0] if len(recs) < len(cases) else None
@@ -413,6 +440,10 @@ def main():
     for case, want_state, got in zip(cases, expect, recs):
         # Generated functions keep NZCV in a local (recomp/flags.py) and leave c->nzcv as it was: flags only count
         # where the function reads them, which the registers and memory show.
+        if T:   # the registers a caller reads after the return, and the callee-saved ones
+            m = T.out(emitted[case[0]][1]) | T.kept | 1 << 18
+            got = ([a if m >> j & 1 else 0 for j, a in enumerate(got[0])],) + tuple(got[1:])
+            want_state = ([a if m >> j & 1 else 0 for j, a in enumerate(want_state[0])],) + tuple(want_state[1:])
         d = diff_state(got, want_state, check_pc=False, check_mem=True, check_nzcv=False)
         if d:
             nfail += 1

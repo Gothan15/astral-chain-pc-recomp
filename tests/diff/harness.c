@@ -23,7 +23,8 @@ extern int ntests;
 #define PTR_LO (BUF + 0x8000)
 #define PTR_SPAN 0x20000
 
-static int g_stubs;            // In.stubs of the running case
+static uint64_t g_stubs;       // In.stubs of the running case: 0 no stub, 1 the stub, another value the stub with
+                               // that register mask for the indirect calls (gen.py --abi-trust)
 static uint64_t g_stub_h;      // digest of every call's state so far
 
 static uint64_t splitmix(uint64_t z) {
@@ -37,13 +38,15 @@ static uint64_t mix(uint64_t h, uint64_t w) { return (h ^ w) * 0x100000001B3ull;
 
 // The callee of every call in a function under tests/diff/func.py; Runner.stub there is the same function on the
 // Unicorn side. Folds the target, X0-X30, SP and V0-V7 into a digest, so a register the caller left unwritten at the
-// call changes it, then sets X0-X18, NZCV and V0-V7 from the digest, so a caller reading a register it held across
+// call changes it (of X0-X30 and SP only the registers of mask, bit n for Xn and bit 31 for SP: with gen.py
+// --abi-trust a caller stores what the callee reads), then sets X0-X18, NZCV and V0-V7 from the digest, so a caller reading a register it held across
 // the call sees a value the callee could have left. X0-X7 mostly get pointers into the scratch buffer. The digest
 // and the call count go to the top of the scratch buffer, which the memory check covers.
-static void rt_stub(Cpu *c, uint64_t target) {
+static void rt_stub(Cpu *c, uint64_t target, uint64_t mask) {
     uint64_t h = mix(g_stub_h, target);
-    for (int i = 0; i < 31; i++) h = mix(h, c->x[i]);
-    h = mix(h, c->sp);
+    for (int i = 0; i < 31; i++)
+        if (mask >> i & 1) h = mix(h, c->x[i]);
+    if (mask >> 31 & 1) h = mix(h, c->sp);
     for (int i = 0; i < 8; i++) h = mix(mix(h, (uint64_t)c->v[i]), (uint64_t)(c->v[i] >> 64));
     g_stub_h = h;
     for (int i = 0; i < 19; i++) {
@@ -59,9 +62,10 @@ static void rt_stub(Cpu *c, uint64_t target) {
 }
 
 void rt_dispatch(Cpu *c) {
-    if (g_stubs) rt_stub(c, c->pc);
+    if (g_stubs) rt_stub(c, c->pc, g_stubs == 1 ? ~0ull : g_stubs);
 }
-void rt_stub_call(Cpu *c, uint64_t target) { rt_stub(c, target); }
+void rt_stub_call(Cpu *c, uint64_t target) { rt_stub(c, target, ~0ull); }
+void rt_stub_call_m(Cpu *c, uint64_t target, uint64_t mask) { rt_stub(c, target, mask); }
 void rt_spin_gate(Cpu *c, uint64_t head) { (void)c; (void)head; }
 void rt_svc(Cpu *c, uint32_t imm, uint64_t pc) { (void)c; (void)imm; (void)pc; }
 void rt_brk(Cpu *c, uint32_t imm, uint64_t pc) { (void)c; (void)imm; (void)pc; abort(); }
@@ -139,7 +143,7 @@ int main(int argc, char **argv) {
         rt_fpcr_sync(&c);
         memcpy(c.v, in.v, sizeof c.v);
         c.excl_addr = ~0ull;
-        g_stubs = (int)in.stubs;
+        g_stubs = in.stubs;
         g_stub_h = 0;
         tests[in.k](&c);
         memcpy(out.x, c.x, sizeof out.x);

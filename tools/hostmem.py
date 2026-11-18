@@ -1,4 +1,4 @@
-"""Memory the machine can still give to new processes, for sizing worker pools (stdlib only, Windows)."""
+"""Memory the machine can still give to new processes, for sizing worker pools (stdlib only, Windows and Linux)."""
 import ctypes
 import ctypes.wintypes as wt
 import sys
@@ -41,7 +41,17 @@ def _job_headroom():
 
 
 def available_ram():
-    """Physical memory not in use right now, capped by the job memory limit if there is one. None off Windows."""
+    """Physical memory not in use right now, capped by the job memory limit if there is one (Windows), or the kernel's
+    estimate of what new programs can take without swapping (Linux, MemAvailable). None elsewhere."""
+    if sys.platform.startswith('linux'):
+        try:
+            with open('/proc/meminfo') as f:
+                for line in f:
+                    if line.startswith('MemAvailable:'):
+                        return int(line.split()[1]) << 10
+        except (OSError, ValueError, IndexError):
+            pass
+        return None
     if sys.platform != 'win32':
         return None
     status = _MemStatus()

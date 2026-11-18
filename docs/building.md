@@ -93,7 +93,10 @@ From the repository root, in PowerShell. Every step that depends on the game ver
    `--cpu v2` targets x86-64-v2 (SSE4.2, no AVX2/FMA) for older CPUs; the default `v3` needs AVX2. The v2 build links
    `runtime/fma.c`, a correctly rounded software fma the FP lowering needs, and runs slower.
 
-   Lifting takes about 15 s, a clean compile about 200 s on 24 threads; later builds recompile only what changed.
+   Lifting takes about 2 minutes on 6 workers (a Z1 Extreme; the register analysis of `recomp/ipa.py` is most of
+   it, and `--no-abi-trust` lifts without it in about 20 s), a clean compile about 200 s on 24 threads; later builds
+   recompile only what changed. The lift takes as many workers as the free memory allows, 1.5 GiB each (`--jobs N`
+   sets the count).
    The generated code is compiled at -O2 with clang 22 or newer, and at -O1 with an older one (or with `--gen-o1`):
    clang 21.1.8 at -O2 builds a game whose title screen video draws corrupt blocks and green dots, which clang 23.1.5
    does not. At -O2 the render thread is busy 5.9% less of the frame (a Z1 Extreme limited to 15 W). The Linux release
@@ -285,7 +288,7 @@ change passes these, all run with `.venv`:
 | `tests\diff\lift.py` | instructions sampled from the extracted modules; `--coverage` lists every word the lifter rejects or traps | yes |
 | `tests\diff\simd.py` | the whole FP/SIMD encoding space | no |
 | `tests\diff\atomic.py` | exclusive load/store sequences and ARMv8.1 atomics | no |
-| `tests\diff\func.py` | whole functions as the generator emits them, loops, jump tables and calls included (calls go to a stub that checks the registers at the call) | yes |
+| `tests\diff\func.py` | whole functions as the generator emits them, loops, jump tables and calls included (calls go to a stub that checks the registers at the call); `--abi-trust --ipa generated\v101\ipa.json` for the default lift's register syncs, without them for `gen.py --no-abi-trust` | yes |
 | `tests\flags_check.py` | the function-local flag helpers of `runtime\cpu.h` against its packed ones | no |
 | `tests\excl_mt.py` | the exclusive monitor helpers under contention and ABA, on several threads | no |
 | `tests\jumptables_check.py` | `recomp/jumptables.py` against a Unicorn oracle; must report 0 disagreements, on 1.4.3 too | yes |

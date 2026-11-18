@@ -44,6 +44,7 @@ import hostmem  # noqa: E402
 import jumptables  # noqa: E402
 import patches  # noqa: E402
 import regs  # noqa: E402
+import ipa  # noqa: E402
 import vlocals  # noqa: E402
 from check_content import GENERATED_MARKER  # noqa: E402
 from layout import base_of, layout, romfs_size, write as write_layout  # noqa: E402
@@ -213,7 +214,7 @@ class Emitter:
     """C for the functions of one module. starts is the set of every function start of the module."""
 
     def __init__(self, mod, starts, patched=None, reg_locals=regs.LOCALS, callee_saved=True, spins=None,
-                 v_locals=vlocals.LOCALS, v_trust=False, abi_trust=False, v_abi_trust=False):
+                 v_locals=vlocals.LOCALS, v_trust=False, abi_trust=False, v_abi_trust=False, ipa=None, summarize=False, poison=False, stubs=None):
         self.mod = mod
         self.starts = starts
         self.patched = patched or {}   # {address: [(set index, [replacement words])]} (recomp/patches.py)
@@ -222,8 +223,12 @@ class Emitter:
         self.kept = regs.CALLEE_SAVED if callee_saved else frozenset()   # not reloaded after a call
         self.v_locals = v_locals   # recomp/vlocals.py: V registers per function in C locals (0: all in c->v)
         self.v_trust = v_trust     # with v_locals: V8-V15 are not reloaded after a call
-        self.abi_trust = abi_trust   # recomp/regs.py plan_trust: every register a local, AAPCS64 syncs at calls
+        self.abi_trust = abi_trust   # recomp/regs.py plan_ipa: every register a local, synced where the other side reads it
         self.v_abi_trust = v_abi_trust   # recomp/vlocals.py: every V register a local, AAPCS64 syncs at calls
+        self.ipa = ipa               # recomp/ipa.py Tables for abi_trust (None while summarize)
+        self.summarize = summarize   # function() returns the ipa.Summary instead of C
+        self.stubs = stubs or {}     # {address of an import stub's br: the function it reaches} (import_stubs())
+        self.poison = poison         # abi_trust: put a trap value in every register left out of a sync (a test build)
         self.uses_patches = False
         self.stats = Counter()
         self.unsupported = Counter()
@@ -394,9 +399,12 @@ class Emitter:
         local = not all_labels
         spill, reload, reload_call = (regs.SPILL, regs.RELOAD, regs.RELOAD_CALL) if local else ('', '', '')
         trust = local and self.abi_trust
-        spill_call, spill_ret = (regs.SPILL_CALL, regs.SPILL_RET) if trust else (spill, spill)
         reload_fn = reload if trust else reload_call   # after a host helper of a patched site
-        succ = self.flow(insns, entry, end, tables) if local else None
+        ev = {}   # recomp/ipa.py events: {instruction: [(event, target or None, helper name or None)]}
+
+        def event(i, kind, target=None, name=None):
+            ev.setdefault(i, []).append((kind, target, name))
+        succ = self.flow(insns, entry, end, tables)
         fp = self.flag_plan(insns, entry, end, tables, succ) if local else None
         if fp and fp.used:
             self.stats['local_flag_functions'] += 1
@@ -418,8 +426,10 @@ class Emitter:
                 return f'goto L_{t:x};'
             if t in starts:
                 refs.add(t)
+                event(i, ipa.TAIL, t)
                 return f'{publish(i)}{spill}{MUSTTAIL} {fname(t)}(c);'
             self.stats['external_branches'] += 1
+            event(i, ipa.TAIL)
             return f'{publish(i)}{spill}c->pc = {hx(t)}; {MUSTTAIL} rt_dispatch(c);'
 
         if all_labels:
@@ -443,13 +453,18 @@ class Emitter:
         def call(t, a):
             if t in starts:
                 refs.add(t)
-                return f'c->x[30] = {hx(a + 4)}; {spill_call}{fname(t)}(c);{reload_call}'
+                event((a - entry) // 4, ipa.CALL, t)
+                return f'c->x[30] = {hx(a + 4)}; {spill}{fname(t)}(c);{reload_call}'
             self.stats['external_calls'] += 1
-            return f'c->x[30] = {hx(a + 4)}; {spill_call}c->pc = {hx(t)}; rt_dispatch(c);{reload_call}'
+            event((a - entry) // 4, ipa.CALL)
+            return f'c->x[30] = {hx(a + 4)}; {spill}c->pc = {hx(t)}; rt_dispatch(c);{reload_call}'
 
         def op(i, code):
             code = fx(i, code)
-            return f'{spill}{code}{reload}' if regs.ESCAPE.search(code) else code
+            if regs.ESCAPE.search(code):   # an SVC, or a BRK / undefined word the lifter left in an op: it may return
+                event(i, ipa.SVC)
+                return f'{spill}{code}{reload}'
+            return code
 
         def one(i, r, a):
             """C of one lifted word of a patched site."""
@@ -459,6 +474,7 @@ class Emitter:
                 # A host helper: spill locals, call, reload what the call may change. The helper writes flags
                 # itself (a @fnz returns packed NZCV, which fx above rewrites onto F.nz), so it is not a
                 # flag-clobbering guest call.
+                event(i, ipa.HELPER, None, re.search(r'(\w+)\(c\);', r.code).group(1))
                 return f'{spill}{fx(i, r.code)}{reload_fn}'
             if r.kind == 'bl':
                 return call(r.target, a)
@@ -467,7 +483,8 @@ class Emitter:
             if r.kind == 'bcond':
                 return f'if ({fx(i, r.cond)}) {{ {jump(r.target, i)} }}'
             if r.kind == 'ret':
-                return f'{spill_ret}return;'
+                event(i, ipa.RET)
+                return f'{spill}return;'
             raise patches.PatchError(f'{a:#x}: patched instruction is a {r.kind}')
 
         def patch(i, ins, a):
@@ -497,6 +514,7 @@ class Emitter:
             elif k == 'op':
                 emit(i, '    ' + op(i, ins.code))
             elif k == 'trap':
+                event(i, ipa.TRAP)
                 emit(i, f'    {spill}{fx(i, ins.code)}')
             elif k in ('b', 'bcond'):
                 j = jump(ins.target, i)
@@ -507,7 +525,8 @@ class Emitter:
             elif k == 'bl':
                 emit(i, '    ' + call(ins.target, a))
             elif k == 'blr':
-                emit(i, f'    c->pc = {ins.target}; c->x[30] = {hx(a + 4)}; {spill_call}rt_dispatch(c);{reload_call}')
+                event(i, ipa.CALL)
+                emit(i, f'    c->pc = {ins.target}; c->x[30] = {hx(a + 4)}; {spill}rt_dispatch(c);{reload_call}')
             elif k == 'br':
                 jt = tables.get(a)
                 if jt == 'all':
@@ -515,11 +534,14 @@ class Emitter:
                 elif jt:
                     cases = ' '.join(f'case {hx(t)}: goto L_{t:x};' for t in jt)
                     emit(i, f'    switch ({ins.target}) {{ {cases} default: break; }}')
+                    event(i, ipa.TAIL)   # an index outside the table
                     emit(i, f'    {publish(i)}{spill}c->pc = {ins.target}; {redispatch}')
                 else:
+                    event(i, ipa.TAIL, self.stubs.get(a), ipa.PLT if a in self.stubs else None)
                     emit(i, f'    {publish(i)}{spill}c->pc = {ins.target}; {MUSTTAIL} rt_dispatch(c);')
             elif k == 'ret':
-                emit(i, f'    {spill_ret}return;')
+                event(i, ipa.RET)
+                emit(i, f'    {spill}return;')
             else:
                 raise ValueError(f'{a:#x}: unknown instruction kind {k!r}')
         n = len(insns)
@@ -527,17 +549,32 @@ class Emitter:
             if end < mod.hi:
                 emit(n, '    ' + jump(end, n))
             else:
+                event(n, ipa.TRAP)
                 emit(n, f'    {spill}rt_udf(c, {hx(end)});')
+        texts = [''] * (n + 1)
+        for i, line in body:
+            if i is not None:
+                texts[i] += line
+        if self.abi_trust:
+            # recomp/ipa.py: the function for the whole-program register analysis. An all-label function reads and
+            # writes the Cpu directly and may go anywhere from its computed branch: it is `plain` there.
+            patched = {i for i in range(n) if entry + 4 * i in self.patched}
+            if end - 4 in self.patched:
+                patched.add(n)   # the fall-through after a patched last instruction
+            anywhere = {(a - entry) // 4 for a, jt in tables.items() if jt == 'all'}
+            summary = ipa.Summary(
+                entry, [ipa.mask(regs.read(t)) & ipa.ALL for t in texts],
+                [0 if i in patched else ipa.mask(regs.written(t)) & ipa.ALL for i, t in enumerate(texts)],
+                succ, anywhere, ev, patched, not local)
+            if self.summarize:
+                return summary
         if local:
-            texts = [''] * (n + 1)
-            for i, line in body:
-                if i is not None:
-                    texts[i] += line
             clean = {i for i, ins in enumerate(insns) if entry + 4 * i not in self.patched
                      and (ins.kind in ('bl', 'blr') or (ins.kind == 'op' and regs.RELOAD in texts[i]))}
             if trust:
-                full = {i for i in clean if regs.RELOAD in texts[i]}
-                rp = regs.plan_trust(texts, succ, clean - full, full)
+                _, ro, po, _ = ipa.live(summary, self.ipa)
+                rp = regs.plan_ipa(texts, succ, summary, {i: ro[i] | po[i] for i in ro}, self.ipa, self.poison)
+                self.stats['call_reloads'] += sum(len(v) for v in rp.reloads.values())
             else:
                 rp = regs.plan(texts, succ, clean, self.reg_locals, self.kept)
             if rp.regs:
@@ -626,6 +663,67 @@ def _emitter(name):
                                            _W['patches'].for_module(name, base),
                                            spins=_W['patches'].spins_for(name, base), **_W['opts'])
     return e
+
+
+def host_symbols(runtime_dir):
+    """The symbols the runtime binds to host functions (HOST_OVERRIDE, HOST_OBSERVER): an import of one does not
+    reach the guest function of that name."""
+    texts = [p.read_text(encoding='utf-8', errors='replace') for p in sorted(Path(runtime_dir).glob('*.[ch]'))]
+    defines = dict(m.groups() for t in texts for m in re.finditer(r'^#define\s+(\w+)\s+"([^"]*)"\s*$', t, re.M))
+    out = set()
+    for t in texts:
+        for m in re.finditer(r'^\s*HOST_(?:OVERRIDE|OBSERVER)\(\s*("[^"]*"|\w+)\s*,', t, re.M):
+            a = m.group(1)
+            if a.startswith('"'):
+                out.add(a[1:-1])
+            elif a in defines:
+                out.add(defines[a])
+            elif a != 'sym':   # the macros' own definitions
+                raise SystemExit(f'gen.py: cannot tell the symbol of HOST_OVERRIDE({a}, ...) in the runtime sources')
+    return out
+
+
+def import_stubs(mods, host):
+    """{address of the br of an import stub: the guest function it reaches}. A stub is `adrp x16; ldr x17, [x16, #n];
+    add x16, x16, #n; br x17` on a GOT slot with a JUMP_SLOT or GLOB_DAT relocation. The slot's symbol resolves as
+    runtime/loader.c does it: a host function when the runtime binds the name (left out here: the target is then
+    unknown), else the module's own definition, else the first module in load order that defines it."""
+    exports = {}
+    for mod in mods:
+        for name, info, shndx, value, _ in mod.nso.syms:
+            if name and shndx and info & 0xF == 2:   # a defined function
+                exports.setdefault(name, mod.base + value)
+    out = {}
+    for mod in mods:
+        slots = {}
+        for off, typ, si, _ in mod.nso.relocs:
+            if typ in (1025, 1026) and si < len(mod.nso.syms):   # GLOB_DAT, JUMP_SLOT
+                name, _, shndx, value, _ = mod.nso.syms[si]
+                if name in host:
+                    continue
+                t = mod.base + value if shndx else exports.get(name)
+                if t and any(m.in_text(t) for m in mods):
+                    slots[mod.base + off] = t
+        w = mod.words
+        for k in np.flatnonzero(w == 0xD61F0220).tolist():   # br x17
+            if k < 3:
+                continue
+            a, ld, ad = int(w[k - 3]), int(w[k - 2]), int(w[k - 1])
+            if a & 0x9F00001F != 0x90000010 or ld & 0xFFC003FF != 0xF9400211 or ad & 0xFFC003FF != 0x91000210:
+                continue
+            imm = (a >> 5 & 0x7FFFF) << 2 | (a >> 29 & 3)
+            imm -= (imm & 1 << 20) << 1
+            slot = ((mod.lo + 4 * (k - 3)) & ~0xFFF) + (imm << 12) + (ld >> 10 & 0xFFF) * 8
+            if slot in slots:
+                out[mod.lo + 4 * k] = slots[slot]
+    return out
+
+
+def _summarize_chunk(task):
+    """Worker: the recomp/ipa.py summaries of one chunk's functions."""
+    name, _, _, fns = task
+    e = _emitter(name)
+    return [e.function(entry, end) for entry, end in fns]
 
 
 def _emit_chunk(task):
@@ -717,16 +815,21 @@ def main():
     ap.add_argument('--v-trust', action='store_true',
                     help='with --v-locals: do not reload V8-V15 after a call (AAPCS64: the callee preserves their low '
                          '64 bits)')
-    ap.add_argument('--abi-trust', action='store_true',
-                    help='EXPERIMENTAL: every register of a function in a C local, synced with the Cpu at calls and '
-                         'returns only as far as AAPCS64 passes it (recomp/regs.py plan_trust)')
+    ap.add_argument('--abi-trust', action=argparse.BooleanOptionalAction, default=True,
+                    help='every register of a function in a C local, synced with the Cpu at calls and returns only '
+                         'where the other side reads it, from a register analysis of every function (recomp/ipa.py, '
+                         'recomp/regs.py plan_ipa). --no-abi-trust: 6 registers in locals and X0-X18 and X30 loaded '
+                         'again after every call, the lift up to 1.19.1')
+    ap.add_argument('--abi-poison', action='store_true',
+                    help='with --abi-trust, for a test build: a trap value in every register a call or a return '
+                         'leaves out of its sync, so a read the analysis missed faults instead of using a stale value')
     ap.add_argument('--v-abi-trust', action='store_true',
                     help='EXPERIMENTAL, with --v-locals: every V register of a function in a C local, synced at guest '
                          'calls and returns only as far as AAPCS64 passes it (recomp/vlocals.py)')
     args = ap.parse_args()
     opts = {'reg_locals': args.reg_locals, 'callee_saved': not args.no_callee_saved_trust, 'v_locals': args.v_locals,
             'v_trust': args.v_trust, 'abi_trust': args.abi_trust,
-            'v_abi_trust': args.v_abi_trust}
+            'v_abi_trust': args.v_abi_trust, 'poison': args.abi_poison}
 
     t0 = time.perf_counter()
     romfs_base = base_of(args.version)
@@ -739,13 +842,14 @@ def main():
     if unknown:
         raise SystemExit(f'not in {args.exefs}: {", ".join(sorted(unknown))}')
 
-    paths, starts_abs, info, tasks = {}, {}, {}, []
+    paths, starts_abs, info, tasks, loaded = {}, {}, {}, [], []
     for name, base, _ in mods:
         if name not in want:
             continue
         t = time.perf_counter()
         path = args.exefs / name
         mod = Module(name, path, base, 'c')
+        loaded.append(mod)
         patches.check(table, mod, name)
         starts, dstats = discover(mod)
         est = estimate_sizes(mod, starts)
@@ -765,7 +869,6 @@ def main():
                       'moddir': moddir}
         print(f'{name}: {dstats["functions"]} functions ({dstats["seeds"]} seeds, {dstats["rounds"]} rounds), '
               f'{len(chunks)} chunks, discovery {time.perf_counter() - t:.1f}s', file=sys.stderr, flush=True)
-        del mod
 
     # Largest chunks first, so the pool does not end on a long tail.
     tasks.sort(key=lambda t: -t[0])
@@ -775,6 +878,26 @@ def main():
     ctx = mp.get_context('spawn')
     jobs, why = pick_jobs(args.jobs)
     print(f'emitting with {jobs} workers ({why})', file=sys.stderr, flush=True)
+    if args.abi_trust:
+        # recomp/ipa.py: every function's register use, from a first pass over all of them
+        t_ipa = time.perf_counter()
+        opts['stubs'] = import_stubs(loaded, host_symbols(ROOT / 'runtime'))
+        print(f'ipa: {len(opts["stubs"])} import stubs resolved', file=sys.stderr, flush=True)
+        summaries = {}
+        with ctx.Pool(jobs, initializer=_worker_init,
+                      initargs=(paths, starts_abs, table, dict(opts, summarize=True))) as pool:
+            for ss in pool.imap_unordered(_summarize_chunk, [t for _, t in tasks], chunksize=1):
+                summaries.update((s.entry, s) for s in ss)
+        helpers = {name for s in summaries.values() for evs in s.ev.values() for k, _, name in evs if k == ipa.HELPER}
+        print(f'ipa: {len(summaries)} functions summarised, {time.perf_counter() - t_ipa:.0f}s', file=sys.stderr,
+              flush=True)
+        opts['ipa'] = ipa.solve(summaries, ipa.mask(regs.CALLEE_SAVED) if opts['callee_saved'] else 0,
+                                ipa.load_helpers(helpers, ROOT / 'runtime'),
+                                log=lambda m: print(m, file=sys.stderr, flush=True))
+        ipa.report(summaries, opts['ipa'], args.out / 'ipa.json', lambda m: print(m, file=sys.stderr, flush=True))
+        print(f'ipa: {time.perf_counter() - t_ipa:.0f}s in all', file=sys.stderr, flush=True)
+        del summaries
+    del loaded
     with ctx.Pool(jobs, initializer=_worker_init, initargs=(paths, starts_abs, table, opts)) as pool:
         for i, r in enumerate(pool.imap_unordered(_emit_chunk, [t for _, t in tasks], chunksize=1)):
             results[r['module']].append(r)

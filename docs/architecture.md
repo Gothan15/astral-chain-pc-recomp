@@ -36,10 +36,16 @@ MacNativeGames cannot run on x86-64 as is: its CPU path executes ARM64 code nati
   - jump tables resolved by our own symbolic pass instead of Unicorn, which keeps GPL code out of the shipped generator;
   - `LDXP`/`STXP` (128-bit exclusive pairs) supported;
   - no 64 MB limit on `main`; `subsdk*` loaded;
-  - NZCV and the six most used general registers of each function kept in C locals instead of the `Cpu`
-    (`recomp/flags.py`, `recomp/regs.py`): registers are stored back where they changed, before calls, SVCs and
-    exits, and reloaded after them. A call reloads only X0-X18 and X30, as AAPCS64 has the callee preserve X19-X29 and
-    SP; `gen.py --no-callee-saved-trust` reloads those too.
+  - NZCV and the general registers of each function kept in C locals instead of the `Cpu` (`recomp/flags.py`,
+    `recomp/regs.py`), X18 excepted. A register analysis of every lifted function at once (`recomp/ipa.py`) tells what
+    each function reads of the registers it is entered with, what its callers read of the ones it returns with, and
+    what it always writes: a call stores only the changed registers the callee reads, a return those a caller reads
+    and the callee-saved ones, and after a call a function loads again only what its own code reads. Nothing is taken
+    from AAPCS64 between two functions joined by a direct call; the target of an indirect call is taken to read X0-X8,
+    X19-X30 and SP, and an SVC or a patch helper every register. `gen.py --abi-poison` builds a test lift that puts a
+    trap value in every register a sync leaves out. `gen.py --no-abi-trust` is the lift up to 1.19.1: the six most
+    used registers in locals, stored before calls, SVCs and exits, and X0-X18 and X30 loaded again after every call
+    (`--no-callee-saved-trust` reloads X19-X29 and SP too).
   - `gen.py --v-locals K` keeps the K most used V registers of each function in a local `u128 vr[32]` that clang
     holds in XMM registers (`recomp/vlocals.py`, the `RT_VLOCALS` accessors of `runtime/simd.h`): loaded at entry,
     stored where they may have changed before calls and exits, reloaded after calls; `--v-trust` does not reload
