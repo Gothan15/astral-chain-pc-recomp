@@ -316,7 +316,7 @@ static void init_image(Tex *e, VkCommandBuffer cb) {
     }
 }
 
-// AC_SHADOW_SCALE (1 to 4; 2 by default, 1 in the Steam Deck profile): the game's shadow maps are made this many times
+// AC_SHADOW_SCALE (1 to 4; 1 by default): the game's shadow maps are made this many times
 // larger on each side. The rule for DEPTH16 square arrays comes from the TotK Recomp, whose game renders its sun cascades
 // into a 960x960 array of 4 layers and its static shadows into 1440x1440 and 720x720 arrays of 2; Astral Chain's sun
 // shadow map is the 2048x2048 one shadow_scale_of describes. Both are made

@@ -358,7 +358,7 @@ Every guest thread is a host thread. Astral Chain assumes Horizon's scheduler: t
   0.3 MiB (Arc 140T, 184x104 probes), made only at the first frame at `gi`, at the price of the bounce of moving things
   following them about 3 frames late. `vk_rc.c`'s header lists the measurements and the variants left out.
 - The sun shadow map, one 2048x2048 DEPTH24_STENCIL8 texture on 1.0.1, is made `shadow_scale` times larger on each side
-  (`vk_texture.c` `shadow_scale_of`; 2 by default, 1 in the Steam Deck profile): its depth-only pass draws at that
+  (`vk_texture.c` `shadow_scale_of`; 1 by default, the game's size): its depth-only pass draws at that
   size and the screen-space sun mask that reads it samples in UV, so edges get finer at the same softness. At x2 it
   takes 85 MiB of its own on an Arc 140T (the pool storage it no longer aliases stays) and its pass about 0.5 ms more.
 - Occlusion queries never block the CPU; a result that is not ready counts as visible.
