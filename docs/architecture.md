@@ -83,7 +83,9 @@ Every guest thread is a host thread. Astral Chain assumes Horizon's scheduler: t
 - Host work gives the core back. Queue submits, presents, GPU waits, shader translation, `nn::fs` calls and NVN memory pool setup run without a core (`NVN_BLOCKING`, `kern_core_away`), as the Switch blocks those threads in IPC, so a thread blocked in the driver or on a file does not hold up guest threads.
 - Spin waits. Loops that only another thread can end (857 in 1.4.3, 864 in 1.2.1, found by `tools/spin_waits.py`, the
   nxnative search) send their back-edges through `rt_spin_gate`, which pauses the core once per pass and hands it to a
-  waiter after 50 us of polling (`AC_SPIN`, `AC_SPIN_HANDOFF_US`).
+  waiter after 50 us of polling (`AC_SPIN`, `AC_SPIN_HANDOFF_US`). A wait that has lasted 200 us stops polling at full
+  speed: each further pass leaves the core and sleeps an eighth of the time waited so far, 250 us at most
+  (`AC_SPIN_SLEEP_US`, 0 to keep polling).
 - `free_cores = 1` (`AC_FREE_CORES=1`) turns the gate off, for experiments only: the game crashes or hangs, usually
   at start, because its job workers all report core 0 and share per-core memory (#212).
 
