@@ -852,7 +852,12 @@ void plat_exit_skip_unload(void) { InterlockedExchange(&exit_skip_unload, 1); }
 // threads held, or waits for one of them, never returns: the process keeps its memory, its exit is never signalled,
 // and its exe and DLLs stay locked. TerminateProcess ends all threads without running any of that; the log and the
 // C streams are flushed first, and the exit code is the same.
+// The profile runtime's writer, present only in a build with --pgo-generate (tools/build_game.py): it writes the
+// .profraw from an atexit handler, which neither ExitProcess nor TerminateProcess runs.
+extern int __llvm_profile_write_file(void) __attribute__((weak));
+
 void plat_exit(int code) {
+    if (__llvm_profile_write_file) __llvm_profile_write_file();
     fflush(stdout);
     fflush(stderr);
     if (InterlockedCompareExchange(&exit_skip_unload, 0, 0)) {

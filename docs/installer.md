@@ -87,6 +87,8 @@ again: it is rebuilt from the 1.0.1 update.
 4. **Compile** the generated C, `modules.c`, `romfs.c`, `patches.c` and `ov_zstd.c` (they bake the per-install layout,
    RomFS hashes and the game version's patch page) and link them with the prebuilt runtime library for the host's level
    (`libacrt.a` or `libacrt-v2.a`) into `astralchain.exe` (`build_game.py --runtime-lib`; about 3 min on 24 cores).
+   The generated C is compiled to bitcode with the profile of play `tools/data/pgo/<version>.profdata` and linked with
+   ThinLTO (`--release-opt`), on Windows and Linux alike: the link takes about 2 min on 16 threads and 1 to 1.4 GiB.
 5. **Prepare** the shaders: `tools/prepare_shaders.py` reads the variants players met (`data/shader-answers.bin`) and
    the shaders themselves from the RomFS (`tools/shader_census.py`), adds each shader's default variant, and writes the
    seed files; `astralchain.exe --prepare-shaders` then translates every variant and builds each stage library or compute
@@ -180,7 +182,7 @@ astralchain.ini.example, VERSION  the default ini; the release string (the repos
 
 - SDL3 comes from the upstream release, not MSYS2: MSYS2's DLL imports the LGPL libiconv.
 - Every bundled third-party piece gets a row in `THIRD_PARTY_NOTICES.md`.
-- The release contains nothing game-derived but, in the Linux release, `tools/data/pgo/<version>.profdata`: the
+- The release contains nothing game-derived but `tools/data/pgo/<version>.profdata`, in both releases: the
   profile the installer compiles the lifted code with (`build_game.py --release-opt`), the names of the lifted
   functions (`f_<guest address>`) and their branch counts, no code or data of the game (`tools/pgo_profile.py`);
   `make_release.py` runs `tools/check_content.py` over the folder before it
