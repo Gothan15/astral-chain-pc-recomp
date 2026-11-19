@@ -13,6 +13,7 @@
 #include "bc7_cache.h"
 #include "cfg.h"
 #include "host.h"
+#include "platform/platform.h" // plat_exe_path y plat_last_sep (la ruta de la caché)
 #include "vk.h"
 
 // data.bin pasa de 16 GB: el fseek de 32 bits se queda corto a mitad de la caché.
