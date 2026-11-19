@@ -1,0 +1,75 @@
+name: Setup
+
+on:
+  workflow_dispatch:
+
+permissions:
+  contents: write
+
+jobs:
+  build:
+    runs-on: windows-latest
+    timeout-minutes: 180
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.14"
+
+      - uses: astral-sh/setup-uv@v6
+
+      - uses: actions/setup-dotnet@v4
+        with:
+          dotnet-version: "10.0.x"
+
+      - name: Write the layout files from secrets
+        shell: pwsh
+        env:
+          LAYOUT_JSON: ${{ secrets.AC_LAYOUT_JSON }}
+          LAYOUT_H: ${{ secrets.AC_LAYOUT_H }}
+        run: |
+          if (-not $env:LAYOUT_JSON -or -not $env:LAYOUT_H) { throw "Faltan los secrets AC_LAYOUT_JSON y AC_LAYOUT_H" }
+          New-Item -ItemType Directory -Force generated/v101 | Out-Null
+          [IO.File]::WriteAllText("generated/v101/layout.json", $env:LAYOUT_JSON)
+          [IO.File]::WriteAllText("generated/v101/layout.h", $env:LAYOUT_H)
+          $lj = Get-Content generated/v101/layout.json -Raw | ConvertFrom-Json
+          $main = $lj | Where-Object { $_.name -eq "main" }
+          if ($main.base -ne "0x7000000000") { throw "layout.json inesperado: main no esta en 0x7000000000" }
+          Write-Host "Modulos:" ($lj.name -join ", ")
+
+      - name: Take shader-answers.bin from the official 1.19.3 release
+        shell: pwsh
+        run: |
+          curl.exe -L -o oficial.zip "https://github.com/captainj-sparrow/astral-chain-pc-recomp/releases/download/1.19.3/Astral.Chain-Setup-1.19.3-windows.zip"
+          Expand-Archive oficial.zip -DestinationPath oficial -Force
+          Copy-Item "oficial/Astral Chain-Setup/data/shader-answers.bin" generated/shader-answers.bin
+          Remove-Item oficial.zip
+          Remove-Item oficial -Recurse -Force
+
+      - name: MSYS2 gcc for hactool
+        shell: pwsh
+        run: |
+          & "C:\msys64\usr\bin\pacman.exe" -Sy --needed --noconfirm mingw-w64-ucrt-x86_64-gcc
+
+      - name: Build hactool
+        shell: pwsh
+        run: python tools/build_hactool.py
+
+      - name: Build the shader translator
+        shell: pwsh
+        run: |
+          $env:PATH = "C:\Program Files (x86)\Microsoft Visual Studio\Installer;" + $env:PATH
+          python tools/build_xlate.py
+
+      - name: Assemble the setup package
+        shell: pwsh
+        run: python tools/make_release.py --out "build/release/Astral Chain-Setup" --zip "build/release/Astral.Chain-Setup-1.19.3-reshade-windows.zip"
+
+      - name: Publish the release
+        uses: softprops/action-gh-release@v2
+        with:
+          tag_name: reshade-1.19.3
+          name: Astral Chain 1.19.3 + opcion ReShade (antes del HUD)
+          body: Paquete Setup compilado desde la rama reshade-antes-del-hud. Igual que la release oficial 1.19.3, pero el runtime lleva la opcion reshade = 1 (los efectos de ReShade solo tocan la escena; el HUD va en una capa aparte que compone el addon). Se instala como siempre, con tu propia copia del juego; el ejecutable se compila en tu PC durante la instalacion.
+          files: build/release/Astral.Chain-Setup-1.19.3-reshade-windows.zip
