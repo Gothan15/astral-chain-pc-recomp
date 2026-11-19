@@ -54,7 +54,7 @@ jobs:
       - name: MSYS2 packages for hactool and the runtime
         shell: pwsh
         run: |
-          & "C:\msys64\usr\bin\pacman.exe" -Sy --needed --noconfirm mingw-w64-ucrt-x86_64-gcc mingw-w64-ucrt-x86_64-shaderc make spirv-tools
+          & "C:\msys64\usr\bin\pacman.exe" -Sy --needed --noconfirm mingw-w64-ucrt-x86_64-gcc mingw-w64-ucrt-x86_64-shaderc mingw-w64-ucrt-x86_64-spirv-tools make
 
       - name: Build hactool
         shell: pwsh
