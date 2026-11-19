@@ -126,7 +126,12 @@ int tex_vk_format(int nvn_format, TexVkFormat *o) {
         o->astc_bh = astc[i].bh;
         o->astc_srgb = (uint8_t)srgb;
         o->note = "no native ASTC: decoded to RGBA8 (vk_astc.c compute decoder, or tex_astc.c with AC_ASTC=cpu)";
-        if (vk_astc_bc()) {
+        int bc_mode = vk_astc_bc();
+        if (bc_mode == 3) {   // AC_ASTC_BC=bc7: BC7 para todas, a los mismos 8 bits por texel que BC3
+            o->vk = srgb ? VK_FORMAT_BC7_SRGB_BLOCK : VK_FORMAT_BC7_UNORM_BLOCK;
+            o->astc_bc = 3;
+            o->note = "no native ASTC: decoded and encoded to BC7 on the GPU (vk_astc.c, AC_ASTC_BC=bc7)";
+        } else if (bc_mode) {
             o->vk = srgb ? VK_FORMAT_BC3_SRGB_BLOCK : VK_FORMAT_BC3_UNORM_BLOCK;
             o->astc_bc = 1;
             o->note = "no native ASTC: decoded and encoded to BC3 on the GPU (vk_astc.c, AC_ASTC_BC)";

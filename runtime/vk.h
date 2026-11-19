@@ -364,6 +364,7 @@ int vk_astc_gpu(void);                  // 1: ASTC images decoded to RGBA8 by th
 int vk_astc_bc(void);                   // the recompression of those images: 0 none (RGBA8), 1 BC3 (AC_ASTC_BC=1),
                                         // 2 BC1 for the textures the alpha scan proves opaque (AC_ASTC_BC=bc1,
                                         // the default), BC3 for the rest; the per-texture choice is vk_texture.c's.
+                                        // 3 BC7 for every texture (AC_ASTC_BC=bc7), sin escaneo alfa.
                                         // 0 turns into 1 when video memory is short (vk_astc_low_memory).
 int vk_astc_low_memory(void);           // vk_texture.c, video memory over its budget or full: new ASTC images are BC3
                                         // for the rest of the run (when they were RGBA8); 1 when the switch happened

@@ -62,7 +62,8 @@ typedef struct TexVkFormat {
                                   // zero for native ASTC (vk == ideal, raw blocks as for BC)
     uint8_t astc_srgb;
     uint8_t astc_bc;              // 1: ASTC decoded then encoded to BC3 (AC_ASTC_BC); 2: to BC1, chosen per
-                                  // texture by the alpha scan when AC_ASTC_BC=bc1 (vk_astc.c, vk_texture.c)
+                                  // texture by the alpha scan when AC_ASTC_BC=bc1 (vk_astc.c, vk_texture.c);
+                                  // 3: to BC7 for every texture when AC_ASTC_BC=bc7 (vk_astc.c, vk_formats.c)
     uint8_t depth, stencil;       // aspect flags of depth / stencil formats
     const char *note;             // why a fallback or an expansion was chosen; NULL when the mapping is direct
     const char *reason;           // unmapped formats only: why there is no Vulkan format
