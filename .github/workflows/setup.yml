@@ -1,4 +1,5 @@
 # Fase 1: binds, iconos, camara, rueda, Esc, textos y post (2026-11-19) + arreglo wheel_feed
+# Fase 2: BC7 y cache (2026-11-19); reintento tras el arreglo de vk_bc7_cache.c
 name: Setup
 
 on:
