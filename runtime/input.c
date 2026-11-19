@@ -312,6 +312,7 @@ static void walk_get(void) {
 // mouse's top speed drops with the factor.
 static void mouse_camera(int32_t out[2]) {
     static uint64_t frame = ~0ull, t0;
+    static uint64_t t_counts;   // instante de la última muestra con conteos, para la retención
     static int32_t held[2];
     uint64_t now = plat_now_ns();
     int32_t dx, dy;
@@ -319,13 +320,27 @@ static void mouse_camera(int32_t out[2]) {
         ikb_mouse_take(&dx, &dy);
         held[0] = held[1] = 0;
         frame = ~0ull;
+        t_counts = 0;   // ninguna retención sobrevive a soltar el cursor
     } else {
         uint64_t fr = __atomic_load_n(&gfx_counters.frames, __ATOMIC_RELAXED);
         double age = frame == ~0ull ? 0 : (double)(now - t0) / 1e9;
         if (fr != frame) {
             double dt = age < 0.004 ? 0.004 : age > 0.1 ? 0.1 : age;
+            int32_t muestra[2];
             ikb_mouse_take(&dx, &dy);
-            input_mouse_stick(dx, dy, dt, mouse_sens_get(), held);
+            input_mouse_stick(dx, dy, dt, mouse_sens_get(), muestra);
+            // Retención (de Puddz): si este frame no trae conteos nuevos, se mantiene la última
+            // muestra distinta de cero hasta 25 ms antes de caer a cero: un ratón de 125 Hz informa
+            // cada 8 ms y puede dejar frames sin informe, y sin esto el giro va a trompicones.
+            if (dx || dy) {
+                t_counts = now;
+                held[0] = muestra[0];
+                held[1] = muestra[1];
+            } else if (now - t_counts <= 25000000ull && (held[0] || held[1])) {
+                // se conserva held tal cual: no se sobrescribe con la muestra cero
+            } else {
+                held[0] = held[1] = 0;
+            }
             frame = fr;
             t0 = now;
         } else if (age > 0.1) {
@@ -868,13 +883,25 @@ int input_prompts_auto(void) {
         rt_log("input: auto prompts: no gamepad found, the launcher names a%s controller",
                kind == PAD_KIND_XBOX ? "n Xbox" : " PlayStation");
     }
-    return input_prompts_auto_for_kind(kind);
+    // Sin mando, auto es el teclado: los prompts los repinta vk_prompts.c sobre el atlas original.
+    // (input_prompts_auto_for_kind queda pura para las sondas; la carpeta de keyboard es NULL, como
+    // la de Nintendo, así que el overlay romfs no nota el cambio.)
+    return kind == PAD_KIND_NONE ? PROMPTS_KEYBOARD : input_prompts_auto_for_kind(kind);
 }
 
 int input_prompts_auto_live(void) {
     int kind = input_pad_kind();
     if (kind == PAD_KIND_NONE && input_pad_layout() < 0) kind = launcher_pad_kind();
-    return input_prompts_auto_for_kind(kind);
+    // Sin mando, auto es el teclado (ver input_prompts_auto).
+    return kind == PAD_KIND_NONE ? PROMPTS_KEYBOARD : input_prompts_auto_for_kind(kind);
+}
+
+// El estilo de prompts en efecto: AC_PROMPTS resuelto, con auto seguido en vivo. Lo consulta
+// vk_prompts.c para decidir si repinta el atlas y para su generación.
+int input_prompts_effective(void) {
+    int pick = input_prompts_pick(cfg_get("AC_PROMPTS"), cfg_value("AC_PAD_LAYOUT"));
+    if (pick == PROMPTS_AUTO) pick = input_prompts_auto_live();
+    return pick;
 }
 
 int input_pad_label(int pad_id) {
@@ -892,18 +919,17 @@ void input_map_snapshot(InputMap *m) {
 
 int input_capture(int reset, int *id) {
     static uint8_t prev_k[KEY_COUNT], prev_p[PAD_COUNT];
-    static int prev_esc;
     uint8_t k[KEY_COUNT] = {0}, p[PAD_COUNT] = {0};
     int fg = ikb_foreground();
+    // Esc entra por el bucle normal como KEY_ESC: ya no cancela la captura (orden de Gothan);
+    // cancelar es dejar pasar el tiempo de espera.
     for (int i = 1; i < KEY_COUNT; i++) k[i] = fg && ikb_down(i);
-    int esc = fg && ikb_escape();
     plat_mutex_lock(&lock);
     if (!state) start();
     if (state == 1) pad_physical(p);
     plat_mutex_unlock(&lock);
     int got = INPUT_CAPTURE_NONE;
     if (!reset) {
-        if (esc && !prev_esc) got = INPUT_CAPTURE_CANCEL;
         for (int i = 1; i < KEY_COUNT && !got; i++)
             if (k[i] && !prev_k[i]) got = INPUT_CAPTURE_KEY, *id = i;
         for (int i = 1; i < PAD_COUNT && !got; i++)
@@ -911,7 +937,6 @@ int input_capture(int reset, int *id) {
     }
     memcpy(prev_k, k, sizeof k);
     memcpy(prev_p, p, sizeof p);
-    prev_esc = esc;
     return got;
 }
 

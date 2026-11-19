@@ -13,14 +13,21 @@
 #define DIAGONAL 23170   // STICK_MAX / sqrt(2)
 #define MOUSE_FULL_CPS 3000.0
 
+// Los defaults de teclado y ratón son el esquema de Puddz (AstralChain-PC, su input_bindings.h,
+// ib_defaults con sus dos huecos por acción): WASD mueve, F/T/G/H giran la cámara, los botones de
+// acción van en J/K/I/U, el ratón ataca (ZR en el clic izquierdo) y maneja la Legión (ZL en el
+// derecho), y la rueda cambia de arma. Sustituye al esquema anterior entero: lo que Puddz no usa
+// (flechas en la cámara, 1-4 en la cruceta, M en Minus) sale de los defaults.
 #define DEFAULT_KEYS \
-    {KEY_W, B_SL_UP}, {KEY_A, B_SL_LEFT}, {KEY_S, B_SL_DOWN}, {KEY_D, B_SL_RIGHT},                  /* move */ \
-    {KEY_UP, B_SR_UP}, {KEY_LEFT, B_SR_LEFT}, {KEY_DOWN, B_SR_DOWN}, {KEY_RIGHT, B_SR_RIGHT},       /* camera, second source */ \
-    {KEY_MOUSE_L, B_Y}, {KEY_MOUSE_R, B_ZL}, {KEY_Z, B_ZL}, {KEY_F, B_ZR}, {KEY_X, B_ZR}, \
-    {KEY_SPACE, B_X}, {KEY_LSHIFT, B_B}, {KEY_E, B_A}, {KEY_Q, B_L}, {KEY_R, B_R}, \
-    {KEY_LCTRL, B_STICK_L}, {KEY_C, B_STICK_R}, \
-    {KEY_1, B_LEFT}, {KEY_2, B_UP}, {KEY_3, B_RIGHT}, {KEY_4, B_DOWN}, \
-    {KEY_TAB, B_PLUS}, {KEY_M, B_MINUS}
+    {KEY_W, B_SL_UP}, {KEY_A, B_SL_LEFT}, {KEY_S, B_SL_DOWN}, {KEY_D, B_SL_RIGHT},                  /* move: WASD */ \
+    {KEY_F, B_SR_UP}, {KEY_T, B_SR_LEFT}, {KEY_G, B_SR_DOWN}, {KEY_H, B_SR_RIGHT},                  /* camera: F/T/G/H */ \
+    {KEY_J, B_A}, {KEY_K, B_B}, {KEY_SPACE, B_B}, {KEY_I, B_X}, {KEY_U, B_Y}, \
+    {KEY_LSHIFT, B_STICK_L}, {KEY_1, B_STICK_L}, {KEY_MOUSE_M, B_STICK_R}, {KEY_2, B_STICK_R}, \
+    {KEY_Q, B_L}, {KEY_MOUSE_X1, B_L}, {KEY_E, B_R}, {KEY_MOUSE_X2, B_R}, \
+    {KEY_MOUSE_R, B_ZL}, {KEY_Z, B_ZL}, {KEY_MOUSE_L, B_ZR}, {KEY_C, B_ZR}, \
+    {KEY_ENTER, B_PLUS}, {KEY_TAB, B_PLUS}, {KEY_BACKSPACE, B_MINUS}, {KEY_ESC, B_MINUS}, \
+    {KEY_LEFT, B_LEFT}, {KEY_UP, B_UP}, {KEY_RIGHT, B_RIGHT}, {KEY_DOWN, B_DOWN}, \
+    {KEY_WHEEL_UP, B_UP}, {KEY_WHEEL_DOWN, B_DOWN}
 
 // By position: south is Switch B, east A, west Y, north X (Nintendo layout); the Xbox layout swaps A with B and X with Y
 // (south A, as the Xbox labels; cross A on a PlayStation pad). The triggers are ZL and ZR.
@@ -34,7 +41,7 @@
 // PlayStation: A and B as labelled (south cross A, east circle B), X and Y by position (west square Y, north
 // triangle X), to match the button mod's glyphs.
 #define PLAYSTATION_PADS DEFAULT_PADS(B_A, B_B, B_Y, B_X)
-enum { DEFAULT_KEY_COUNT = 26, DEFAULT_PAD_COUNT = 16 };
+enum { DEFAULT_KEY_COUNT = 35, DEFAULT_PAD_COUNT = 16 };
 _Static_assert(sizeof (Binding[]){DEFAULT_KEYS} / sizeof (Binding) == DEFAULT_KEY_COUNT, "DEFAULT_KEY_COUNT");
 
 static const InputMap defaults = {{DEFAULT_KEYS}, DEFAULT_KEY_COUNT, {{NINTENDO_PADS}, {XBOX_PADS}, {PLAYSTATION_PADS}},
@@ -60,7 +67,8 @@ static const char *const key_names[KEY_COUNT] = {   // each group starts at its 
     [KEY_NUM0] = "num0", "num1", "num2", "num3", "num4", "num5", "num6", "num7", "num8", "num9",
     [KEY_NUM_ADD] = "num_add", "num_sub", "num_mul", "num_div", "num_decimal",
     [KEY_MINUS] = "minus", "equals", "lbracket", "rbracket", "semicolon", "apostrophe", "comma", "period", "slash",
-    "backslash", "grave"};
+    "backslash", "grave",
+    [KEY_WHEEL_UP] = "wheel_up", "wheel_down", "esc"};
 
 const char *input_action_name(int action) { return action >= 0 && action < ACTION_COUNT ? action_names[action] : NULL; }
 const char *input_key_name(int key) { return key > KEY_NONE && key < KEY_COUNT ? key_names[key] : NULL; }
@@ -173,7 +181,7 @@ void input_map_configure(void) {
         char var[32];
         snprintf(var, sizeof var, "AC_BIND_%s", action_names[a]);
         const char *v = cfg_get(var);
-        if (v && *v && input_map_bind(action_names[a], v)) rt_log("input: %s = %s", var + 5, v);
+        if (v && *v && input_map_bind(action_names[a], v)) rt_log("input: %s = %s", var + 3, v);
     }
 }
 
@@ -301,6 +309,7 @@ int input_prompts_pick(const char *prompts, const char *pad_layout) {
     if (!strcasecmp(prompts, "auto")) return PROMPTS_AUTO;
     if (!strcasecmp(prompts, "xbox")) return PROMPTS_XBOX;
     if (!strcasecmp(prompts, "playstation")) return PROMPTS_PLAYSTATION;
+    if (!strcasecmp(prompts, "keyboard")) return PROMPTS_KEYBOARD;   // vk_prompts.c: sin carpeta, repinta el atlas
     return PROMPTS_NINTENDO;
 }
 
@@ -362,6 +371,13 @@ void input_mouse_stick(int32_t dx, int32_t dy, double dt_s, float sens, int32_t 
     double k = STICK_MAX * (double)sens / (MOUSE_FULL_CPS * dt_s);
     double x = dx * k, y = -dy * k, len = sqrt(x * x + y * y);
     if (len > STICK_MAX) { x *= STICK_MAX / len; y *= STICK_MAX / len; }
+    // Suelo de inclinación (de Puddz, mouse_look_stick): si hay movimiento y la deflexión resultante
+    // no llega al 20 % del stick, se escala hasta exactamente el 20 %, conservando la dirección. Es
+    // un suelo puro, sin remapeo: por encima del 20 % la respuesta es la de siempre, y en reposo
+    // (len == 0) no se toca nada, para vencer la zona muerta del juego sin falsear la dirección.
+    // (Si el recorte actuó, len vale más que STICK_MAX y la condición es falsa: el suelo nunca
+    // pelea con el techo.)
+    if (len > 0 && len < STICK_MAX * 0.2) { double s = STICK_MAX * 0.2 / len; x *= s; y *= s; }
     out[0] = (int32_t)lrint(x);
     out[1] = (int32_t)lrint(y);
 }

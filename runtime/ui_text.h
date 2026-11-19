@@ -53,6 +53,11 @@ typedef enum {
     UI_MENU_SHADOW_SCALE, UI_MENU_SHADOW_SCALE_DESC,
     // ambient occlusion (vk_ao.c); GI is its top level, which adds the bounced light (vk_rc.c)
     UI_MENU_AO, UI_MENU_AO_DESC, UI_MENU_AO_OFF, UI_MENU_AO_LOW, UI_MENU_AO_HIGH, UI_MENU_AO_GI,
+    // contact shadows and percentage-closer soft shadows (vk_contact.c)
+    UI_MENU_CONTACT_SHADOWS, UI_MENU_CONTACT_SHADOWS_DESC, UI_MENU_PCSS, UI_MENU_PCSS_DESC,
+    // post-processing toggles (vk_post.c): the game's own motion blur, depth of field, chromatic aberration
+    UI_MENU_MOTION_BLUR, UI_MENU_MOTION_BLUR_DESC, UI_MENU_DEPTH_OF_FIELD, UI_MENU_DEPTH_OF_FIELD_DESC,
+    UI_MENU_CHROMATIC_ABERRATION, UI_MENU_CHROMATIC_ABERRATION_DESC,
     // the upscaler (vk_dlaa.c), its mode (resolution.c) and the game's anti-aliasing for when none runs
     UI_MENU_UPSCALING, UI_MENU_UPSCALING_DESC, UI_MENU_UPSCALING_DESC_OTHER, UI_MENU_UPSCALING_OFF, UI_MENU_UPSCALING_AUTO,
     UI_MENU_UPSCALING_UNAVAILABLE,
@@ -102,7 +107,7 @@ typedef enum {
     UI_MENU_PAD_LAYOUT, UI_MENU_PAD_LAYOUT_DESC, UI_MENU_PAD_LAYOUT_AUTO, UI_MENU_PAD_LAYOUT_NINTENDO,
     UI_MENU_PAD_LAYOUT_XBOX, UI_MENU_PAD_LAYOUT_PLAYSTATION, UI_MENU_PAD_LAYOUT_IN_USE,
     UI_MENU_PROMPTS, UI_MENU_PROMPTS_DESC, UI_MENU_PROMPTS_AUTO, UI_MENU_PROMPTS_NINTENDO, UI_MENU_PROMPTS_XBOX,
-    UI_MENU_PROMPTS_PLAYSTATION,
+    UI_MENU_PROMPTS_PLAYSTATION, UI_MENU_PROMPTS_KEYBOARD,
     // the notes under the prompts: their files are missing or damaged, they change after restart, or why they are off
     UI_MENU_PROMPTS_MISSING, UI_MENU_PROMPTS_FAILED, UI_MENU_PROMPTS_RESTART, UI_MENU_PROMPTS_OFF_SHAPE,
     UI_MENU_PROMPTS_OFF_MODS, UI_MENU_PROMPTS_OFF_PATCHES,

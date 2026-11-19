@@ -38,6 +38,7 @@ static int key_vk(int key) {
     case KEY_MOUSE_X2: return VK_XBUTTON2;
     case KEY_ENTER: return VK_RETURN;
     case KEY_BACKSPACE: return VK_BACK;
+    case KEY_ESC: return VK_ESCAPE;   // Esc es una tecla de juego normal (KEY_ESC)
     case KEY_RSHIFT: return VK_RSHIFT;
     case KEY_RCTRL: return VK_RCONTROL;
     case KEY_LALT: return VK_LMENU;
@@ -144,15 +145,20 @@ int input_window_msg(HWND h, UINT m, WPARAM w, LPARAM l, LRESULT *res) {
         }
         break;   // DefWindowProc must see WM_INPUT for cleanup
     }
+    case WM_MOUSEWHEEL: {
+        int notches = GET_WHEEL_DELTA_WPARAM(w) / WHEEL_DELTA;
+        wheel_feed(notches > 0, notches < 0 ? -notches : notches);
+        break;   // sin marcar el mensaje como tratado: el menú recibe el mismo WM_MOUSEWHEEL por
+                 // su propio camino y su scroll sigue funcionando.
+    }
     case WM_SETCURSOR:
         if (cur_captured && LOWORD(l) == HTCLIENT) { SetCursor(NULL); *res = TRUE; return 1; }
         break;
     case WM_SYSCOMMAND:   // Alt pressed alone would enter the window menu loop, which stalls the game: Alt is a game key
         if ((w & 0xFFF0) == SC_KEYMENU && l == 0) { *res = 0; return 1; }
         break;
-    case WM_KEYDOWN:   // Esc is unbound in the game layout: it releases the cursor and opens the menu (menu_window_msg)
-        if (w == VK_ESCAPE && !(cur_rel & CUR_REL)) { cur_rel_update(rel_esc); cursor_update(h); }
-        break;
+    // Esc ya no tiene caso propio: es una tecla de juego normal (KEY_ESC, bindeable). El cursor se
+    // libera abriendo el overlay con F1 o perdiendo el foco; antes Esc lo liberaba y abría el menú.
     case WM_LBUTTONDOWN: case WM_RBUTTONDOWN: case WM_MBUTTONDOWN:   // client area only; poll_merged drops the click
         if (cur_rel & CUR_REL) { cur_rel_update(rel_clear); cursor_update(h); }
         break;
@@ -194,7 +200,34 @@ int ikb_foreground(void) {
     return w && w == GetForegroundWindow();
 }
 
+// La rueda como teclas (KEY_WHEEL_UP / KEY_WHEEL_DOWN): cada muesca se convierte en una pulsación
+// temporizada (60 ms pulsada, 50 ms de pausa, cola de hasta 8), el ritmo de Puddz, para que el
+// juego no pierda ninguna. El estado avanza al consultarlo ikb_down, con GetTickCount64.
+typedef struct { int count, active, down; uint64_t t_phase; } WheelPulse;
+static WheelPulse wheel_pulses[2];   // 0: arriba, 1: abajo
+
+static void wheel_feed(int up, int n) {
+    WheelPulse *p = &wheel_pulses[up ? 0 : 1];
+    if (n <= 0) return;
+    p->count += n;
+    if (p->count > 8) p->count = 8;
+    if (!p->active) { p->active = 1; p->down = 1; p->t_phase = GetTickCount64() + 60; }
+}
+
+static int wheel_down(int key) {
+    WheelPulse *p = &wheel_pulses[key == KEY_WHEEL_UP ? 0 : 1];
+    if (!p->active) return 0;
+    uint64_t now = GetTickCount64();
+    while (now >= p->t_phase) {
+        if (p->down) { p->down = 0; p->t_phase += 50; }              // fin de la pulsación: pausa
+        else if (--p->count <= 0) { p->active = 0; p->count = 0; return 0; }
+        else { p->down = 1; p->t_phase += 60; }                      // siguiente muesca de la cola
+    }
+    return p->down;
+}
+
 int ikb_down(int key) {
+    if (key == KEY_WHEEL_UP || key == KEY_WHEEL_DOWN) return wheel_down(key);   // la rueda no tiene VK
     int vk = key_vk(key);
     return vk && key_down(vk);
 }

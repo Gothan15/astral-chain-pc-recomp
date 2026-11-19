@@ -746,6 +746,14 @@ static void tab_screen(float scale) {
     // off, low, high, gi: the names in the order of cfg.c's values for AO
     static const UiTextId ao[] = {UI_MENU_AO_OFF, UI_MENU_AO_LOW, UI_MENU_AO_HIGH, UI_MENU_AO_GI};
     opt_choice("AC_AO", UI_MENU_AO, ao, 4, UI_MENU_AO_DESC);
+    // Sombras de contacto y PCSS (vk_contact.c): sliders de porcentaje como los del bloque. Son
+    // claves RESTART y la fila lo dice sola desde la meta de cfg; los defaults (0) no se tocan.
+    opt_slider("AC_CONTACT_SHADOWS", UI_MENU_CONTACT_SHADOWS, 0, 100, UI_MENU_CONTACT_SHADOWS_DESC, 5, "%.0f %%");
+    opt_slider("AC_PCSS", UI_MENU_PCSS, 0, 200, UI_MENU_PCSS_DESC, 5, "%.0f %%");
+    // Post-procesado del propio juego (vk_post.c): interruptores en vivo; 1 es como viene el juego.
+    opt_toggle("AC_MOTION_BLUR", UI_MENU_MOTION_BLUR, UI_MENU_MOTION_BLUR_DESC);
+    opt_toggle("AC_DEPTH_OF_FIELD", UI_MENU_DEPTH_OF_FIELD, UI_MENU_DEPTH_OF_FIELD_DESC);
+    opt_toggle("AC_CHROMATIC_ABERRATION", UI_MENU_CHROMATIC_ABERRATION, UI_MENU_CHROMATIC_ABERRATION_DESC);
     rows_color();
     opt_group(UI_MENU_HDR_GROUP);
     opt_toggle("AC_HDR", UI_MENU_HDR, UI_MENU_HDR_DESC);
@@ -902,10 +910,10 @@ static void tab_controls(float scale) {
                                         UI_MENU_PAD_LAYOUT_PLAYSTATION};
     opt_choice("AC_PAD_LAYOUT", UI_MENU_PAD_LAYOUT, layout, 4, UI_MENU_PAD_LAYOUT_DESC, pad_layout_note());
     static const UiTextId prompts[] = {UI_MENU_PROMPTS_AUTO, UI_MENU_PROMPTS_NINTENDO, UI_MENU_PROMPTS_XBOX,
-                                        UI_MENU_PROMPTS_PLAYSTATION};
+                                        UI_MENU_PROMPTS_PLAYSTATION, UI_MENU_PROMPTS_KEYBOARD};
     bool restart;
     const char *note = prompts_note(&restart);
-    opt_choice("AC_PROMPTS", UI_MENU_PROMPTS, prompts, 4, UI_MENU_PROMPTS_DESC, note);
+    opt_choice("AC_PROMPTS", UI_MENU_PROMPTS, prompts, 5, UI_MENU_PROMPTS_DESC, note);
     bool ask = restart && opt_button("##restart", UI_MENU_RESTART, UI_MENU_RESTART_DESC);
     opt_toggle("AC_MOTION", UI_MENU_MOTION, UI_MENU_MOTION_DESC);
     opt_slider("AC_RUMBLE_STRENGTH", UI_MENU_RUMBLE_STRENGTH, 0, 300, UI_MENU_RUMBLE_STRENGTH_DESC, 10, "%.0f %%");

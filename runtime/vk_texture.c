@@ -27,6 +27,7 @@
 #include "tex.h"
 #include "vk.h"
 #include "vk_exec.h"
+#include "vk_prompts.h"   // iconos de teclado y ratón sobre el atlas del juego
 #include "platform/platform.h"
 
 typedef struct {
@@ -1364,6 +1365,13 @@ static void upload(Tex *e) {
             } else {
                 rg[k].bufferRowLength = rb / (uint32_t)bpb * (uint32_t)bw, rg[k].bufferImageHeight = rows * (uint32_t)bh;
             }
+            // Iconos de teclado (vk_prompts.c): si esta región es el nivel 0 del atlas de iconos de
+            // ui_core y el estilo en efecto es el de teclado, se repinta sobre los píxeles ya
+            // deswizzleados del staging (rb es su paso de fila), antes de la copia a la imagen. El
+            // atlas es RGBA8 sin comprimir: ni ASTC ni expansión RGB.
+            if (lv == 0 && ly == 0 && !astc && !rgb &&
+                vk_prompts_paint(dst, rb, t->mem, t->L.size, d->format, d->width, d->height))
+                vk_prompts_note_painted(e->pub.addr);
             free(tmp);
         }
         if (acheck) {
@@ -1484,6 +1492,7 @@ static void make_fresh(Tex *e) {
     int ch = vk_mem_changed(e->pub.addr, size, e->wgen, &now);
     e->wgen = now;
     e->last_ch = ch;
+    if (!ch && vk_prompts_stale(e->pub.addr)) ch = 1;   // binds o estilo nuevos: el atlas se repinta
     if (ch) upload(e);   // 1 written, -1 not tracked: both upload again
 }
 
@@ -1498,6 +1507,7 @@ static void make_fresh_snap(Tex *e) {
     e->wgen = now;
     if (!e->uploaded) { upload(e); return; }
     e->last_ch = ch;
+    if (!ch && vk_prompts_stale(e->pub.addr)) ch = 1;   // binds o estilo nuevos: el atlas se repinta
     if (ch) upload(e);
 }
 

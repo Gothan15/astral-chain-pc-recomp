@@ -7,6 +7,7 @@
 // camera is on and no text entry or menu is open; Esc releases it until a click in the window (and closing the menu
 // opened by that Esc gives it back); losing the focus releases it until the window has the focus again.
 #include <string.h>
+#include <math.h>   // lrintf, para las muescas de la rueda
 
 #include <SDL3/SDL.h>
 
@@ -45,6 +46,7 @@ static SDL_Scancode key_sc(int key) {
     case KEY_RIGHT: return SDL_SCANCODE_RIGHT;
     case KEY_ENTER: return SDL_SCANCODE_RETURN;
     case KEY_BACKSPACE: return SDL_SCANCODE_BACKSPACE;
+    case KEY_ESC: return SDL_SCANCODE_ESCAPE;   // Esc es una tecla de juego normal (KEY_ESC)
     case KEY_RSHIFT: return SDL_SCANCODE_RSHIFT;
     case KEY_RCTRL: return SDL_SCANCODE_RCTRL;
     case KEY_LALT: return SDL_SCANCODE_LALT;
@@ -172,13 +174,21 @@ void input_sdl_event(const SDL_Event *e) {
         int down = e->type == SDL_EVENT_KEY_DOWN;
         if (e->key.scancode == SDL_SCANCODE_ESCAPE) {
             plat_xchg32(&esc_held, down);
-            // Esc is unbound in the game layout: it releases the cursor and opens the menu (ui/menu_sdl.cpp)
-            if (down && !e->key.repeat && !(cur_rel & CUR_REL)) plat_xchg32(&cur_rel, CUR_REL | CUR_ESC);
+            // Esc ya no libera el cursor: es una tecla de juego normal (KEY_ESC vía key_of_sc) y el
+            // overlay del port se abre solo con F1 (ui/menu_sdl.cpp). esc_held queda para ikb_escape().
         }
         if (e->key.scancode == SDL_SCANCODE_F8) plat_xchg32(&f8_held, down);
         int k = key_of_sc(e->key.scancode);
         if (k) key_held[k] = (uint8_t)down;
         break;
+    }
+    case SDL_EVENT_MOUSE_WHEEL: {
+        // e->wheel.y: muescas (positivo = arriba); con SDL_MOUSEWHEEL_FLIPPED el signo viene dado
+        // la vuelta por el sistema y hay que deshacerlo.
+        int n = (int)lrintf(e->wheel.y);
+        if (e->wheel.direction == SDL_MOUSEWHEEL_FLIPPED) n = -n;
+        wheel_feed(n > 0, n < 0 ? -n : n);
+        break;   // el evento no se consume en exclusiva: el menú lee la misma rueda para su scroll
     }
     case SDL_EVENT_MOUSE_BUTTON_DOWN:
     case SDL_EVENT_MOUSE_BUTTON_UP: {
@@ -214,7 +224,36 @@ void input_sdl_event(const SDL_Event *e) {
 
 // ---- input_wsys.h
 int ikb_foreground(void) { return focused != 0; }
-int ikb_down(int key) { return key > 0 && key < KEY_COUNT && key_held[key]; }
+// La rueda como teclas (KEY_WHEEL_UP / KEY_WHEEL_DOWN): cada muesca se convierte en una pulsación
+// temporizada (60 ms pulsada, 50 ms de pausa, cola de hasta 8), el ritmo de Puddz, para que el
+// juego no pierda ninguna. El estado avanza al consultarlo ikb_down, con SDL_GetTicks.
+typedef struct { int count, active, down; uint64_t t_phase; } WheelPulse;
+static WheelPulse wheel_pulses[2];   // 0: arriba, 1: abajo
+
+static void wheel_feed(int up, int n) {
+    WheelPulse *p = &wheel_pulses[up ? 0 : 1];
+    if (n <= 0) return;
+    p->count += n;
+    if (p->count > 8) p->count = 8;
+    if (!p->active) { p->active = 1; p->down = 1; p->t_phase = SDL_GetTicks() + 60; }
+}
+
+static int wheel_down(int key) {
+    WheelPulse *p = &wheel_pulses[key == KEY_WHEEL_UP ? 0 : 1];
+    if (!p->active) return 0;
+    uint64_t now = SDL_GetTicks();
+    while (now >= p->t_phase) {
+        if (p->down) { p->down = 0; p->t_phase += 50; }              // fin de la pulsación: pausa
+        else if (--p->count <= 0) { p->active = 0; p->count = 0; return 0; }
+        else { p->down = 1; p->t_phase += 60; }                      // siguiente muesca de la cola
+    }
+    return p->down;
+}
+
+int ikb_down(int key) {
+    if (key == KEY_WHEEL_UP || key == KEY_WHEEL_DOWN) return wheel_down(key);   // la rueda no es una tecla física
+    return key > 0 && key < KEY_COUNT && key_held[key];
+}
 int ikb_escape(void) { return esc_held != 0; }
 int ikb_captured(void) { return captured != 0; }
 

@@ -47,7 +47,7 @@ extern "C" int menu_window_msg(HWND h, UINT m, WPARAM w, LPARAM l, LRESULT *res)
     case WM_SYSKEYDOWN:
         // bit 30: auto-repeat
         // Esc with the menu open (opened by F1 too) is not a toggle here: it goes to the menu, which closes itself
-        if (!(l & (1 << 30)) && (w == VK_F1 || (w == VK_ESCAPE && !menu_is_open()))) {
+        if (!(l & (1 << 30)) && w == VK_F1) {   // solo F1: Esc es una tecla de juego (KEY_ESC)
             menu_toggle();
             *res = 0;
             return 1;

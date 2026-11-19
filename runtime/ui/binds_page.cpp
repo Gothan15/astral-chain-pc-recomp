@@ -120,7 +120,10 @@ static void write_lines(const InputMap *m) {
         if (line[0]) {
             cfg_set(var, line);
         } else {
-            const char *k = var + 5;
+            // La clave en cfg es «BIND_<ACCION>»: var + 3 salta el «AC_». Con var + 5 salía
+            // «ND_<ACCION>», cfg_reset no encontraba la entrada y la línea intermedia sobrevivía
+            // en el ini: restaurar un bind a su valor de fábrica no se aplicaba nunca.
+            const char *k = var + 3;
             cfg_reset(&k, 1);
         }
         rt_log("menu: bind_%s = %s", input_action_name(a), line[0] ? line : "(default)");
