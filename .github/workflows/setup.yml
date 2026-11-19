@@ -1,4 +1,4 @@
-# Fase 1: binds, iconos, camara, rueda, Esc, textos y post (2026-11-19)
+# Fase 1: binds, iconos, camara, rueda, Esc, textos y post (2026-11-19) + arreglo wheel_feed
 name: Setup
 
 on:
