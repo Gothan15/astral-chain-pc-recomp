@@ -1643,6 +1643,9 @@ void vk_texture_debug(const VkTexImage *img, uint32_t *uploads, int *last_change
     unlock();
 }
 
+// The NVN format of the texture an image was made for (any thread: fixed at creation).
+int vk_texture_nvn_format(const VkTexImage *img) { return (int)((const Tex *)img)->key.d.format; }
+
 const VkTexImage *vk_texture_get(const tex_t *t) {
     if (!t || !t->mem) return NULL;
     lock();
