@@ -1308,6 +1308,62 @@ static void upload(Tex *e) {
     uint32_t skip = e->pub.skip;   // AC_TEX_MIP_SKIP: image level lv holds the game's level lv + skip
     int astc = e->f.astc_bw != 0, rgb = e->f.expand_rgb;
     int agpu = astc && vk_astc_gpu(), acheck = agpu && vk_astc_mode() == VK_ASTC_CHECK;   // raw blocks to the GPU
+    // Caché BC7 precómputada (vk_bc7_cache.c): si esta textura va a BC7 y sus bloques ya
+    // están codificados en disco, se suben tal cual y se salta entero el bucle de
+    // deswizzle + decodificación + codificación. La clave es el contenido huésped actual
+    // (t->mem sobre t->L.size): si el juego reescribió el almacenamiento, el hash no
+    // casa y se sigue por el camino normal. Fuera quedan: el modo check (debe comparar
+    // decodificadores), las lineales (sin layout Tegra empaquetado que enumerar), las 3D
+    // (el enumerador las excluye) y mip-skip (la ventana de niveles no empieza en el 0).
+    // El atlas de prompts no corre peligro: va por el camino !astc (más abajo, en el
+    // bucle por regiones) y esta rama exige astc con astc_bc == 3.
+    if (astc && agpu && !acheck && e->f.astc_bc == 3 && !linear && !is3d && !skip) {
+        // Con AC_BC7_CACHE_LOG, la clave de TODA subida BC7 candidata va al log, haya
+        // caché o no: es la mitad en caliente de la validación de claves (doc 04 §5).
+        if (vk_bc7_cache_log_on())
+            vk_bc7_cache_log_key(t->mem, t->L.size, d->format, d->width, d->height,
+                                 d->levels, layers);
+        uint8_t *blocks = NULL;
+        uint64_t blocks_size = 0;
+        if (vk_bc7_cache_enabled() &&
+            vk_bc7_cache_fetch(t->mem, t->L.size, d->format, d->width, d->height,
+                               d->levels, layers, &blocks, &blocks_size)) {
+            VkCommandBuffer cb = vk_upload_begin();
+            barrier(cb, ALL_RW, VK_PIPELINE_STAGE_2_COPY_BIT, VK_ACCESS_2_TRANSFER_WRITE_BIT);
+            vk_bc7_cache_record(cb, e->pub.image, e->pub.aspect, blocks, d->width, d->height,
+                                d->levels, layers, levels);
+            barrier(cb, VK_PIPELINE_STAGE_2_COPY_BIT, VK_ACCESS_2_TRANSFER_WRITE_BIT, ALL_RW);
+            vk_upload_end();
+            free(blocks);
+            // Epílogo: el mismo cierre que el final de upload() cuando la subida vale,
+            // con `decoded` calculado aquí (el bucle de regiones no ha corrido).
+            uint64_t decoded = 0;
+            for (uint32_t lv = 0; lv < levels; lv++)
+                decoded += (uint64_t)mip(d->width, lv) * (one_d ? 1 : mip(d->height, lv)) * 4;
+            decoded *= layers;
+            uint64_t dt = kern_now_ns() - u0;
+            if (e->uploaded) {
+                n_reuploads++, perf_count(PERF_CNT_TEX_REUP);
+                ru_n++, ru_bytes += t->L.size, ru_ns += dt;
+                if (e->wt_n) {
+                    ru_wt_n++, ru_wt_bytes += t->L.size, ru_wt_ns += dt;
+                    if (rt_trace & RT_TRACE_PERF)
+                        rt_log("perf: frame %llu: re-upload after %u WriteTexels: texture %#llx fmt %#x %ux%u, %.1f KiB, %.3f ms",
+                               (unsigned long long)__atomic_load_n(&gfx_counters.frames, __ATOMIC_RELAXED), e->wt_n,
+                               (unsigned long long)e->pub.addr, d->format, d->width, d->height, t->L.size / 1024.0, dt / 1e6);
+                }
+            } else {
+                n_uploads++, perf_count(PERF_CNT_TEX_UP);
+                if (!pre_in_step) pre_n_draw++, pre_tx_draw += decoded / 4;
+            }
+            e->wt_n = 0;
+            e->uploaded = 1;
+            e->nomem_epoch = 0;
+            e->n_up++;
+            perf_end(PERF_TEX, p0);
+            return;
+        }
+    }
     uint32_t n = levels * layers, k = 0;
     VkBufferImageCopy *rg = calloc(n, sizeof *rg);
     VkAstcRegion *ar = agpu ? calloc(n, sizeof *ar) : NULL;

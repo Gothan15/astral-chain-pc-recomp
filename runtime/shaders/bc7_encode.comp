@@ -1,0 +1,147 @@
+// Texeles RGBA8 a bloques BC7 en la GPU, una invocación por bloque de 4x4: el segundo paso de la
+// decodificación ASTC cuando AC_ASTC_BC=bc7 (vk_astc.c), para que una textura ASTC decodificada ocupe
+// 8 bits por texel en la memoria de vídeo en vez de los 32 de RGBA8, con más calidad que BC1/BC3 a
+// igualdad de tamaño que BC3 (extremos RGBA de 7 bits con bit p compartido, índices de 4 bits y alfa
+// de verdad: los modos 1 y bc1 de AC_ASTC_BC pierden el alfa o la precisión de color por el camino).
+// Los texeles que caen fuera del borde derecho o inferior repiten la última columna o fila.
+//
+// Solo se emite el modo 6 de BC7: un único subconjunto, extremos RGBA de 7 bits con un bit p por
+// extremo e índices de 4 bits para los 16 texeles. El algoritmo es el del codificador BC7 en GPU de
+// AstralChain-PC (Puddz, MIT): eje principal de los texeles por iteración de potencia sobre su
+// covarianza, cuantización de los extremos probando los dos bits p, ajuste de índices por error
+// mínimo y dos rondas de refinado de extremos por mínimos cuadrados. La medición de su calidad está
+// en --probe-astc (astc_probe.c, bc7_check), que decodifica estos bloques y los sostiene contra los
+// límites de error de los otros codificadores.
+// Compilado a runtime/bc7_encode_spv.h por tools/build_shaders.py; vk_astc.c graba el dispatch.
+#version 450
+
+layout(local_size_x = 8, local_size_y = 8, local_size_z = 1) in;
+
+layout(std430, set = 0, binding = 0) readonly buffer Texels { uint px[]; };
+layout(std430, set = 0, binding = 1) writeonly buffer Blocks { uvec4 blk[]; };
+
+layout(push_constant) uniform Params {
+    uint in_base;    // primer texel de la rebanada 0 (índice en px)
+    uint out_base;   // primer bloque de la rebanada 0 (índice uvec4 en blk)
+    uint width, height;
+    uint bx;         // bloques por fila
+    uint bslice;     // bloques por rebanada
+} pc;
+
+// Pesos de interpolación de los índices de 4 bits del modo 6 (la tabla del formato, sobre 64).
+const int W4[16] = int[](0, 4, 9, 13, 17, 21, 26, 30, 34, 38, 43, 47, 51, 55, 60, 64);
+
+vec4 px16[16];
+uint idx16[16];
+
+vec4 texel(uint x, uint y, uint z) {
+    x = min(x, pc.width - 1u), y = min(y, pc.height - 1u);
+    return unpackUnorm4x8(px[pc.in_base + (z * pc.height + y) * pc.width + x]) * 255.0;
+}
+
+// El extremo tal como se guarda: 7 bits por canal y un bit p compartido por los canales (el valor
+// guardado v representa v * 2 + p en 8 bits); se prueba cada bit p y se queda el más cercano.
+ivec4 quantize(vec4 e, out uint p) {
+    ivec4 best = ivec4(0);
+    float err = 1e30;
+    p = 0u;
+    for (int pb = 0; pb < 2; pb++) {
+        ivec4 c = clamp(ivec4(floor((e - float(pb)) * 0.5 + 0.5)), ivec4(0), ivec4(127));
+        vec4 d = vec4(c * 2 + pb) - e;
+        float de = dot(d, d);
+        if (de < err) { err = de; best = c; p = uint(pb); }
+    }
+    return best;
+}
+
+// Índices para los extremos q0, q1 (valores ya en 8 bits) y el error cuadrático total que dejan.
+float fit(ivec4 q0, ivec4 q1) {
+    vec4 pal[16];
+    for (int k = 0; k < 16; k++) pal[k] = vec4((q0 * (64 - W4[k]) + q1 * W4[k] + 32) >> 6);
+    float total = 0.0;
+    for (int i = 0; i < 16; i++) {
+        float best = 1e30;
+        uint bk = 0u;
+        for (int k = 0; k < 16; k++) { vec4 d = px16[i] - pal[k]; float e = dot(d, d); if (e < best) { best = e; bk = uint(k); } }
+        idx16[i] = bk;
+        total += best;
+    }
+    return total;
+}
+
+void putbits(inout uvec4 o, inout int pos, uint v, int n) {
+    int wi = pos >> 5, sh = pos & 31;
+    o[wi] |= v << uint(sh);
+    if (sh + n > 32) o[wi + 1] |= v >> uint(32 - sh);
+    pos += n;
+}
+
+void main() {
+    uvec3 id = gl_GlobalInvocationID;
+    uint by = (pc.height + 3u) / 4u;
+    if (id.x >= pc.bx || id.y >= by) return;
+    vec4 mean = vec4(0.0), lo = vec4(255.0), hi = vec4(0.0);
+    for (uint i = 0u; i < 16u; i++) {
+        px16[i] = texel(id.x * 4u + (i & 3u), id.y * 4u + (i >> 2), id.z);
+        mean += px16[i];
+        lo = min(lo, px16[i]);
+        hi = max(hi, px16[i]);
+    }
+    mean *= 1.0 / 16.0;
+    // Eje principal de los texeles (iteración de potencia sobre su covarianza, desde la diagonal
+    // de la caja que los contiene).
+    mat4 cov = mat4(0.0);
+    for (int i = 0; i < 16; i++) { vec4 d = px16[i] - mean; cov += outerProduct(d, d); }
+    vec4 axis = hi - lo;
+    for (int it = 0; it < 6; it++) { vec4 v = cov * axis; float l = length(v); if (l < 1e-6) break; axis = v / l; }
+    if (length(axis) < 1e-6) axis = vec4(0.5); else axis = normalize(axis);
+    float tmin = 1e30, tmax = -1e30;
+    for (int i = 0; i < 16; i++) { float t = dot(px16[i] - mean, axis); tmin = min(tmin, t); tmax = max(tmax, t); }
+    vec4 e0 = clamp(mean + axis * tmin, 0.0, 255.0), e1 = clamp(mean + axis * tmax, 0.0, 255.0);
+    uint p0, p1, bp0 = 0u, bp1 = 0u;
+    ivec4 c0 = quantize(e0, p0), c1 = quantize(e1, p1);
+    float best = fit(c0 * 2 + int(p0), c1 * 2 + int(p1));
+    ivec4 b0 = c0, b1 = c1;
+    bp0 = p0;
+    bp1 = p1;
+    uint bidx[16];
+    for (int i = 0; i < 16; i++) bidx[i] = idx16[i];
+    // Extremos por mínimos cuadrados para los índices elegidos, dos rondas.
+    for (int round_ = 0; round_ < 2 && best > 0.0; round_++) {
+        float A = 0.0, B = 0.0, C = 0.0;
+        vec4 X = vec4(0.0), Y = vec4(0.0);
+        for (int i = 0; i < 16; i++) {
+            float t = float(W4[bidx[i]]) / 64.0, s = 1.0 - t;
+            A += s * s; B += s * t; C += t * t; X += s * px16[i]; Y += t * px16[i];
+        }
+        float det = A * C - B * B;
+        if (abs(det) < 1e-4) break;
+        e0 = clamp((C * X - B * Y) / det, 0.0, 255.0);
+        e1 = clamp((A * Y - B * X) / det, 0.0, 255.0);
+        c0 = quantize(e0, p0);
+        c1 = quantize(e1, p1);
+        float err = fit(c0 * 2 + int(p0), c1 * 2 + int(p1));
+        if (err >= best) break;
+        best = err;
+        b0 = c0;
+        b1 = c1;
+        bp0 = p0;
+        bp1 = p1;
+        for (int i = 0; i < 16; i++) bidx[i] = idx16[i];
+    }
+    // El bit alto del primer índice va implícito a 0: si no se cumple, se intercambian los extremos.
+    if (bidx[0] >= 8u) {
+        ivec4 tc = b0; b0 = b1; b1 = tc;
+        uint tp = bp0; bp0 = bp1; bp1 = tp;
+        for (int i = 0; i < 16; i++) bidx[i] = 15u - bidx[i];
+    }
+    uvec4 o = uvec4(0u);
+    int pos = 0;
+    putbits(o, pos, 64u, 7);   // modo 6
+    for (int c = 0; c < 4; c++) { putbits(o, pos, uint(b0[c]), 7); putbits(o, pos, uint(b1[c]), 7); }
+    putbits(o, pos, bp0, 1);
+    putbits(o, pos, bp1, 1);
+    putbits(o, pos, bidx[0], 3);
+    for (int i = 1; i < 16; i++) putbits(o, pos, bidx[i], 4);
+    blk[pc.out_base + id.z * pc.bslice + id.y * pc.bx + id.x] = o;
+}

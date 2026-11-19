@@ -13,7 +13,11 @@ final tras todos los efectos, con el HUD intacto.
 
 ## Compilar el addon
 
-Es un solo archivo (`reshade_hud.cpp`) contra los encabezados del SDK de ReShade, vendored en
+La vía automática: el workflow **Addon** de este repo (`.github/workflows/addon.yml`) lo compila con
+MSVC en cada push a `addon/**` de esta rama y deja el `reshade_hud.addon64` como artefacto
+`reshade_hud` de la corrida (pestaña Actions). También se puede lanzar a mano desde ahí.
+
+A mano es un solo archivo (`reshade_hud.cpp`) contra los encabezados del SDK de ReShade, vendored en
 `include/` (BSD-3/MIT, (C) Patrick Mours). Con MSVC, desde una consola de desarrollador:
 
 ```
