@@ -128,6 +128,8 @@ void input_cursor_suspend(int on) {
 }
 
 // Window procedure hook (gfx_window_win.c calls it first). Returns 1 with *res set when the message is fully handled.
+static void wheel_feed(int up, int n);   // la rueda como teclas: su definición va junto a ikb_down, más abajo
+
 int input_window_msg(HWND h, UINT m, WPARAM w, LPARAM l, LRESULT *res) {
     switch (m) {
     case WM_CREATE: {

@@ -167,6 +167,8 @@ void input_sdl_idle(void) {
     if (cur_pending) cursor_apply();
 }
 
+static void wheel_feed(int up, int n);   // la rueda como teclas: su definición va junto a ikb_down, más abajo
+
 void input_sdl_event(const SDL_Event *e) {
     switch (e->type) {
     case SDL_EVENT_KEY_DOWN:
