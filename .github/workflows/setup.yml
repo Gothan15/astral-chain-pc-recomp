@@ -51,10 +51,10 @@ jobs:
           Remove-Item oficial.zip
           Remove-Item oficial -Recurse -Force
 
-      - name: MSYS2 gcc and make for hactool
+      - name: MSYS2 packages for hactool and the runtime
         shell: pwsh
         run: |
-          & "C:\msys64\usr\bin\pacman.exe" -Sy --needed --noconfirm mingw-w64-ucrt-x86_64-gcc make
+          & "C:\msys64\usr\bin\pacman.exe" -Sy --needed --noconfirm mingw-w64-ucrt-x86_64-gcc mingw-w64-ucrt-x86_64-shaderc make spirv-tools
 
       - name: Build hactool
         shell: pwsh
