@@ -54,7 +54,12 @@ jobs:
       - name: MSYS2 packages for hactool and the runtime
         shell: pwsh
         run: |
-          & "C:\msys64\usr\bin\pacman.exe" -Sy --needed --noconfirm mingw-w64-ucrt-x86_64-gcc mingw-w64-ucrt-x86_64-shaderc mingw-w64-ucrt-x86_64-spirv-tools make
+          & "C:\msys64\usr\bin\pacman.exe" -Sy --needed --noconfirm mingw-w64-ucrt-x86_64-gcc mingw-w64-ucrt-x86_64-shaderc mingw-w64-ucrt-x86_64-spirv-tools mingw-w64-ucrt-x86_64-mesa make
+
+      - name: Register the lavapipe software Vulkan driver
+        shell: pwsh
+        run: |
+          reg add "HKLM\SOFTWARE\Khronos\Vulkan\Drivers" /v "C:\msys64\ucrt64\share\vulkan\icd.d\lvp_icd.x86_64.json" /t REG_DWORD /d 0 /f
 
       - name: Build hactool
         shell: pwsh
