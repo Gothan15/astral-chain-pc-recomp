@@ -11,7 +11,7 @@ on:
 permissions:
   contents: write
   
-  jobs:
+jobs:
   build:
     runs-on: windows-latest
     steps:
@@ -25,11 +25,9 @@ permissions:
           name: reshade_hud
           path: reshade_hud.addon64
       - name: Publish the addon to the reshade release
-      uses: softprops/action-gh-release@v2
-      with:
-      tag_name: reshade-1.19.3
-      files: |
-      reshade_hud.addon64
-      addon/AstralChainHud.fx
-      
-                                                      
+        uses: softprops/action-gh-release@v2
+        with:
+          tag_name: reshade-1.19.3
+          files: |
+            reshade_hud.addon64
+            addon/AstralChainHud.fx
