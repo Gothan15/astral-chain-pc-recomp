@@ -66,6 +66,12 @@ jobs:
           $env:PATH = "C:\Program Files (x86)\Microsoft Visual Studio\Installer;" + $env:PATH
           python tools/build_xlate.py
 
+      - name: Fetch the MacNativeGames licence
+        shell: pwsh
+        run: |
+          New-Item -ItemType Directory -Force "refs/MacNativeGames" | Out-Null
+          curl.exe -fL "https://raw.githubusercontent.com/ly05010419/MacNativeGames/b75be8cfa704df3701e86130c8ced268e79d6b11/LICENSE" -o "refs/MacNativeGames/LICENSE"
+
       - name: Assemble the setup package
         shell: pwsh
         run: python tools/make_release.py --out "build/release/Astral Chain-Setup" --zip "build/release/Astral.Chain-Setup-1.19.3-reshade-windows.zip"
