@@ -85,7 +85,7 @@ jobs:
       - name: Publish the release
         uses: softprops/action-gh-release@v2
         with:
-          tag_name: reshade-fase1
+          tag_name: reshade-fase2
           name: Astral Chain 1.19.3 + opcion ReShade (antes del HUD)
           body: Paquete Setup compilado desde la rama reshade-antes-del-hud. Igual que la release oficial 1.19.3, pero el runtime lleva la opcion reshade = 1 (los efectos de ReShade solo tocan la escena; el HUD va en una capa aparte que compone el addon). Se instala como siempre, con tu propia copia del juego; el ejecutable se compila en tu PC durante la instalacion.
           files: build/release/Astral.Chain-Setup-1.19.3-reshade-windows.zip
