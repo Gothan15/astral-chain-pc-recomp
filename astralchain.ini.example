@@ -127,7 +127,7 @@
 # board), desktop or deck. On a Steam Deck the keys this file does not set default to fullscreen = 1,
 # window_size = 1280x800, output_res = 1280x720 (shown on the 1280x800 screen with bars of 40 rows above and below;
 # set output_res = 1920x1080 here or in the menu for a docked Deck on a 1080p display), render_scale = game, vk_present = fifo,
-# fps = 30, operation_mode = handheld, astc_bc = bc1, tex_cache_mb = 512, tex_vram_pressure = 70, aniso = game,
+# operation_mode = handheld, astc_bc = bc1, tex_cache_mb = 512, tex_vram_pressure = 70, aniso = game,
 # shadow_res = 512, shadow_scale = 1, shadow_range = 100, contact_shadows = 0, pcss = 0, draw_distance = 100. Read at
 # start.
 # device_profile = auto
@@ -266,7 +266,7 @@
 # upscaler that can (FSR 3 at worst) takes over until a restart. With output_res = auto an upscaler from the start also
 # raises the game resolution to the screen's.
 # upscaling_quality = native
-# The game's own anti-aliasing, for when no upscaler runs: smaa (the default) or off (the default on the Steam Deck).
+# The game's own anti-aliasing, for when no upscaler runs: smaa (the default, the Steam Deck too) or off.
 # anti_aliasing = smaa
 # Up to 1.10.1 one setting, anti_aliasing = smaa | dlaa | xess | fsr3, chose the scene's anti-aliasing (and before it
 # dlaa = 1 / xess = 1): dlaa, xess and fsr3 are read as upscaling = dlss, xess or fsr3 with upscaling_quality = native,
