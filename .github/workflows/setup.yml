@@ -2,6 +2,10 @@ name: Setup
 
 on:
   workflow_dispatch:
+  push:
+    branches: [reshade-antes-del-hud]
+    paths:
+      - ".github/workflows/setup.yml"
 
 permissions:
   contents: write
