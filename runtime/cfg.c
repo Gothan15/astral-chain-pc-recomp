@@ -156,6 +156,7 @@ static const CfgMeta metas[] = {
     {"OPERATION_MODE", "docked", "docked|handheld", RESTART},
     {"ASSUME_FOCUS", "1", "0|1", LIVE},   // read on every focus change (ov_system.c)
     {"HUD", "1", "0|1", LIVE},            // the gameplay HUD is drawn (resolution.c res_hud_tick); F12 switches it
+    {"RESHADE", "0", "0|1", LIVE},        // ReShade solo toca la escena: la fase HUD va a una capa aparte (vk_reshade.c)
     // Sound, Controls, Menu
     {"VOLUME", "100", "0..100", LIVE},
     {"MOTION", "1", "0|1", LIVE}, {"RUMBLE_STRENGTH", "130", "0..300", LIVE}, {"RUMBLE_CURVE", "0.6", "0.2..1.5", LIVE},

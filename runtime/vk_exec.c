@@ -30,6 +30,7 @@
 #include "vk.h"
 #include "vk_exec.h"
 #include "vk_dlaa.h"
+#include "vk_reshade.h"
 
 #define WEAK __attribute__((weak))
 #define CALL_DEPTH 8
@@ -976,6 +977,7 @@ void vk_exec_pass_begin(VkExec *ex) {
     ex->fbl_mask = fbl;
     ex->fb_dirty = (cl & 0xff) | (cl & 0x300 ? 0x100u : 0);   // a load-op clear writes its attachment in this pass
     ex->pass_serial++;
+    vk_reshade_pass_begin(ex);   // la opción reshade: la fase HUD se redirige a su capa (vk_reshade.c)
     VkRenderingAttachmentInfo ca[8], da = {0}, sa = {0};
     for (uint32_t i = 0; i < ex->pass_ncolor; i++) {
         const VkExecTarget *t = &ex->color[i];
@@ -986,6 +988,11 @@ void vk_exec_pass_begin(VkExec *ex) {
         ca[i].loadOp = cl >> i & 1 ? VK_ATTACHMENT_LOAD_OP_CLEAR : VK_ATTACHMENT_LOAD_OP_LOAD;
         ca[i].storeOp = VK_ATTACHMENT_STORE_OP_STORE;
         if (cl >> i & 1) ca[i].clearValue = clv[i];
+    }
+    if (vk_reshade_redirected()) {   // el pase es de la fase HUD: escribe en la capa, ya limpia, no en la ventana
+        ca[0].imageView = vk_reshade_overlay_view();
+        ca[0].imageLayout = VK_IMAGE_LAYOUT_GENERAL;
+        ca[0].loadOp = VK_ATTACHMENT_LOAD_OP_LOAD;
     }
     const VkExecTarget *d = &ex->depth;
     if (d->image) {
@@ -1015,6 +1022,7 @@ void vk_exec_pass_end_why(VkExec *ex, int why) {
     vk_exec_oq_pass_end(ex);
     vkCmdEndRendering(ex->cb);
     ex->recorded++;
+    vk_reshade_pass_end(ex);   // la barrera de salida de la capa del HUD, si el pase iba redirigido
     ex->in_pass = 0;
     ex->chain_at = ex->recorded;   // the pass chain: whatever is recorded from here on that is not a pass breaks it
     if (vk_exec_chain_on() & 2) {

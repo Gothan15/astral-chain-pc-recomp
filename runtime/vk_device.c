@@ -15,6 +15,7 @@
 #include "vk.h"
 #include "platform/platform.h"
 #include "vk_dlaa.h"
+#include "vk_reshade.h"
 #include "vk_xess.h"
 
 static VkCtx g_vk;
@@ -410,6 +411,7 @@ static void destroy_all(void) {
     if (g_vk.device) vk_astc_release();
     if (g_vk.device) vk_crumbs_release();
     if (g_vk.device) vk_dlaa_release();
+    if (g_vk.device) vk_reshade_release();
     if (g_vk.device) vk_lowlat_release(&g_vk);
     if (g_vk.timeline) vkDestroySemaphore(g_vk.device, g_vk.timeline, NULL);
     vk_headroom_stop();

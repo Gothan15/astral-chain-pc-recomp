@@ -158,6 +158,11 @@
 # 1, the default: the game draws its HUD. 0: the HUD of play (the gauges, the map, the prompts, the markers) is not
 # drawn; the menus stay. F12 switches it in game and saves it here, as does the menu's Game tab.
 # hud = 1
+# 1: ReShade's effects are applied to the scene only. The game's HUD and menus are drawn into a separate
+# layer and put back over the picture after ReShade has run, untouched by its effects. Needs the companion
+# add-on (addon/reshade_hud.addon64) loaded by a ReShade build with full add-on support; without it this
+# setting does nothing. 0, the default: off.
+# reshade = 0
 # Performance overlay in the top right corner: off, fps, or full (frame rate, mean and longest frame time). F10
 # cycles the modes in game, as does holding L + R and then pressing Minus + Plus on a controller (both stick clicks are
 # left to the game: they trigger Fusion).
