@@ -88,5 +88,5 @@ jobs:
         with:
           tag_name: camara-directa
           name: Astral Chain 1.19.3 + opcion ReShade (antes del HUD)
-          body: Compilacion experimental de la rama camara-directa: camara directa del raton (MOUSE_CAMERA = direct en astralchain.ini) y el escaner para localizar el estado de la camara (CAM_SCAN = 1). Todo lo demas es lo mismo que la release reshade-unificado. Se instala como siempre, con tu propia copia del juego.
+          body: Compilacion experimental de la rama camara-directa. Camara directa del raton (MOUSE_CAMERA = direct en astralchain.ini) y el escaner para localizar el estado de la camara (CAM_SCAN = 1). Todo lo demas es lo mismo que la release reshade-unificado. Se instala como siempre, con tu propia copia del juego.
           files: build/release/Astral.Chain-Setup-1.19.3-camara-directa-windows.zip
