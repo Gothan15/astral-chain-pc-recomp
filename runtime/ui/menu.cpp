@@ -733,6 +733,11 @@ static void tab_screen(float scale) {
     opt_choice("AC_PERF_OVERLAY", UI_MENU_PERF_OVERLAY, perf, 3, UI_MENU_PERF_OVERLAY_DESC);
     opt_group(UI_MENU_GRAPHICS);
     row_output_res();
+    // Escala de renderizado (resolution.c): por encima de 100 es supersampling, la mejora de detalle
+    // más directa; la clave ya aceptaba 25..400 y el menú no la ofrecía.
+    static const char *const rscale[] = {"game", "50", "67", "75", "100", "125", "150", "200"};
+    static const char *const rscale_names[] = {"Game", "50%", "67%", "75%", "100%", "125%", "150%", "200%"};
+    opt_choice_list("AC_RENDER_SCALE", UI_MENU_RENDER_SCALE, rscale, rscale_names, 8, UI_MENU_RENDER_SCALE_DESC);
     rows_upscaling();
     static const UiTextId up[] = {UI_MENU_UPSCALER_FSR, UI_MENU_UPSCALER_BILINEAR};
     opt_choice("AC_UPSCALER", UI_MENU_UPSCALER, up, 2, UI_MENU_UPSCALER_DESC);
@@ -742,6 +747,8 @@ static void tab_screen(float scale) {
     static const char *const aniso[] = {"auto", "game", "2", "4", "8", "16"};
     const char *aniso_names[] = {menu_text(UI_MENU_ANISO_AUTO), menu_text(UI_MENU_ANISO_GAME), "2x", "4x", "8x", "16x"};
     opt_choice_list("AC_ANISO", UI_MENU_ANISO, aniso, aniso_names, 6, UI_MENU_ANISO_DESC);
+    // Sesgo de LOD de texturas (vk_texture.c): negativo = mips más finos, más nitidez con algo de shimmer.
+    opt_slider("AC_TEX_LOD_BIAS", UI_MENU_TEX_LOD_BIAS, -2, 0, UI_MENU_TEX_LOD_BIAS_DESC, 0.25f, "%.2f");
     // Compresión de texturas del fork (vk_astc.c): los valores que acepta la clave son auto, bc1, 1 (BC3
     // forzado), bc7 y 0 (sin compresión, RGBA8). La caché BC7 precómputada (bc7_cache.h) solo actúa con BC7.
     static const char *const astc_bc[] = {"auto", "bc1", "1", "bc7", "0"};
@@ -977,11 +984,10 @@ static void tab_debug(float scale) {
     opt_begin("##debug", scale);
     opt_toggle("AC_POST_DEBUG", UI_MENU_POST_DEBUG, UI_MENU_POST_DEBUG_DESC);
     opt_toggle("AC_CONTACT_DEBUG", UI_MENU_CONTACT_DEBUG, UI_MENU_CONTACT_DEBUG_DESC);
-    opt_choice_list("AC_AO_DEBUG", UI_MENU_AO_DEBUG, UI_MENU_AO_DEBUG_DESC, kAoVals, kAoNames, 4);
+    opt_choice_list("AC_AO_DEBUG", UI_MENU_AO_DEBUG, kAoVals, kAoNames, 4, UI_MENU_AO_DEBUG_DESC);
     opt_toggle("AC_BC7_CACHE_LOG", UI_MENU_BC7_CACHE_LOG, UI_MENU_BC7_CACHE_LOG_DESC);
     opt_toggle("AC_FLIGHT", UI_MENU_FLIGHT, UI_MENU_FLIGHT_DESC);
-    opt_slider("AC_FLIGHT_SPIKE_MS", UI_MENU_FLIGHT_SPIKE_MS, UI_MENU_FLIGHT_SPIKE_MS_DESC, 0.0f, 1000.0f, 10.0f,
-               "%.0f");
+    opt_slider("AC_FLIGHT_SPIKE_MS", UI_MENU_FLIGHT_SPIKE_MS, 0, 1000, UI_MENU_FLIGHT_SPIKE_MS_DESC, 10, "%.0f");
     opt_end();
 }
 

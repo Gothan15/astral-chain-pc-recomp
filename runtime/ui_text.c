@@ -159,6 +159,14 @@ static const char *const text_en[UI_TEXT_COUNT] = {
     [UI_MENU_BC7_CACHE_LOG] = "BC7 cache key log",
     [UI_MENU_BC7_CACHE_LOG_DESC] = "Logs a [bc7key] line for every texture the BC7 path uploads, to check the "
                                    "precomputed cache's keys against the game's. Takes effect at the next start.",
+    [UI_MENU_RENDER_SCALE] = "Render scale",
+    [UI_MENU_RENDER_SCALE_DESC] = "Scales the rendered scene against the game resolution. Above 100% is "
+                                  "supersampling: 125% renders a 1080p game at 1440p and sharpens everything, "
+                                  "textures included, at a GPU cost. Takes effect at the next start.",
+    [UI_MENU_TEX_LOD_BIAS] = "Texture sharpness (LOD bias)",
+    [UI_MENU_TEX_LOD_BIAS_DESC] = "Shifts every texture toward its finer mip levels: negative values make "
+                                  "surfaces sharper at a distance, at the cost of some shimmer. Pair it with "
+                                  "16x anisotropy. Takes effect at the next start.",
     [UI_MENU_MOTION_BLUR] = "Motion blur",
     [UI_MENU_MOTION_BLUR_DESC] = "The game's own motion blur. Off, the picture stays sharp in motion.",
     [UI_MENU_DEPTH_OF_FIELD] = "Depth of field",
@@ -611,6 +619,14 @@ static const char *const text_ru[UI_TEXT_COUNT] = {
     [UI_MENU_BC7_CACHE_LOG] = "Журнал ключей BC7",
     [UI_MENU_BC7_CACHE_LOG_DESC] = "Пишет строку [bc7key] для каждой текстуры, загруженной путём BC7, чтобы "
                                    "сверять ключи готового кэша с игрой. Действует со следующего запуска.",
+    [UI_MENU_RENDER_SCALE] = "Масштаб рендера",
+    [UI_MENU_RENDER_SCALE_DESC] = "Масштабирует рендер сцены относительно разрешения игры. Выше 100% — "
+                                  "суперсемплинг: 125% рендерит игру 1080p в 1440p и делает резче всё, включая "
+                                  "текстуры, ценой нагрузки на GPU. Действует со следующего запуска.",
+    [UI_MENU_TEX_LOD_BIAS] = "Резкость текстур (смещение LOD)",
+    [UI_MENU_TEX_LOD_BIAS_DESC] = "Сдвигает каждую текстуру к более мелким уровням мип-карт: отрицательные "
+                                  "значения делают поверхности резче на расстоянии ценой небольшого мерцания. "
+                                  "Сочетайте с анизотропией 16x. Действует со следующего запуска.",
     [UI_MENU_MOTION_BLUR] = "Размытие в движении",
     [UI_MENU_MOTION_BLUR_DESC] = "Размытие в движении самой игры. Выкл. — картинка остаётся резкой в движении.",
     [UI_MENU_DEPTH_OF_FIELD] = "Глубина резкости",
@@ -1343,6 +1359,16 @@ static const char *const text_pt_br[UI_TEXT_COUNT] = {
     [UI_MENU_BC7_CACHE_LOG_DESC] = "Registra uma linha [bc7key] para cada textura enviada pelo caminho BC7, "
                                    "para conferir as chaves do cache pré-calculado com as do jogo. Vale a partir "
                                    "da próxima inicialização.",
+    [UI_MENU_RENDER_SCALE] = "Escala de renderização",
+    [UI_MENU_RENDER_SCALE_DESC] = "Escala a cena renderizada em relação à resolução do jogo. Acima de 100% é "
+                                  "supersampling: 125% renderiza um jogo 1080p em 1440p e deixa tudo mais "
+                                  "nítido, texturas incluídas, ao custo de GPU. Vale a partir da próxima "
+                                  "inicialização.",
+    [UI_MENU_TEX_LOD_BIAS] = "Nitidez das texturas (viés de LOD)",
+    [UI_MENU_TEX_LOD_BIAS_DESC] = "Desloca cada textura para os níveis de mip mais finos: valores negativos "
+                                  "deixam as superfícies mais nítidas à distância, ao custo de um pouco de "
+                                  "cintilação. Combine com anisotropia 16x. Vale a partir da próxima "
+                                  "inicialização.",
     [UI_MENU_MOTION_BLUR] = "Desfoque de movimento",
     [UI_MENU_MOTION_BLUR_DESC] = "O desfoque de movimento do próprio jogo. Desligado, a imagem fica nítida em movimento.",
     [UI_MENU_DEPTH_OF_FIELD] = "Profundidade de campo",
@@ -1919,6 +1945,12 @@ static const char *const text_zh_hans[UI_TEXT_COUNT] = {
     [UI_MENU_BC7_CACHE_LOG] = "BC7 缓存键日志",
     [UI_MENU_BC7_CACHE_LOG_DESC] = "为 BC7 路径上传的每张纹理写一行 [bc7key]，用来核对预计算缓存的键与游戏"
                                    "是否一致。下次启动生效。",
+    [UI_MENU_RENDER_SCALE] = "渲染比例",
+    [UI_MENU_RENDER_SCALE_DESC] = "按游戏分辨率缩放渲染画面。超过 100% 即超级采样：125% 会把 1080p 游戏按 "
+                                  "1440p 渲染，全面变锐利，包括纹理，代价是 GPU 负载。下次启动生效。",
+    [UI_MENU_TEX_LOD_BIAS] = "纹理锐度（LOD 偏移）",
+    [UI_MENU_TEX_LOD_BIAS_DESC] = "把每张纹理推向更细的 mip 层级：负值让远处表面更锐利，代价是些许闪烁。"
+                                  "建议配合 16x 各向异性。下次启动生效。",
     [UI_MENU_MOTION_BLUR] = "运动模糊",
     [UI_MENU_MOTION_BLUR_DESC] = "游戏自带的运动模糊。关闭后，运动中的画面保持清晰。",
     [UI_MENU_DEPTH_OF_FIELD] = "景深",
