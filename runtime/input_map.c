@@ -365,19 +365,16 @@ void input_map_stick(const uint8_t down[KEY_COUNT], int stick, int32_t out[2]) {
     out[1] = dy * m;
 }
 
+// La conversión de Sparrow, lineal y sin más: los conteos del frame a deflexión del stick, con el
+// tope a MOUSE_FULL_CPS conteos por segundo y sensibilidad 1. La adaptación de Puddz ya no vive aquí:
+// es el modo «puddz» de AC_MOUSE_CAMERA y se calcula en mouse_camera (runtime/input.c), que es quien
+// lleva el tiempo entre informes y la velocidad suavizada que aquella necesita.
 void input_mouse_stick(int32_t dx, int32_t dy, double dt_s, float sens, int32_t out[2]) {
     out[0] = out[1] = 0;
     if (!(dt_s > 0) || !(sens > 0)) return;
     double k = STICK_MAX * (double)sens / (MOUSE_FULL_CPS * dt_s);
     double x = dx * k, y = -dy * k, len = sqrt(x * x + y * y);
     if (len > STICK_MAX) { x *= STICK_MAX / len; y *= STICK_MAX / len; }
-    // Suelo de inclinación (de Puddz, mouse_look_stick): si hay movimiento y la deflexión resultante
-    // no llega al 20 % del stick, se escala hasta exactamente el 20 %, conservando la dirección. Es
-    // un suelo puro, sin remapeo: por encima del 20 % la respuesta es la de siempre, y en reposo
-    // (len == 0) no se toca nada, para vencer la zona muerta del juego sin falsear la dirección.
-    // (Si el recorte actuó, len vale más que STICK_MAX y la condición es falsa: el suelo nunca
-    // pelea con el techo.)
-    if (len > 0 && len < STICK_MAX * 0.2) { double s = STICK_MAX * 0.2 / len; x *= s; y *= s; }
     out[0] = (int32_t)lrint(x);
     out[1] = (int32_t)lrint(y);
 }

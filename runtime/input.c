@@ -310,41 +310,87 @@ static void walk_get(void) {
 // the camera speed factor the game runs with (camera_speed.c, cam_speed_applied), which multiplies every right-stick
 // turn rate, so AC_MOUSE_SENS alone sets the mouse's speed; below 1 the sample stays within the stick's range, so the
 // mouse's top speed drops with the factor.
+//
+// El movimiento tiene dos adaptaciones entre las que elige AC_MOUSE_CAMERA: «sparrow», la del port
+// base (la conversión lineal de input_mouse_stick, sin suelo ni retención), y «puddz», la de Puddz
+// (mouse_look_stick de su port), que va por velocidad suavizada y remapea la deflexión. Los botones
+// del ratón y los binds no cambian con el modo: solo cambia cómo el movimiento se convierte en stick.
+static int mouse_cam_puddz = -1;        // AC_MOUSE_CAMERA: -1 sin leer, 0 = sparrow, 1 = puddz; en vivo (cfg_version)
+static unsigned mouse_cam_seen;
+
+static int mouse_camera_puddz(void) {
+    unsigned ver = cfg_version();
+    if (mouse_cam_puddz >= 0 && ver == mouse_cam_seen) return mouse_cam_puddz;
+    mouse_cam_seen = ver;
+    const char *v = cfg_value("AC_MOUSE_CAMERA");   // «sparrow» (el defecto) o «puddz»
+    int p = *v && name_matches(v, "puddz") ? 1 : 0;
+    if (p != mouse_cam_puddz) {
+        mouse_cam_puddz = p;
+        rt_log("input: mouse camera %s", p ? "puddz" : "sparrow");
+    }
+    return mouse_cam_puddz;
+}
+
+// La muestra del modo puddz desde la velocidad suavizada (conteos por segundo): la magnitud se
+// remapea a 0,2..1 — cualquier movimiento arranca al 20 % para vencer la zona muerta del juego y el
+// tope se alcanza a 1500 conteos/s con sensibilidad 1 — conservando la dirección de la velocidad.
+// La «y» se invierte como en el stick de siempre (mover hacia arriba es stick hacia arriba).
+static void mouse_puddz_sample(const double vel[2], float sens, int32_t held[2]) {
+    double vx = vel[0], vy = -vel[1];
+    double len = sqrt(vx * vx + vy * vy);
+    double m = len * (double)sens / 1500.0;
+    if (m < 1e-6) { held[0] = held[1] = 0; return; }
+    double out = 0.2 + 0.8 * (m > 1 ? 1 : m);
+    held[0] = (int32_t)lrint(vx / len * out * STICK_MAX);
+    held[1] = (int32_t)lrint(vy / len * out * STICK_MAX);
+}
+
 static void mouse_camera(int32_t out[2]) {
     static uint64_t frame = ~0ull, t0;
-    static uint64_t t_counts;   // instante de la última muestra con conteos, para la retención
+    static uint64_t t_report;   // (puddz) instante del último frame con conteos, para la velocidad y la retención
+    static double vel[2];       // (puddz) velocidad suavizada, en conteos por segundo
     static int32_t held[2];
     uint64_t now = plat_now_ns();
     int32_t dx, dy;
+    int puddz = mouse_camera_puddz();
     if (!ikb_captured()) {
         ikb_mouse_take(&dx, &dy);
         held[0] = held[1] = 0;
         frame = ~0ull;
-        t_counts = 0;   // ninguna retención sobrevive a soltar el cursor
+        t_report = 0;   // ni la velocidad ni la retención sobreviven a soltar el cursor
+        vel[0] = vel[1] = 0;
     } else {
         uint64_t fr = __atomic_load_n(&gfx_counters.frames, __ATOMIC_RELAXED);
         double age = frame == ~0ull ? 0 : (double)(now - t0) / 1e9;
         if (fr != frame) {
-            double dt = age < 0.004 ? 0.004 : age > 0.1 ? 0.1 : age;
-            int32_t muestra[2];
             ikb_mouse_take(&dx, &dy);
-            input_mouse_stick(dx, dy, dt, mouse_sens_get(), muestra);
-            // Retención (de Puddz): si este frame no trae conteos nuevos, se mantiene la última
-            // muestra distinta de cero hasta 25 ms antes de caer a cero: un ratón de 125 Hz informa
-            // cada 8 ms y puede dejar frames sin informe, y sin esto el giro va a trompicones.
-            if (dx || dy) {
-                t_counts = now;
-                held[0] = muestra[0];
-                held[1] = muestra[1];
-            } else if (now - t_counts <= 25000000ull && (held[0] || held[1])) {
-                // se conserva held tal cual: no se sobrescribe con la muestra cero
+            if (!puddz) {
+                // Sparrow, tal cual el port base: la muestra de este frame, sin suelo ni retención.
+                double dt = age < 0.004 ? 0.004 : age > 0.1 ? 0.1 : age;
+                input_mouse_stick(dx, dy, dt, mouse_sens_get(), held);
+            } else if (dx || dy) {
+                // Puddz: la velocidad se mide sobre el tiempo desde el último informe con conteos
+                // (no sobre el frame: un ratón de 125 Hz informa cada 8 ms y puede dejar frames sin
+                // informe) y se suaviza a medias con la anterior, porque el ratón informa a ráfagas.
+                double dt = t_report ? (double)(now - t_report) / 1e9 : age > 0 ? age : 1.0 / 60;
+                dt = dt < 0.002 ? 0.002 : dt > 0.1 ? 0.1 : dt;
+                vel[0] = 0.5 * vel[0] + 0.5 * (dx / dt);
+                vel[1] = 0.5 * vel[1] + 0.5 * (dy / dt);
+                t_report = now;
+                mouse_puddz_sample(vel, mouse_sens_get(), held);
+            } else if (t_report && now - t_report <= 25000000ull) {
+                // Puddz: sin informe nuevo, la última velocidad se mantiene hasta 25 ms antes de
+                // caer a cero; sin esto el giro va a trompicones con ratones de pocos hercios.
+                mouse_puddz_sample(vel, mouse_sens_get(), held);
             } else {
+                vel[0] = vel[1] = 0;
                 held[0] = held[1] = 0;
             }
             frame = fr;
             t0 = now;
         } else if (age > 0.1) {
             held[0] = held[1] = 0;   // frames stopped: do not hold a deflection
+            vel[0] = vel[1] = 0;
         }
     }
     double k = cam_speed_applied(), x = held[0] / k, y = held[1] / k, len = sqrt(x * x + y * y);
