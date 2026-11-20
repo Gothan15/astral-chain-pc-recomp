@@ -31,10 +31,10 @@ from . import ini
 from . import layout as layouts
 from . import state as statefile
 from .layout import SUPPORTED
-from .guilogic import (DONE, FAILED, INSTALL, PENDING, PREPARE_LEVELS, RUNNING, SKIPPED, UI_LANGUAGE_LABELS,
-                       UI_LANGUAGES, UPDATE, Catalog, Form, Model, Process, amount, default_game_language,
-                       describe_event, find_keys, inspect_folder, install_subfolder, launcher_game_folder,
-                       parse_line, sibling_game_files, windows_ui_language)
+from .guilogic import (DONE, FAILED, INSTALL, PENDING, RUNNING, SKIPPED, UI_LANGUAGE_LABELS, UI_LANGUAGES, UPDATE,
+                       Catalog, Form, Model, Process, amount, default_game_language, describe_event, find_keys,
+                       inspect_folder, install_subfolder, launcher_game_folder, parse_line, sibling_game_files,
+                       windows_ui_language)
 
 POLL_MS = 100
 GLYPH = {PENDING: '\u25cb', RUNNING: '\u25b6', DONE: '\u2714', SKIPPED: '\u2013', FAILED: '\u2716'}
@@ -89,8 +89,6 @@ class App:
         # base, update, keys: shared by both forms; dest: the first install's folder; update_dest: the installed folder
         self.vars = {n: tk.StringVar() for n in ('base', 'update', 'keys', 'dest', 'update_dest')}
         self.lang_vars = {INSTALL: tk.StringVar(), UPDATE: tk.StringVar()}
-        self.prepare_var = tk.StringVar()
-        self.prepare_code = 'full'   # nivel de preparación elegido; selected_prepare() lo lee del desplegable
         self.lang_codes = {INSTALL: default_game_language(ui_lang), UPDATE: default_game_language(ui_lang)}
         self.lang_boxes = {}
         self.lang_touched = {INSTALL: False, UPDATE: False}
@@ -227,10 +225,6 @@ class App:
             code = self.selected_lang(mode)
             box.configure(values=[self.lang_label(c) for c in ini.LANGUAGES])
             self.lang_vars[mode].set(self.lang_label(code))
-        if hasattr(self, 'prepare_box'):
-            level = self.selected_prepare()
-            self.prepare_box.configure(values=[self.cat('ui.prepare_' + c) for c in PREPARE_LEVELS])
-            self.prepare_var.set(self.cat('ui.prepare_' + level))
 
     def selected_lang(self, mode):
         """The game language code behind a form's combobox text (kept when it is not one of the labels)."""
@@ -240,24 +234,6 @@ class App:
                 if shown == Catalog(lang)('lang.' + code):
                     return code
         return self.lang_codes[mode]
-
-    def selected_prepare(self):
-        """El nivel de preparación tras el texto del desplegable (se conserva si no es una de las etiquetas)."""
-        shown = self.prepare_var.get()
-        for code in PREPARE_LEVELS:
-            for lang in UI_LANGUAGES:
-                if shown == Catalog(lang)('ui.prepare_' + code):
-                    return code
-        return self.prepare_code
-
-    def prepare_row(self, parent, row):
-        self.label(parent, 'ui.prepare').grid(row=row, column=0, sticky='w', pady=self.px(3),
-                                              padx=(0, self.px(10)))
-        box = ttk.Combobox(parent, textvariable=self.prepare_var, state='readonly', width=30)
-        box.grid(row=row, column=1, sticky='w', pady=self.px(3))
-        self.prepare_box = box
-        box.configure(values=[self.cat('ui.prepare_' + c) for c in PREPARE_LEVELS])
-        self.prepare_var.set(self.cat('ui.prepare_' + self.prepare_code))
 
     # ---- screens --------------------------------------------------------------------------------------------------
 
@@ -397,9 +373,6 @@ class App:
         self.dest_hint = self.wrapped(grid, width=WRAP - 180, style='Muted.TLabel')
         self.dest_hint.grid(row=10, column=1, columnspan=3, sticky='w', pady=(self.px(1), self.px(2)))
         self.lang_row(grid, 11, INSTALL)
-        self.prepare_row(grid, 12)
-        self.wrapped(grid, 'ui.prepare_hint', width=WRAP - 180, style='Muted.TLabel').grid(
-            row=13, column=1, columnspan=3, sticky='w', pady=(self.px(1), self.px(2)))
 
         # A problem the player can fix in one click (the folder holds an installation: update it) gets a button.
         self.install_error_row = ttk.Frame(f)
@@ -524,8 +497,7 @@ class App:
                         keys=self.vars['keys'].get() if files else '', lang=self.selected_lang(UPDATE),
                         dest=self.vars['update_dest'].get(), mode=UPDATE)
         return Form(base=self.vars['base'].get(), update=self.vars['update'].get(), keys=self.vars['keys'].get(),
-                    lang=self.selected_lang(INSTALL), prepare=self.selected_prepare(),
-                    dest=self.vars['dest'].get(), mode=INSTALL)
+                    lang=self.selected_lang(INSTALL), dest=self.vars['dest'].get(), mode=INSTALL)
 
     def update_files_shown(self):
         folder = inspect_folder(self.vars['update_dest'].get())

@@ -18,9 +18,6 @@ A driver whose shader compiler crashes on a variant crashes on it in every run. 
 are written by then, and the journal the run leaves names the variants the driver was building (vk_pipeline.c skip_init),
 so only the driver step runs again (`astralchain.exe --warm-shaders`), up to RETRIES times, and skips them.
 
---no-defaults writes only the recorded variants (the installer's essential preparation): every other shader's
-default variant is then translated in play instead of before it.
-
 Game-derived output stays in the build directory (ignored). Needs Python 3.14 (compression.zstd), so run it in
 .venv-py314 or the embeddable 3.14:
 
@@ -121,8 +118,6 @@ def main():
     ap.add_argument('--romfs', type=Path, help='RomFS directory (default build/extracted/<version>/romfs)')
     ap.add_argument('--answers', help='a shader-answers.bin of recorded variants (default data/ or generated/)')
     ap.add_argument('--no-run', action='store_true', help='write the seed files only')
-    ap.add_argument('--no-defaults', action='store_true',
-                    help='write only the recorded variants, without a default variant of every shader')
     ap.add_argument('--recordings', type=Path, help='turn a play recording into shader-answers.bin in --out and exit')
     ap.add_argument('--out', type=Path, help='with --recordings: output directory (default generated/)')
     a = ap.parse_args()
@@ -149,18 +144,13 @@ def main():
             progs[code_hash] = program_record(s)
         recs.append((DEFAULT_PRIORITY, answer_record(stage, code_hash, answers, DEFAULT_PRIORITY)))
         covered.add(code_hash)
-    # Con --no-defaults (la preparación «esencial» del instalador) solo van las variantes grabadas: la variante
-    # por defecto de cada shader restante se traducirá jugando.
-    n_default = 0
-    if not a.no_defaults:
-        for code_hash, s in shaders.items():
-            if code_hash in covered:
-                continue
-            if code_hash not in progs:
-                progs[code_hash] = program_record(s)
-            recs.append((DEFAULT_PRIORITY, answer_record(STAGES[s['stage']], code_hash, default_answer(),
-                                                         DEFAULT_PRIORITY)))
-            n_default += 1
+    for code_hash, s in shaders.items():
+        if code_hash in covered:
+            continue
+        if code_hash not in progs:
+            progs[code_hash] = program_record(s)
+        recs.append((DEFAULT_PRIORITY, answer_record(STAGES[s['stage']], code_hash, default_answer(),
+                                                     DEFAULT_PRIORITY)))
     recs.sort(key=lambda r: r[0])   # stable: recorded first, then the defaults, within a priority
     out = a.build.resolve()
     with open(out / 'seed-programs.bin', 'wb') as f:
@@ -171,6 +161,7 @@ def main():
         f.write(b'ACSANS\x00\x00' + struct.pack('<II', 2, ANS_REC))
         for _, rec in recs:
             f.write(rec)
+    n_default = len(shaders) - len(covered)
     print(f'{len(recorded)} recorded variants and {n_default} default ones: {len(recs)} variants of {len(progs)} shaders '
           f'in {a.version} ({missing} recorded shaders not in it); inventory {t1 - t0:.1f} s, seed written in '
           f'{time.monotonic() - t0:.1f} s', flush=True)
