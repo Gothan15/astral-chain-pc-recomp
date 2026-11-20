@@ -5,7 +5,7 @@ name: Setup
 on:
   workflow_dispatch:
   push:
-    branches: [main]
+    branches: [camara-directa]
     paths:
       - ".github/workflows/setup.yml"
 
@@ -81,12 +81,12 @@ jobs:
 
       - name: Assemble the setup package
         shell: pwsh
-        run: python tools/make_release.py --out "build/release/Astral Chain-Setup" --zip "build/release/Astral.Chain-Setup-1.19.3-reshade-windows.zip"
+        run: python tools/make_release.py --out "build/release/Astral Chain-Setup" --zip "build/release/Astral.Chain-Setup-1.19.3-camara-directa-windows.zip"
 
       - name: Publish the release
         uses: softprops/action-gh-release@v2
         with:
-          tag_name: reshade-unificado
+          tag_name: camara-directa
           name: Astral Chain 1.19.3 + opcion ReShade (antes del HUD)
-          body: Paquete Setup compilado desde la rama reshade-antes-del-hud. Igual que la release oficial 1.19.3, pero el runtime lleva la opcion reshade = 1 (los efectos de ReShade solo tocan la escena; el HUD va en una capa aparte que compone el addon). Se instala como siempre, con tu propia copia del juego; el ejecutable se compila en tu PC durante la instalacion.
-          files: build/release/Astral.Chain-Setup-1.19.3-reshade-windows.zip
+          body: Compilacion experimental de la rama camara-directa: camara directa del raton (MOUSE_CAMERA = direct en astralchain.ini) y el escaner para localizar el estado de la camara (CAM_SCAN = 1). Todo lo demas es lo mismo que la release reshade-unificado. Se instala como siempre, con tu propia copia del juego.
+          files: build/release/Astral.Chain-Setup-1.19.3-camara-directa-windows.zip
