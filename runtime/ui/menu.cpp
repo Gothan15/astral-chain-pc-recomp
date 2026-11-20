@@ -394,7 +394,7 @@ extern "C" void menu_vk_release(void) {
 // the pseudo-key SAVE=1 (cfg_save, as a row change does; a failed write shows the menu's save note).
 // The Cheats tab (ui/cheats_tab.cpp tab_cheats) is not listed: the cheats are not ready to be shown. Their switches
 // are still read from astralchain.ini (cheats.c).
-enum { TAB_SCREEN, TAB_GAME, TAB_SOUND, TAB_CONTROLS, TAB_MENU, TAB_MODS, TAB_COUNT };
+enum { TAB_SCREEN, TAB_GAME, TAB_SOUND, TAB_CONTROLS, TAB_MENU, TAB_MODS, TAB_DEBUG, TAB_COUNT };
 enum { TEST_PAGE_FRAMES = 30, TEST_SETS = 16 };
 struct TestSet { uint64_t frame; char key[64], value[64]; };
 static struct {
@@ -963,10 +963,27 @@ static void tab_menu(float scale) {
 }
 
 static const UiTextId kTabNames[TAB_COUNT] = {UI_MENU_TAB_SCREEN,   UI_MENU_TAB_GAME,   UI_MENU_TAB_SOUND,
-                                              UI_MENU_TAB_CONTROLS, UI_MENU_TAB_MENU,   UI_MENU_TAB_MODS};
+                                              UI_MENU_TAB_CONTROLS, UI_MENU_TAB_MENU,   UI_MENU_TAB_MODS,
+                                              UI_MENU_TAB_DEBUG};
 static int g_tab;               // the tab shown
 static int g_tab_request = -1;  // select this tab at the next layout; -1 none
 static int g_focus_page = -1;   // this tab's first row takes the cursor once it is shown; -1 none
+
+// ---- Debug: vistas y registros de depuración; todos se leen al arrancar (RESTART en cfg.c) ----
+static void tab_debug(float scale) {
+    (void)scale;
+    static const char *kAoVals[] = {"0", "1", "2", "3"};
+    static const char *kAoNames[] = {"Off", "Factor", "Surface share", "Whole pixel"};
+    opt_begin("##debug", scale);
+    opt_toggle("AC_POST_DEBUG", UI_MENU_POST_DEBUG, UI_MENU_POST_DEBUG_DESC);
+    opt_toggle("AC_CONTACT_DEBUG", UI_MENU_CONTACT_DEBUG, UI_MENU_CONTACT_DEBUG_DESC);
+    opt_choice_list("AC_AO_DEBUG", UI_MENU_AO_DEBUG, UI_MENU_AO_DEBUG_DESC, kAoVals, kAoNames, 4);
+    opt_toggle("AC_BC7_CACHE_LOG", UI_MENU_BC7_CACHE_LOG, UI_MENU_BC7_CACHE_LOG_DESC);
+    opt_toggle("AC_FLIGHT", UI_MENU_FLIGHT, UI_MENU_FLIGHT_DESC);
+    opt_slider("AC_FLIGHT_SPIKE_MS", UI_MENU_FLIGHT_SPIKE_MS, UI_MENU_FLIGHT_SPIKE_MS_DESC, 0.0f, 1000.0f, 10.0f,
+               "%.0f");
+    opt_end();
+}
 
 // ---- Mods: the mods folder (mods.c) with switches and the load order. The folder was read at start; the rows
 // change the order and switches for the next start.
@@ -1086,6 +1103,7 @@ static void layout_menu(uint32_t w, uint32_t h, float scale) {
             case TAB_SCREEN: tab_screen(scale); break;
             case TAB_GAME: tab_game(scale); break;
             case TAB_MODS: tab_mods(scale); break;
+            case TAB_DEBUG: tab_debug(scale); break;
             case TAB_SOUND: tab_sound(scale); break;
             case TAB_CONTROLS: tab_controls(scale); break;
             case TAB_MENU: tab_menu(scale); break;

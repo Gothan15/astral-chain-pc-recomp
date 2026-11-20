@@ -107,6 +107,8 @@ static const struct { const char *key, *section; } sections[] = {
     {"VK_DYN_VERTEX", "performance"}, {"VK_DYN_A2C", "performance"}, {"VK_SUBGROUP_PIN", "performance"},
     {"TRACE", "diagnostics"}, {"FLIGHT", "diagnostics"}, {"FLIGHT_SPIKE_MS", "diagnostics"},
     {"WB_FENCE_LIMIT", "diagnostics"}, {"WB_EXACT", "diagnostics"},
+    {"POST_DEBUG", "diagnostics"}, {"CONTACT_DEBUG", "diagnostics"}, {"AO_DEBUG", "diagnostics"},
+    {"BC7_CACHE_LOG", "diagnostics"},
 };
 
 // The settings the menu shows: the value in effect when the key is unset, and what the key accepts. The only place a
@@ -196,6 +198,9 @@ static const CfgMeta metas[] = {
     {"TRACE", "", NULL, RESTART}, {"FLIGHT", "0", "0|1", RESTART}, {"FLIGHT_SPIKE_MS", "100", "0..60000", RESTART},
     {"WB_FENCE_LIMIT", "65536", "0..1073741824", RESTART}, {"WB_EXACT", "1", "0|1", RESTART},
     {"INPUT_RECORD", "", NULL, RESTART},
+    // la pestaña Debug del menú: vistas y registros de depuración, todos leídos al arrancar
+    {"POST_DEBUG", "0", "0|1", RESTART}, {"CONTACT_DEBUG", "0", "0|1", RESTART},
+    {"AO_DEBUG", "0", "0|1|2|3", RESTART}, {"BC7_CACHE_LOG", "0", "0|1", RESTART},
 };
 
 static int is_known(const char *key) {

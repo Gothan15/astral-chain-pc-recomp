@@ -25,10 +25,11 @@ typedef struct { const char *lang; const char *const *text; } Row;
     [UI_SWKBD_TITLE] = title, [UI_SWKBD_PROMPT] = prompt, [UI_SWKBD_DEFAULT_NAME] = name, [UI_SWKBD_OK] = ok, \
     [UI_SWKBD_CANCEL] = cancel, [UI_SWKBD_PAD_HINT] = hint, LANG_NAMES
 
-static const char *const text_en[UI_TEXT_COUNT] = {text_en
+static const char *const text_en[UI_TEXT_COUNT] = {
     SWKBD("Text entry", "Enter a name", "Akira", "OK", "Cancel", "Controller: A = OK, B = Cancel"),
 
     [UI_MENU_TITLE] = "Settings",
+    [UI_MENU_TAB_DEBUG] = "Debug",
     [UI_MENU_TAB_SCREEN] = "Screen", [UI_MENU_TAB_GAME] = "Game", [UI_MENU_TAB_MODS] = "Mods", [UI_MENU_TAB_SOUND] = "Sound",
     [UI_MENU_TAB_CONTROLS] = "Controls", [UI_MENU_TAB_MENU] = "Menu", [UI_MENU_TAB_ADVANCED] = "Advanced",
     [UI_MENU_CONTINUE] = "Continue", [UI_MENU_QUIT] = "Quit game",
@@ -145,6 +146,19 @@ static const char *const text_en[UI_TEXT_COUNT] = {text_en
     [UI_MENU_RESHADE_DESC] = "With the ReShade add-on installed, effects touch only the scene and the game's "
                              "interface is drawn afterwards, untouched. Needs ReShade with full add-on support and "
                              "the AstralChainHudComposite technique last in the preset.",
+    [UI_MENU_POST_DEBUG] = "Post-processing log",
+    [UI_MENU_POST_DEBUG_DESC] = "Logs every pass after the lighting composite (size, formats, program) to "
+                                "astralchain.log, to assign the post-processing switches their passes. Takes "
+                                "effect at the next start.",
+    [UI_MENU_CONTACT_DEBUG] = "Contact shadows view",
+    [UI_MENU_CONTACT_DEBUG_DESC] = "Shows the contact shadow factor in grey over the picture instead of the "
+                                   "darkening, to check where the march reaches. Takes effect at the next start.",
+    [UI_MENU_AO_DEBUG] = "Ambient occlusion view",
+    [UI_MENU_AO_DEBUG_DESC] = "Replaces the light with an occlusion debug view: 1 the factor alone, 2 the "
+                              "surfaces' share alone, 3 the whole pixel multiplied. Takes effect at the next start.",
+    [UI_MENU_BC7_CACHE_LOG] = "BC7 cache key log",
+    [UI_MENU_BC7_CACHE_LOG_DESC] = "Logs a [bc7key] line for every texture the BC7 path uploads, to check the "
+                                   "precomputed cache's keys against the game's. Takes effect at the next start.",
     [UI_MENU_MOTION_BLUR] = "Motion blur",
     [UI_MENU_MOTION_BLUR_DESC] = "The game's own motion blur. Off, the picture stays sharp in motion.",
     [UI_MENU_DEPTH_OF_FIELD] = "Depth of field",
@@ -459,10 +473,11 @@ static const char *const text_en[UI_TEXT_COUNT] = {text_en
                                       "stays off while this mod is on.",
 };
 
-static const char *const text_ru[UI_TEXT_COUNT] = {text_ru
+static const char *const text_ru[UI_TEXT_COUNT] = {
     SWKBD("Ввод текста", "Введите имя", "Акира", "ОК", "Отмена", "Контроллер: A — ОК, B — отмена"),
 
     [UI_MENU_TITLE] = "Настройки",
+    [UI_MENU_TAB_DEBUG] = "Отладка",
     [UI_MENU_TAB_SCREEN] = "Экран", [UI_MENU_TAB_GAME] = "Игра", [UI_MENU_TAB_MODS] = "Моды", [UI_MENU_TAB_SOUND] = "Звук",
     [UI_MENU_TAB_CONTROLS] = "Управление", [UI_MENU_TAB_MENU] = "Меню", [UI_MENU_TAB_ADVANCED] = "Дополнительно",
     [UI_MENU_CONTINUE] = "Продолжить", [UI_MENU_QUIT] = "Выйти из игры",
@@ -583,6 +598,19 @@ static const char *const text_ru[UI_TEXT_COUNT] = {text_ru
     [UI_MENU_RESHADE_DESC] = "С установленным аддоном ReShade эффекты касаются только сцены, а интерфейс игры "
                              "рисуется после, без изменений. Нужен ReShade с полной поддержкой аддонов и техника "
                              "AstralChainHudComposite последней в пресете.",
+    [UI_MENU_POST_DEBUG] = "Журнал постобработки",
+    [UI_MENU_POST_DEBUG_DESC] = "Пишет в astralchain.log каждый проход после светового композита (размер, "
+                                "форматы, программу), чтобы назначить проходы переключателям постобработки. "
+                                "Действует со следующего запуска.",
+    [UI_MENU_CONTACT_DEBUG] = "Вид контактных теней",
+    [UI_MENU_CONTACT_DEBUG_DESC] = "Показывает фактор контактных теней серым поверх картинки вместо затемнения, "
+                                   "чтобы проверить, куда доходит проход. Действует со следующего запуска.",
+    [UI_MENU_AO_DEBUG] = "Вид объёмного затенения",
+    [UI_MENU_AO_DEBUG_DESC] = "Заменяет свет отладочным видом затенения: 1 — только фактор, 2 — только доля "
+                              "поверхностей, 3 — умножение всего пикселя. Действует со следующего запуска.",
+    [UI_MENU_BC7_CACHE_LOG] = "Журнал ключей BC7",
+    [UI_MENU_BC7_CACHE_LOG_DESC] = "Пишет строку [bc7key] для каждой текстуры, загруженной путём BC7, чтобы "
+                                   "сверять ключи готового кэша с игрой. Действует со следующего запуска.",
     [UI_MENU_MOTION_BLUR] = "Размытие в движении",
     [UI_MENU_MOTION_BLUR_DESC] = "Размытие в движении самой игры. Выкл. — картинка остаётся резкой в движении.",
     [UI_MENU_DEPTH_OF_FIELD] = "Глубина резкости",
@@ -902,12 +930,13 @@ static const char *const text_ru[UI_TEXT_COUNT] = {text_ru
                                       "который выключен, пока этот мод включён.",
 };
 
-static const char *const text_pt_br[UI_TEXT_COUNT] = {text_pt_br
+static const char *const text_pt_br[UI_TEXT_COUNT] = {
     SWKBD("Inserir texto", "Insira um nome", "Akira", "OK", "Cancelar", "Controle: A = OK, B = Cancelar"),
 
     [UI_MENU_TITLE] = "Configurações",
     [UI_MENU_TAB_SCREEN] = "Tela", [UI_MENU_TAB_GAME] = "Jogo", [UI_MENU_TAB_SOUND] = "Som",
     [UI_MENU_TAB_CONTROLS] = "Controles", [UI_MENU_TAB_MENU] = "Menu", [UI_MENU_TAB_ADVANCED] = "Avançado",
+    [UI_MENU_TAB_DEBUG] = "Depuração",
     [UI_MENU_TAB_MODS] = "Mods",
     [UI_MENU_MODS_INSTALLED] = "Mods instalados",
     [UI_MENU_MODS_NONE] = "Nenhum mod ainda. Descompacte um mod na pasta mods, uma pasta por mod com a pasta romfs dentro, "
@@ -1298,6 +1327,22 @@ static const char *const text_pt_br[UI_TEXT_COUNT] = {text_pt_br
     [UI_MENU_RESHADE_DESC] = "Com o addon do ReShade instalado, os efeitos tocam só a cena e a interface do jogo é "
                              "desenhada depois, sem alterações. Precisa do ReShade com suporte completo a addons e "
                              "da técnica AstralChainHudComposite por último no preset.",
+    [UI_MENU_POST_DEBUG] = "Registro do pós-processamento",
+    [UI_MENU_POST_DEBUG_DESC] = "Registra no astralchain.log cada passagem depois do composto de iluminação "
+                                "(tamanho, formatos, programa), para atribuir as passagens aos interruptores de "
+                                "pós-processamento. Vale a partir da próxima inicialização.",
+    [UI_MENU_CONTACT_DEBUG] = "Vista das sombras de contato",
+    [UI_MENU_CONTACT_DEBUG_DESC] = "Mostra o fator das sombras de contato em cinza sobre a imagem em vez do "
+                                   "escurecimento, para conferir até onde a marcha alcança. Vale a partir da "
+                                   "próxima inicialização.",
+    [UI_MENU_AO_DEBUG] = "Vista da oclusão de ambiente",
+    [UI_MENU_AO_DEBUG_DESC] = "Troca a luz por uma vista de depuração da oclusão: 1 só o fator, 2 só a parte "
+                              "das superfícies, 3 o pixel inteiro multiplicado. Vale a partir da próxima "
+                              "inicialização.",
+    [UI_MENU_BC7_CACHE_LOG] = "Registro de chaves BC7",
+    [UI_MENU_BC7_CACHE_LOG_DESC] = "Registra uma linha [bc7key] para cada textura enviada pelo caminho BC7, "
+                                   "para conferir as chaves do cache pré-calculado com as do jogo. Vale a partir "
+                                   "da próxima inicialização.",
     [UI_MENU_MOTION_BLUR] = "Desfoque de movimento",
     [UI_MENU_MOTION_BLUR_DESC] = "O desfoque de movimento do próprio jogo. Desligado, a imagem fica nítida em movimento.",
     [UI_MENU_DEPTH_OF_FIELD] = "Profundidade de campo",
@@ -1372,7 +1417,7 @@ static const char *const text_pt_br[UI_TEXT_COUNT] = {text_pt_br
 // Simplified Chinese: this row covers the software keyboard and the whole menu, so the menu and the overlay read Chinese
 // when the menu language is zh-Hans (ui_text.h menu_text). The rows are fixed width, so the strings stay close to the
 // English length; an id without a Chinese entry falls back to English.
-static const char *const text_zh_hans[UI_TEXT_COUNT] = {text_zh_hans
+static const char *const text_zh_hans[UI_TEXT_COUNT] = {
     SWKBD("文字输入", "请输入名字", "阿基拉", "确定", "取消", "手柄：A 确定，B 取消"),
 
     [UI_MENU_TITLE] = "设置",
@@ -1382,6 +1427,7 @@ static const char *const text_zh_hans[UI_TEXT_COUNT] = {text_zh_hans
     [UI_MENU_TAB_CONTROLS] = "操作",
     [UI_MENU_TAB_MENU] = "菜单",
     [UI_MENU_TAB_ADVANCED] = "高级",
+    [UI_MENU_TAB_DEBUG] = "调试",
     [UI_MENU_TAB_MODS] = "模组",
     [UI_MENU_MODS_INSTALLED] = "已安装的模组",
     [UI_MENU_MODS_NONE] = "还没有模组。把模组解压到 mods 文件夹，每个模组一个文件夹，里面放 romfs 文件夹，然后重启游戏。"
@@ -1861,6 +1907,18 @@ static const char *const text_zh_hans[UI_TEXT_COUNT] = {text_zh_hans
     [UI_MENU_RESHADE] = "ReShade 在 HUD 之前",
     [UI_MENU_RESHADE_DESC] = "安装 ReShade 插件后，特效只作用于场景，游戏界面随后绘制、不受影响。需要支持完整"
                              "插件的 ReShade，并把 AstralChainHudComposite 技术放在预设最后。",
+    [UI_MENU_POST_DEBUG] = "后处理日志",
+    [UI_MENU_POST_DEBUG_DESC] = "把光照合成之后的每个通道（尺寸、格式、程序）写入 astralchain.log，"
+                                "用于给后处理开关分配通道。下次启动生效。",
+    [UI_MENU_CONTACT_DEBUG] = "接触阴影视图",
+    [UI_MENU_CONTACT_DEBUG_DESC] = "把接触阴影因子以灰色显示在画面上，而不是变暗，用来检查行进的覆盖范围。"
+                                   "下次启动生效。",
+    [UI_MENU_AO_DEBUG] = "环境光遮蔽视图",
+    [UI_MENU_AO_DEBUG_DESC] = "用遮蔽调试视图代替光照：1 只看因子，2 只看表面份额，3 整个像素相乘。"
+                              "下次启动生效。",
+    [UI_MENU_BC7_CACHE_LOG] = "BC7 缓存键日志",
+    [UI_MENU_BC7_CACHE_LOG_DESC] = "为 BC7 路径上传的每张纹理写一行 [bc7key]，用来核对预计算缓存的键与游戏"
+                                   "是否一致。下次启动生效。",
     [UI_MENU_MOTION_BLUR] = "运动模糊",
     [UI_MENU_MOTION_BLUR_DESC] = "游戏自带的运动模糊。关闭后，运动中的画面保持清晰。",
     [UI_MENU_DEPTH_OF_FIELD] = "景深",
