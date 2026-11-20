@@ -14,7 +14,8 @@ enum {
     ACTION_COUNT = 24
 };
 
-// Keys and mouse buttons. F1, F10, F11 and Esc belong to the menu and the window, F8 to the flight recorder: no ids.
+// Keys and mouse buttons. F1, F10 and F11 belong to the menu and the window, F8 to the flight recorder: no ids.
+// Esc sí tiene id (KEY_ESC, al final del enum): es una tecla de juego normal y bindeable.
 enum {
     KEY_NONE = 0,
     KEY_A, KEY_B, KEY_C, KEY_D, KEY_E, KEY_F, KEY_G, KEY_H, KEY_I, KEY_J, KEY_K, KEY_L, KEY_M,   // letters and digits are
@@ -30,6 +31,10 @@ enum {
     // the punctuation keys of a US keyboard, by position; the character on the key follows the keyboard layout
     KEY_MINUS, KEY_EQUALS, KEY_LBRACKET, KEY_RBRACKET, KEY_SEMICOLON, KEY_APOSTROPHE, KEY_COMMA, KEY_PERIOD, KEY_SLASH,
     KEY_BACKSLASH, KEY_GRAVE,
+    // Al final, fuera del rango KEY_SPACE..KEY_PAGEDOWN que la página de binds empareja con los
+    // UI_KEY_*: la rueda (pulsos temporizados de los backends, no una tecla física) y Esc. Esc es
+    // una tecla normal y bindeable (orden de Gothan): el overlay del port se abre solo con F1.
+    KEY_WHEEL_UP, KEY_WHEEL_DOWN, KEY_ESC,
     KEY_COUNT
 };
 
@@ -99,7 +104,7 @@ int input_pad_layout_pick(const char *setting, int east_labelled_a, int pad_kind
 // cross and circle (switch A/B in the emulator controls) but draws X and Y at the Switch positions, so only the
 // PlayStation layout matches it. A loaded mod forces its layout (input_prompts_layout, input.c pad_layout_get).
 // Automatic follows the controller in use (input_prompts_auto_for_kind): its mod when built, else Nintendo.
-enum { PROMPTS_NINTENDO, PROMPTS_XBOX, PROMPTS_PLAYSTATION, PROMPTS_AUTO };
+enum { PROMPTS_NINTENDO, PROMPTS_XBOX, PROMPTS_PLAYSTATION, PROMPTS_AUTO, PROMPTS_KEYBOARD };
 // The prompts for a AC_PROMPTS value ("auto", "nintendo", "xbox" or "playstation", any case). Unset or empty:
 // Xbox while the pad layout setting is "xbox_prompts" (0.1.9's name for the Nintendo layout with the Xbox prompts),
 // else AUTO (the settings default, resolved by the caller).

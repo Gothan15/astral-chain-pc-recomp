@@ -23,7 +23,7 @@
 #include "vk_exec.h"
 
 static struct {
-    int tried, ok, strength, debug, logged;
+    int tried, cfg_loaded, ok, strength, debug, logged;
     PFN_vkCmdPushDescriptorSetKHR push;
     VkDescriptorSetLayout dsl;
     VkPipelineLayout layout;
@@ -36,7 +36,15 @@ static struct {
 } C;
 
 int vk_contact_strength(void) {
-    if (!C.tried) {
+    // La configuración se carga una sola vez y con su PROPIA marca (cfg_loaded): no puede depender
+    // de C.tried, que significa «init() ya corrió». Antes la carga iba tras !C.tried, pero init()
+    // pone tried = 1 antes de llamar aquí, así que por esa vía la fuerza quedaba a 0 y el módulo
+    // nacía muerto; solo se salvaba si la textura de color de escena se creaba antes que el primer
+    // pase (vk_texture.c llama aquí al decidir el uso STORAGE), y si un pase cualquiera empezaba
+    // antes, las sombras quedaban desactivadas toda la sesión y la textura nacía sin STORAGE.
+    // (Revisión de ChatGPT del 2026-11-20, verificada contra este código; el fallo viene del base.)
+    if (!C.cfg_loaded) {
+        C.cfg_loaded = 1;
         int s = cfg_int("AC_CONTACT_SHADOWS");
         C.strength = s < 0 ? 0 : s > 100 ? 100 : s;
     }

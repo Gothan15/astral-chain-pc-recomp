@@ -267,6 +267,10 @@ VkImageView vk_exec_target_view(const VkTexImage *img, VkFormat format, VkImageV
 void vk_exec_op_xfer(VkExec *ex, uint32_t op, const void *payload);
 // vk_contact.c: a pass about to begin (its targets resolved, no pass open), and a dispatch or copy about to be recorded
 void vk_contact_pass_begin(VkExec *ex);
+// vk_post.c: interruptores del post del juego (un pase va a empezar; un draw va a grabarse)
+void vk_post_pass_begin(VkExec *ex);
+void vk_post_draw(VkExec *ex);
+int vk_post_skip_draw(void);
 void vk_contact_flush(VkExec *ex);
 // vk_ao.c, ambient occlusion: a pass about to begin (its targets resolved, no pass open), a dispatch or copy about to be
 // recorded, and a draw about to be recorded (the camera block)

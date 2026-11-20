@@ -32,22 +32,22 @@ static int save_ok = 1;                         // the last cfg_save_to wrote (o
 // though nothing reads it any more (it switched TotK's FXAA, which Astral Chain does not have): older files carry it.
 static const char *const known[] = {
     "AB", "AMIIBO_DIR", "ANISO", "ANTI_ALIASING", "AO", "AO_DEBUG", "APP_POOL", "ASPECT", "ASPECT_MIGRATED", "ASPECT_PATCH", "ASSUME_FOCUS", "ASTC", "ASTC_BC", "ASTC_TIME", "ASYNC_PREEMPT", "AUDIO", "AUDIO_OFF", "AVSYNC_PATCH", "AUDIO_PREFILL_MS",
-    "BACKGROUND_WINDOW", "BIND_A", "BIND_B", "BIND_DOWN", "BIND_L", "BIND_LCLICK", "BIND_LEFT", "BIND_LSTICK_DOWN", "BIND_LSTICK_LEFT",
+    "BACKGROUND_WINDOW", "BC7_CACHE", "BC7_CACHE_LOG", "BC7_JOBS", "BC7_OUT", "BIND_A", "BIND_B", "BIND_DOWN", "BIND_L", "BIND_LCLICK", "BIND_LEFT", "BIND_LSTICK_DOWN", "BIND_LSTICK_LEFT",
     "BIND_LSTICK_RIGHT", "BIND_LSTICK_UP", "BIND_MINUS",
     "BIND_PLUS", "BIND_R", "BIND_RCLICK", "BIND_RIGHT", "BIND_RSTICK_DOWN", "BIND_RSTICK_LEFT", "BIND_RSTICK_RIGHT", "BIND_RSTICK_UP",
     "BIND_SKIP", "BIND_STATS", "BIND_UP", "BIND_X", "BIND_Y",
     "BAR_ELIDE", "BAR_NARROW",
-    "BIND_ZL", "BIND_ZR", "BLOCK_VIEWS_3D", "CLEAR_LOAD", "CLOTH_REALTIME", "COLOR_BRIGHTNESS", "COLOR_CONTRAST", "COLOR_GAMMA",
+    "BIND_ZL", "BIND_ZR", "BLOCK_VIEWS_3D", "CHROMATIC_ABERRATION", "CLEAR_LOAD", "CLOTH_REALTIME", "COLOR_BRIGHTNESS", "COLOR_CONTRAST", "COLOR_GAMMA",
     "COLOR_PRESET", "COLOR_SATURATION", "CONTACT_DEBUG", "CONTACT_SHADOWS", "CORE_DIAG", "CPU_BOOST", "CPU_BOOST_SPIN_US", "CRIT", "CRIT_OUT",
-    "DECK_AA_MIGRATED", "DECK_RES_MIGRATED", "DESC_TEMPLATE", "DEVICE_PROFILE", "DISPATCH_CACHE", "DLAA", "DLAA_JITTER", "DLAA_MV", "DLAA_MVDEBUG", "DLAA_OBJMV", "DLAA_TIMES", "DLSS", "DRAW_DISTANCE", "DRAW_DISTANCE_PATCH", "DUMP", "DUMP_AUTO", "DUMP_BUF", "DUMP_DIR", "DUMP_DRAWS",
+    "DECK_AA_MIGRATED", "DECK_RES_MIGRATED", "DEPTH_OF_FIELD", "DESC_TEMPLATE", "DEVICE_PROFILE", "DISPATCH_CACHE", "DLAA", "DLAA_JITTER", "DLAA_MV", "DLAA_MVDEBUG", "DLAA_OBJMV", "DLAA_TIMES", "DLSS", "DRAW_DISTANCE", "DRAW_DISTANCE_PATCH", "DUMP", "DUMP_AUTO", "DUMP_BUF", "DUMP_DIR", "DUMP_DRAWS",
     "DUMP_KEY", "DUMP_LOG", "DUMP_N", "DUMP_SKIP_RUNS", "DUMP_TEX", "DUMP_UBO", "DYN_DELTA", "EXEFS", "FEEDBACK", "FIX_C0", "FIX_ZERO", "FLIGHT", "FLIGHT_AT", "FLIGHT_DIR", "FLIGHT_FRAMES",
     "FLIGHT_SPIKE_MS", "FLIGHT_THUMBS", "FLUSH_STAMP", "FOV", "FOV_PATCH", "FPS", "FREEZE_IDLE", "FREE_CORES",
     "FULLSCREEN", "FXAA", "GPL", "GPL_DRAW_BUILD", "GPU", "GPU_INDEX", "GPU_NAME", "GPU_PASSES", "HDR", "HDR_GAME_NITS",
     "HDR_HUE", "HDR_PEAK_NITS", "HDR_UI_NITS", "HIGHFPS_FIX", "HUD", "INPUT", "INPUT_RECORD", "INPUT_SCRIPT", "LANG", "LIB_PREBUILD",
     "LIB_PREBUILD_KEEP", "LIB_PREBUILD_THREADS", "LOCALE", "LOD_GUARD", "LOW_LATENCY", "LOW_LATENCY_BACKEND", "LSTICK_DEADZONE", "MEMORY", "MENU_LANG", "MENU_TEST",
-    "MENU_TEST_DIR", "MENU_TEST_FOCUS", "MENU_TEST_SET", "MINIMAL_LAYOUT", "MIRROR_CHUNKS", "MIRROR_GAP", "MIRROR_LAZY", "MODS_DIR", "MODS_DISABLED", "MODS_ORDER", "MODS_REBUILD", "MOTION", "MOUSE_SENS", "MOVIE_HOST", "MOVIE_PACE", "MOVIE_TRACK",
+    "MENU_TEST_DIR", "MENU_TEST_FOCUS", "MENU_TEST_SET", "MINIMAL_LAYOUT", "MIRROR_CHUNKS", "MIRROR_GAP", "MIRROR_LAZY", "MODS_DIR", "MODS_DISABLED", "MODS_ORDER", "MODS_REBUILD", "MOTION", "MOTION_BLUR", "MOUSE_SENS", "MOVIE_HOST", "MOVIE_PACE", "MOVIE_TRACK",
     "NOHUD_PATCH", "ONE_PER_CORE", "OPERATION_MODE", "OUTPUT_RES", "PAD_LAYOUT", "PATCH_OUTPUT", "PATCH_SCENE", "PCSS", "PCSS_K", "PERF_OVERLAY", "PERF_SLOW_MS", "PIPELINE_CACHE", "PIPE_MEMO", "PIPE_PREBUILD", "PIPE_SKIP", "PIPE_SYNC", "PIPE_WAIT",
-    "PRESENT_SHOT", "PREWARM_XLATE", "PROFILE", "PROFILE_CHAINS", "PROFILE_DIR", "PROFILE_FRAMES",
+    "POST_DEBUG", "PRESENT_SHOT", "PREWARM_XLATE", "PROFILE", "PROFILE_CHAINS", "PROFILE_DIR", "PROFILE_FRAMES",
     "PROFILE_MAIN", "PROFILE_RENDER", "PROMPTS", "PUSH_SKIP", "PUSH_STAGE", "RC_APPLY", "RC_DEBUG", "RC_DEBUG_CASCADE", "RC_LIGHT", "RC_TEMPORAL", "RDOC", "RDOC_DIR", "RDOC_DLL", "REALTIME", "REC_END", "REEXEC",
     "RENDER_SCALE", "REPLAY_ASYNC",
     "REPLAY_CHECK", "RES", "RES1062", "RESOLVE_CHECK", "RESTART_WAIT", "ROMFS", "ROMFS_INDEX", "ROMFS_MMAP", "ROMFS_MODS", "ROMFS_PATCHES",
@@ -82,6 +82,7 @@ static const struct { const char *key, *section; } sections[] = {
     {"DEVICE_PROFILE", "display"}, {"DECK_RES_MIGRATED", "display"}, {"DECK_AA_MIGRATED", "display"}, {"ASPECT_MIGRATED", "display"}, {"ASSUME_FOCUS", "display"},
     {"SHADOW_SCALE", "display"}, {"SHADOW_RANGE", "display"}, {"CONTACT_SHADOWS", "display"}, {"AO", "display"},
     {"PCSS", "display"},
+    {"MOTION_BLUR", "display"}, {"DEPTH_OF_FIELD", "display"}, {"CHROMATIC_ABERRATION", "display"},
     {"MODS_DIR", "mods"}, {"MODS_ORDER", "mods"}, {"MODS_DISABLED", "mods"}, {"MODS_REBUILD", "mods"},
     {"MENU_LANG", "language"}, {"LANG", "language"}, {"OPERATION_MODE", "language"},
     {"VOLUME", "audio"},
@@ -100,7 +101,7 @@ static const struct { const char *key, *section; } sections[] = {
     {"LIB_PREBUILD", "performance"}, {"LIB_PREBUILD_THREADS", "performance"}, {"LIB_PREBUILD_KEEP", "performance"},
     {"PIPE_PREBUILD", "performance"},
     {"PREWARM_XLATE", "performance"}, {"GPL", "performance"}, {"ASTC", "performance"}, {"MEMORY", "performance"},
-    {"TEX_ALIAS", "performance"}, {"TEX_CACHE_MB", "performance"}, {"TEX_VRAM_PRESSURE", "performance"}, {"ASTC_BC", "performance"}, {"TEX_MIP_SKIP", "performance"}, {"TEX_PREFETCH", "performance"}, {"LOD_GUARD", "performance"}, {"FIX_C0", "performance"}, {"FIX_ZERO", "performance"},
+    {"TEX_ALIAS", "performance"}, {"TEX_CACHE_MB", "performance"}, {"TEX_VRAM_PRESSURE", "performance"}, {"ASTC_BC", "performance"}, {"BC7_CACHE", "performance"}, {"TEX_MIP_SKIP", "performance"}, {"TEX_PREFETCH", "performance"}, {"LOD_GUARD", "performance"}, {"FIX_C0", "performance"}, {"FIX_ZERO", "performance"},
     {"BIND_SKIP", "performance"}, {"SHADER_MEMO", "performance"}, {"PIPE_MEMO", "performance"}, {"TEX_MEMO", "performance"}, {"DESC_TEMPLATE", "performance"},
     {"PUSH_SKIP", "performance"}, {"SPLIT_DRAWS", "performance"}, {"SPLIT_US", "performance"}, {"VK_VALIDATION", "performance"},
     {"VK_DYN_VERTEX", "performance"}, {"VK_DYN_A2C", "performance"}, {"VK_SUBGROUP_PIN", "performance"},
@@ -144,6 +145,8 @@ static const CfgMeta metas[] = {
     {"SHADOW_SCALE", "1", "1..4", RESTART},   // vk_texture.c shadow_scale_of: the game's size unless asked
     {"SHADOW_RANGE", "100", "50..400", RESTART}, {"CONTACT_SHADOWS", "0", "0..100", RESTART},
     {"PCSS", "0", "0..200", RESTART},
+    {"MOTION_BLUR", "1", "0|1", LIVE}, {"DEPTH_OF_FIELD", "1", "0|1", LIVE},
+    {"CHROMATIC_ABERRATION", "1", "0|1", LIVE},
     // ambient occlusion (vk_ao.c; gi adds the radiance cascades of vk_rc.c): read again at the next present after a
     // change
     {"AO", "off", "off|low|high|gi", LIVE},
@@ -156,11 +159,12 @@ static const CfgMeta metas[] = {
     {"OPERATION_MODE", "docked", "docked|handheld", RESTART},
     {"ASSUME_FOCUS", "1", "0|1", LIVE},   // read on every focus change (ov_system.c)
     {"HUD", "1", "0|1", LIVE},            // the gameplay HUD is drawn (resolution.c res_hud_tick); F12 switches it
+    {"RESHADE", "0", "0|1", LIVE},        // ReShade solo toca la escena: la fase HUD va a una capa aparte (vk_reshade.c)
     // Sound, Controls, Menu
     {"VOLUME", "100", "0..100", LIVE},
     {"MOTION", "1", "0|1", LIVE}, {"RUMBLE_STRENGTH", "130", "0..300", LIVE}, {"RUMBLE_CURVE", "0.6", "0.2..1.5", LIVE},
     {"RUMBLE_TRIGGERS", "0", "0|1", LIVE}, {"PAD_LAYOUT", "auto", "auto|nintendo|xbox|playstation", LIVE},
-    {"PROMPTS", "auto", "auto|nintendo|xbox|playstation", RESTART},
+    {"PROMPTS", "auto", "auto|nintendo|xbox|playstation|keyboard", RESTART},
     {"STICK_DEADZONE", "8", "0..50", LIVE}, {"STICK_SENS", "1", "0.1..3", RESTART},
     {"LSTICK_DEADZONE", "", "0..50", LIVE}, {"RSTICK_DEADZONE", "", "0..50", LIVE},
     {"MOUSE_SENS", "1", "0..10", LIVE},
@@ -177,7 +181,7 @@ static const CfgMeta metas[] = {
     {"LIB_PREBUILD_KEEP", "1024", "0..4096", RESTART}, {"PIPE_PREBUILD", "1", "0|1", RESTART}, {"PREWARM_XLATE", "", "1..64", RESTART}, {"GPL", "", "0|1", RESTART},
     // textures and memory
     {"ASTC", "auto", "auto|gpu|native|cpu", RESTART}, {"MEMORY", "auto", "auto|import|mirror|verify", RESTART},
-    {"TEX_ALIAS", "1", "0|1", RESTART}, {"TEX_CACHE_MB", "", "", RESTART}, {"TEX_VRAM_PRESSURE", "90", "0..100", RESTART}, {"ASTC_BC", "auto", "auto|bc1|1|0", RESTART}, {"TEX_MIP_SKIP", "0", "0|1024|2048", RESTART}, {"TEX_PREFETCH", "1", "0|1", RESTART}, {"ZSTD_NATIVE", "1", "0|1", RESTART}, {"ZSTD_CHECK", "0", "0|1", RESTART},
+    {"TEX_ALIAS", "1", "0|1", RESTART}, {"TEX_CACHE_MB", "", "", RESTART}, {"TEX_VRAM_PRESSURE", "90", "0..100", RESTART}, {"ASTC_BC", "auto", "auto|bc1|bc7|1|0", RESTART}, {"BC7_CACHE", "1", "0|1", RESTART}, {"TEX_MIP_SKIP", "0", "0|1024|2048", RESTART}, {"TEX_PREFETCH", "1", "0|1", RESTART}, {"ZSTD_NATIVE", "1", "0|1", RESTART}, {"ZSTD_CHECK", "0", "0|1", RESTART},
     // render fixes
     {"LOD_GUARD", "1", "0|1", RESTART}, {"FIX_C0", "1", "0|1", RESTART}, {"FIX_ZERO", "1", "0|1", RESTART},
     {"BIND_SKIP", "1", "0|1", RESTART}, {"SHADER_MEMO", "1", "0|1", RESTART}, {"PIPE_MEMO", "1", "0|1", RESTART}, {"TEX_MEMO", "1", "0|1", RESTART},

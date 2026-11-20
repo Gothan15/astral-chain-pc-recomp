@@ -2443,6 +2443,7 @@ static int prepare_draw(VkExec *ex, int prim, int32_t count, int restart) {
         skip_prog = e && *e ? atoi(e) : 0;
     }
     if (skip_prog > 0 && ex->prog->serial == (uint64_t)skip_prog) return drop_draw(ex, VK_DROP_OTHER, "AC_SKIP_PROG");
+    if (vk_post_skip_draw()) return drop_draw(ex, VK_DROP_OTHER, "post: efecto apagado");   // vk_post.c
     int has_vs, has_fs, vs_wait = 0, fs_wait = 0, memo = shader_memo_on();
     const GfxShader *vs, *fs;
     uint32_t gen = memo ? vk_texture_slots_gen() : 0;   // before shader_for, whose lookups may bump it
@@ -2581,6 +2582,7 @@ static int prepare_draw(VkExec *ex, int prim, int32_t count, int restart) {
     }
     vk_dlaa_draw(ex);
     vk_ao_draw(ex);
+    vk_post_draw(ex);   // cuenta el draw en el pase abierto (vk_post.c)
     record_fixed(ex);
     repeat_stats(ex, info);
     bind_resources(ex, info);
