@@ -97,8 +97,10 @@ void on_reshade_present(api::effect_runtime *runtime) {
     if (active.handle != 0) runtime->set_uniform_value_bool(active, true);
 
     // Sin capa este frame: se enlaza la textura de reserva y no hay más que hacer.
+    // Si ni eso se puede, la marca se retira: el fork deja de redirigir y el HUD
+    // vuelve al camino normal en vez de desaparecer (degradar, no romper).
     if (sh->hud_image == 0) {
-        if (!ensure_blank(device)) return;
+        if (!ensure_blank(device)) { sh->addon_magic = 0; return; }
         if (g_bound_srv.handle != g_blank_srv.handle) {
             runtime->update_texture_bindings("HUDLAYER", g_blank_srv, g_blank_srv);
             g_bound_srv = g_blank_srv;
@@ -115,8 +117,13 @@ void on_reshade_present(api::effect_runtime *runtime) {
         api::resource layer = { sh->hud_image };
         api::resource_view srv = { 0 };
         if (!device->create_resource_view(layer, api::resource_usage::shader_resource,
-                                          api::resource_view_desc(fmt), &srv))
+                                          api::resource_view_desc(fmt), &srv)) {
+            // Sin vista no hay composición posible (p. ej. un formato de ventana
+            // que no sea 37 ni 44): se retira la marca para que el fork deje de
+            // redirigir y el HUD se quede en el camino normal.
+            sh->addon_magic = 0;
             return;
+        }
         runtime->update_texture_bindings("HUDLAYER", srv, srv);
         if (g_layer_srv.handle != 0) device->destroy_resource_view(g_layer_srv);
         g_layer_srv = srv;

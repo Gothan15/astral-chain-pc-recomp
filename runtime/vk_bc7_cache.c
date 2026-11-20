@@ -88,10 +88,11 @@ int vk_bc7_cache_log_on(void) { return key_log(); }
 // caché): es la mitad en caliente de la validación de claves de doc 04 §5, que se
 // cruza contra las claves del enumerador. La emite el enganche de vk_texture.c.
 void vk_bc7_cache_log_key(const void *guest, uint64_t total, uint32_t format, uint32_t w,
-                          uint32_t h, uint32_t layout_levels, uint32_t layers) {
-    rt_log("[bc7key] %016llx total %llu fmt %#x %ux%u levels %u layers %u",
+                          uint32_t h, uint32_t layout_levels, uint32_t layers,
+                          uint32_t pkg_block_h) {
+    rt_log("[bc7key] %016llx total %llu fmt %#x %ux%u levels %u layers %u pkg %u",
            (unsigned long long)ac_bc7_hash(guest, total), (unsigned long long)total,
-           format, w, h, layout_levels, layers);
+           format, w, h, layout_levels, layers, pkg_block_h);
 }
 
 int vk_bc7_cache_enabled(void) {
@@ -103,6 +104,7 @@ int vk_bc7_cache_enabled(void) {
 
 int vk_bc7_cache_fetch(const void *guest, uint64_t total, uint32_t format, uint32_t w,
                        uint32_t h, uint32_t layout_levels, uint32_t layers,
+                       uint32_t pkg_block_h,
                        uint8_t **blocks, uint64_t *size) {
     cache_open();
     if (!g_count) return 0;
@@ -123,9 +125,9 @@ int vk_bc7_cache_fetch(const void *guest, uint64_t total, uint32_t format, uint3
     if (!r || r >= g_index + g_count || r->hash != hash) {
         g_misses++;
         if (log)
-            rt_log("[bc7key] %016llx total %llu fmt %#x %ux%u levels %u layers %u: miss",
+            rt_log("[bc7key] %016llx total %llu fmt %#x %ux%u levels %u layers %u pkg %u: miss",
                    (unsigned long long)hash, (unsigned long long)total, format, w, h,
-                   layout_levels, layers);
+                   layout_levels, layers, pkg_block_h);
         return 0;
     }
     // El tamaño del registro debe ser el que la geometría anuncia: si el data.bin

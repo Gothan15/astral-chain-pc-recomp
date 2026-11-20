@@ -173,7 +173,7 @@ def _write_jobs(romfs_bin, jobs_path, decompress, limit=0):
     seen = set()
     records = []                     # (campos, data_off, data_size), en orden de trabajos
     with jobs_path.open('wb') as out:
-        out.write(struct.pack('<4sIII', b'BC7J', 1, 0, 0))   # cuenta y records_off, al final
+        out.write(struct.pack('<4sIIQ', b'BC7J', 2, 0, 0))   # cuenta y records_off (u64 en la v2), al final
         for fields, data, short in _pairs(romfs_bin, decompress):
             variants = [fields]
             if short:
@@ -194,23 +194,27 @@ def _write_jobs(romfs_bin, jobs_path, decompress, limit=0):
         for v, data_off, data_size in records:
             out.write(struct.pack('<6I2Q', *v, data_off, data_size))
         out.seek(0)
-        out.write(struct.pack('<4sIII', b'BC7J', 1, len(records), records_off))
+        out.write(struct.pack('<4sIIQ', b'BC7J', 2, len(records), records_off))
     return jobs
 
 
 def _run_exe(exe, mode, jobs_path, out_dir):
-    """Corre el exe en el modo dado y devuelve sus líneas de salida, en orden."""
+    """Corre el exe en el modo dado y devuelve (líneas de salida, código).
+    Contrato con bc7_convert.c: 0 = todo convertido, 1 = terminó con texturas
+    fallidas (caché parcial: se monta pero NO se sella), 2 = aborto (no se
+    monta nada). Aceptar el 1 como éxito selló una vez una caché vacía."""
     env = dict(os.environ)
     env['AC_BC7_JOBS'] = str(jobs_path)
     if out_dir is not None:
         env['AC_BC7_OUT'] = str(out_dir)
     r = subprocess.run([str(exe), mode], env=env, capture_output=True, text=True)
-    if r.returncode not in (0, 1) or (mode == '--bc7-keys' and r.returncode != 0):
-        sys.stderr.write(r.stderr)
-        raise SystemExit(f'{exe.name} {mode} salió con código {r.returncode}')
     if r.stderr:
         sys.stderr.write(r.stderr)
-    return r.stdout.splitlines()
+    if r.returncode == 2 or (mode == '--bc7-keys' and r.returncode != 0):
+        raise SystemExit(f'{exe.name} {mode} abortó con código {r.returncode}')
+    if r.returncode not in (0, 1):
+        raise SystemExit(f'{exe.name} {mode} salió con código {r.returncode}')
+    return r.stdout.splitlines(), r.returncode
 
 
 def _parse_keys(lines, count):
@@ -274,16 +278,26 @@ def main():
     print(f'  {len(jobs)} trabajos únicos ({time.time() - t0:.0f} s)', flush=True)
 
     if args.keys:
-        lines = _run_exe(exe, '--bc7-keys', jobs_path, None)
+        lines, _rc = _run_exe(exe, '--bc7-keys', jobs_path, None)
         keys = _parse_keys(lines, len(jobs))
         with open(args.keys, 'w', encoding='ascii') as f:
             for job, k in zip(jobs, keys):
                 if k:
-                    f.write(f'{k[0]:016x} {k[1]} {job[0]:#x} {job[1]}x{job[2]} {job[3]} {job[4]}\n')
+                    f.write(f'{k[0]:016x} {k[1]} {job[0]:#x} {job[1]}x{job[2]} {job[3]} {job[4]} pkg {(job[5] & 0xFF) + 1}\n')
         print(f'{sum(1 for k in keys if k)} claves en {args.keys} ({time.time() - t0:.0f} s)')
         return 0
 
-    lines = _run_exe(exe, '--bc7-convert', jobs_path, out)
+    # Espacio con las sumas reales, ya enumerado: la caché ocupará la suma de los
+    # tamaños BC7 de los trabajos, y el fichero de trabajos (en disco, puede
+    # pasar de 4 GB de datos huésped) convive con ella hasta el final. La
+    # estimación previa de ~20 GB no contaba el fichero de trabajos.
+    cache_bytes = sum(_bc7_size(j[1], j[2], j[3], j[4]) for j in jobs)
+    free = shutil.disk_usage(out).free
+    if free < cache_bytes:
+        raise SystemExit(f'BC7 precompute: la caché ocuparía {cache_bytes / 2**30:.1f} GB '
+                         f'y quedan {free / 2**30:.1f} GB libres; no se convierte')
+
+    lines, rc = _run_exe(exe, '--bc7-convert', jobs_path, out)
     keys = _parse_keys(lines, len(jobs))
     if len(keys) != len(jobs):
         raise SystemExit(f'el exe informó de {len(keys)} trabajos y se le dieron {len(jobs)}')
@@ -308,10 +322,17 @@ def main():
     (out / 'index.bin.partial').write_bytes(struct.pack('<3I', _MAGIC, _VERSION, len(records)) + b''.join(records))
     for name in ('data.bin', 'index.bin'):
         (out / (name + '.partial')).replace(out / name)
-    (out / 'complete.txt').write_text(seal, encoding='ascii')
+    # El sello solo si la caché está COMPLETA de verdad: código 0 del exe (sin
+    # texturas fallidas), sin --limit y con al menos un registro. La parcial se
+    # monta igual (el runtime la usa), pero sin sello la próxima pasada la rehace.
+    sealed = rc == 0 and not args.limit and len(records) > 0
+    if sealed:
+        (out / 'complete.txt').write_text(seal, encoding='ascii')
     jobs_path.unlink()
     print(f'{len(records)} texturas, {offset / 2**30:.2f} GB, {failed} no convertidas, '
           f'{time.time() - t0:.0f} s')
+    if not sealed:
+        print('BC7 precompute: caché parcial, SIN sellar (la próxima pasada la completará)')
     return 0
 
 

@@ -374,9 +374,11 @@ int vk_astc_low_memory(void);           // vk_texture.c, video memory over its b
 int vk_bc7_cache_enabled(void);         // 1: clave BC7_CACHE puesta y el modo es bc7
 int vk_bc7_cache_log_on(void);          // 1: AC_BC7_CACHE_LOG puesta (líneas [bc7key])
 void vk_bc7_cache_log_key(const void *guest, uint64_t total, uint32_t format, uint32_t w,
-                          uint32_t h, uint32_t layout_levels, uint32_t layers);
+                          uint32_t h, uint32_t layout_levels, uint32_t layers,
+                          uint32_t pkg_block_h);
 int vk_bc7_cache_fetch(const void *guest, uint64_t total, uint32_t format, uint32_t w,
                        uint32_t h, uint32_t layout_levels, uint32_t layers,
+                       uint32_t pkg_block_h,
                        uint8_t **blocks, uint64_t *size);   // 1 = acierto: *blocks es malloc del llamador
 void vk_bc7_cache_record(VkCommandBuffer cb, VkImage image, VkImageAspectFlags aspect,
                          const uint8_t *blocks, uint32_t w, uint32_t h,

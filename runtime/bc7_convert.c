@@ -14,7 +14,8 @@
 //                   (eso es el productor CPU con bc7enc, doc 04 §3).
 //
 // El fichero de trabajos (lo escribe bc7_precompute.py; formato propio y simple):
-//   cabecera: "BC7J", u32 versión=1, u32 cuenta, u32 records_off
+//   cabecera: "BC7J", u32 versión=2, u32 cuenta, u64 records_off (la v1 llevaba el
+//   offset en u32: los datos huésped de todas las texturas pueden pasar de 4 GiB)
 //   los bytes huésped de cada textura, concatenados tras la cabecera (el driver los
 //   escribe al enumerar, sin guardarlos en RAM), y AL FINAL los registros:
 //   por trabajo (40 bytes): u32 format, w, h, levels, layers, packaged;
@@ -41,9 +42,17 @@ typedef struct {
 } Bc7Job;
 _Static_assert(sizeof(Bc7Job) == 40, "Bc7Job debe medir 40 bytes");
 
-// El nvn_texdesc que el juego construiría desde el XT1 (mapeo de doc 04 §2):
-// packaged -> pkg_block_h directo es la hipótesis de partida; la validación de
-// claves (§5) es la que la confirma o la corrige. 0 si no es ASTC convertible.
+// El pkg_block_h de un trabajo: el byte packaged del XT1 es el layout[0] que el
+// juego pasa a NVN, y el runtime lo guarda sumándole 1 (nvn_api_obj.c, al
+// construir el descriptor: pkg_block_h = layout[0] + 1; nvn_tex_layout resta ese
+// 1 al volcarlo). Mapearlo directo dejaba la altura de bloque una unidad corta:
+// en los tamaños en que el total coincide con ambas alturas, la clave acertaba
+// y la caché servía bloques desenmarañados con la altura equivocada. La línea
+// de clave lleva el pkg para que el cruce de doc 04 §5 también lo compare.
+static int job_pkg(const Bc7Job *j) { return (int)(j->packaged & 0xFF) + 1; }
+
+// El nvn_texdesc que el juego construiría desde el XT1 (mapeo de doc 04 §2).
+// 0 si no es ASTC convertible.
 static int desc_of(nvn_texdesc *d, const Bc7Job *j) {
     memset(d, 0, sizeof *d);
     d->target = j->layers == 6 ? NVN_TEXTURE_TARGET_CUBEMAP : NVN_TEXTURE_TARGET_2D;
@@ -51,7 +60,7 @@ static int desc_of(nvn_texdesc *d, const Bc7Job *j) {
     d->width = j->w, d->height = j->h, d->depth = 1;
     d->levels = j->levels;
     d->samples = 1;
-    d->pkg_block_h = (signed int)(j->packaged & 0xFF);
+    d->pkg_block_h = job_pkg(j);
     int bw, bh;
     return nvn_fmt_bpb(j->format, &bw, &bh) != 0;
 }
@@ -72,13 +81,15 @@ static int key_of(const Bc7Job *j, const uint8_t *data, uint64_t *hash, uint64_t
 // Lee la cabecera y los registros (al final del fichero) de trabajos. NULL si no
 // es válido.
 static Bc7Job *jobs_load(FILE *f, uint32_t *count) {
-    uint32_t head[4];
-    if (fread(head, 4, 4, f) != 4 || head[0] != 0x4A374342u /* "BC7J" */ || head[1] != 1 || !head[2])
+    uint32_t head[3];
+    uint64_t records_off;
+    if (fread(head, 4, 3, f) != 3 || head[0] != 0x4A374342u /* "BC7J" */ || head[1] != 2 || !head[2] ||
+        fread(&records_off, 8, 1, f) != 1)
         return NULL;
 #ifdef _WIN32
-    if (_fseeki64(f, (long long)head[3], SEEK_SET) != 0) return NULL;
+    if (_fseeki64(f, (long long)records_off, SEEK_SET) != 0) return NULL;
 #else
-    if (fseeko(f, (off_t)head[3], SEEK_SET) != 0) return NULL;
+    if (fseeko(f, (off_t)records_off, SEEK_SET) != 0) return NULL;
 #endif
     Bc7Job *jobs = malloc((size_t)head[2] * sizeof *jobs);
     if (!jobs || fread(jobs, sizeof *jobs, head[2], f) != head[2]) { free(jobs); return NULL; }
@@ -100,8 +111,9 @@ static uint8_t *job_data(FILE *f, const Bc7Job *j) {
 }
 
 static void print_key(const Bc7Job *j, uint64_t hash, uint64_t total) {
-    printf("key %016llx %llu %#x %u %u %u %u\n", (unsigned long long)hash,
-           (unsigned long long)total, j->format, j->w, j->h, j->levels, j->layers);
+    printf("key %016llx %llu %#x %u %u %u %u pkg %d\n", (unsigned long long)hash,
+           (unsigned long long)total, j->format, j->w, j->h, j->levels, j->layers,
+           job_pkg(j));
     fflush(stdout);
 }
 
@@ -297,10 +309,14 @@ int bc7_convert(void) {
     // El modo BC7 se decide una vez por dispositivo: se fija antes de vk_init para
     // que la decisión construya el codificador BC7 (como hace la sonda ASTC).
     plat_setenv("AC_ASTC_BC", "bc7");
+    // Contrato de salida con el driver: 0 = todo convertido, 1 = terminó pero con
+    // texturas fallidas (el driver monta la caché parcial y NO la sella), 2 =
+    // aborto (el driver no monta nada). Compartir código entre «falló una» y «no
+    // se pudo ni arrancar» selló una vez una caché vacía como completa.
     if (!vk_init() || vk_astc_bc() != 3) {
         fprintf(stderr, "bc7-convert: el dispositivo no muestrea BC7 o Vulkan no arranca\n");
         fclose(out); free(jobs); fclose(f);
-        return 1;
+        return 2;
     }
     VkCtx *c = vk_ctx();
     uint32_t converted = 0, skipped = 0, failed = 0;
@@ -325,7 +341,7 @@ int bc7_convert(void) {
             fprintf(stderr, "bc7-convert: error escribiendo data.bin.partial\n");
             free(blocks);
             fclose(out); free(jobs); fclose(f);
-            return 1;
+            return 2;
         }
         free(blocks);
         converted++;

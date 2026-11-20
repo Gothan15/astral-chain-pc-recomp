@@ -1322,12 +1322,13 @@ static void upload(Tex *e) {
         // caché o no: es la mitad en caliente de la validación de claves (doc 04 §5).
         if (vk_bc7_cache_log_on())
             vk_bc7_cache_log_key(t->mem, t->L.size, d->format, d->width, d->height,
-                                 d->levels, layers);
+                                 d->levels, layers, (uint32_t)d->pkg_block_h);
         uint8_t *blocks = NULL;
         uint64_t blocks_size = 0;
         if (vk_bc7_cache_enabled() &&
             vk_bc7_cache_fetch(t->mem, t->L.size, d->format, d->width, d->height,
-                               d->levels, layers, &blocks, &blocks_size)) {
+                               d->levels, layers, (uint32_t)d->pkg_block_h,
+                               &blocks, &blocks_size)) {
             VkCommandBuffer cb = vk_upload_begin();
             barrier(cb, ALL_RW, VK_PIPELINE_STAGE_2_COPY_BIT, VK_ACCESS_2_TRANSFER_WRITE_BIT);
             vk_bc7_cache_record(cb, e->pub.image, e->pub.aspect, blocks, d->width, d->height,

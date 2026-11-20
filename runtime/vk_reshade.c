@@ -76,6 +76,10 @@ void vk_reshade_present(VkImage image, VkFormat format, int w, int h) {
     g_frame++;
     g_win = image;
     g_win_passes = 0;
+    // ¿Este frame llegó a abrir la capa? Se lee ANTES de reiniciar: un frame sin
+    // pases de HUD (una cinemática sin subtítulos) no debe publicar la capa, o el
+    // addon compone el HUD del frame anterior sobre la escena.
+    int had_hud = g_hud_started;
     g_hud_started = 0;
     g_redir = 0;
     int on = cfg_bool("AC_RESHADE") && vk_reshade_contract_addon_present();
@@ -83,9 +87,10 @@ void vk_reshade_present(VkImage image, VkFormat format, int w, int h) {
         g_on = on;
         rt_log("reshade: la separación del HUD queda %s", on ? "activada" : "desactivada");
     }
-    // El contrato se publica siempre: con la capa válida si la opción está activa, y sin capa si no.
-    vk_reshade_contract_publish(g_on && g_hud ? (uint64_t)(uintptr_t)g_hud : 0, g_hud_w, g_hud_h,
-                                (uint32_t)g_hud_fmt, g_frame);
+    // El contrato se publica siempre: con la capa válida si la opción está activa
+    // y el frame tuvo HUD, y sin capa en los demás casos.
+    vk_reshade_contract_publish(g_on && g_hud && had_hud ? (uint64_t)(uintptr_t)g_hud : 0,
+                                g_hud_w, g_hud_h, (uint32_t)g_hud_fmt, g_frame);
 }
 
 int vk_reshade_pass_begin(VkExec *ex) {

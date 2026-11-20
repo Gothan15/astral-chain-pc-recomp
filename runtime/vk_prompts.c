@@ -360,16 +360,20 @@ int vk_prompts_identify(const void *mem, uint64_t size, uint32_t format, uint32_
         rt_log("vk: prompts: candidata al atlas con formato %#x (se esperaba %#x); se decide por el hash", format,
                ATLAS_FORMAT);
     // (una textura del mismo tamaño que no es el atlas se pregunta en cada comprobación: solo se
-    //  vuelve a hashear entera cuando una muestra de sus bytes cambió)
-    static struct { const void *mem; uint64_t sample; } seen[16];
+    //  vuelve a hashear entera cuando una muestra de sus bytes cambió. El veredicto se cachea
+    //  con la muestra: sin eso, la segunda subida del atlas bueno devolvía 0 y el repintado se
+    //  perdía — al cambiar un bind el atlas se resube tal cual y volvían los iconos de mando,
+    //  con la marca de «viejo» puesta y resubidas en cada submit.)
+    static struct { const void *mem; uint64_t sample; int verdict; } seen[16];
     const uint8_t *p = mem;
     uint64_t sample = 0;
     for (uint64_t i = 0; i < size; i += size / 16) { uint64_t v; memcpy(&v, p + i, 8); sample = (sample ^ v) * 0x100000001B3ull; }
     unsigned k = (unsigned)(((uintptr_t)mem >> 4) % 16);
-    if (seen[k].mem == mem && seen[k].sample == sample) return 0;
-    seen[k].mem = mem, seen[k].sample = sample;
+    if (seen[k].mem == mem && seen[k].sample == sample) return seen[k].verdict;
     uint64_t hash = hash_full(p, size);
-    if (hash != ATLAS_HASH) {
+    int verdict = hash == ATLAS_HASH;
+    seen[k].mem = mem, seen[k].sample = sample, seen[k].verdict = verdict;
+    if (!verdict) {
         static int n_logs;
         if (n_logs++ < 4)
             rt_log("vk: prompts: textura de 256x512 que no es el atlas (hash %llx, se esperaba %llx)",
