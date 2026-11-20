@@ -1,4 +1,6 @@
-/* Astral Chain-Setup.exe: starts python\pythonw.exe -m installer.gui with this exe's folder as the working directory.
+/* The launcher exes: Astral Chain-Setup.exe starts python\pythonw.exe -m installer.gui, and Astral
+   Chain-Preparar.exe (built with -DPREPARE_LAUNCHER) starts -m installer.prepare_gui instead; both with
+   this exe's folder as the working directory.
 
    No console window. The two message strings come from the catalog (installer/text/<lang>.json, ids launcher.title and
    launcher.python_missing); tools/make_release.py writes them into launcher_text.h before it compiles this file.
@@ -8,6 +10,12 @@
 #include <wchar.h>
 
 #include "launcher_text.h"
+
+#ifdef PREPARE_LAUNCHER
+#define LAUNCHER_MODULE L"installer.prepare_gui"   /* la ventana de preparación (Astral Chain-Preparar.exe) */
+#else
+#define LAUNCHER_MODULE L"installer.gui"           /* la ventana del Setup (Astral Chain-Setup.exe) */
+#endif
 
 #define LANGID_RUSSIAN 0x19     /* primary language id */
 #define LANGID_PT_BR 0x0416     /* the whole LANGID: Portugal's Portuguese stays English */
@@ -43,7 +51,7 @@ int WINAPI WinMain(HINSTANCE instance, HINSTANCE previous, LPSTR command_line, i
     folder[n > 0 ? n - 1 : 0] = 0;
     if (swprintf(python, PATH_CHARS, L"%ls\\python\\pythonw.exe", folder) < 0 ||
         GetFileAttributesW(python) == INVALID_FILE_ATTRIBUTES) { fail(); return 1; }
-    if (swprintf(command, PATH_CHARS + 64, L"\"%ls\" -m installer.gui", python) < 0) { fail(); return 1; }
+    if (swprintf(command, PATH_CHARS + 64, L"\"%ls\" -m " LAUNCHER_MODULE, python) < 0) { fail(); return 1; }
     if (!CreateProcessW(python, command, NULL, NULL, FALSE, 0, NULL, folder, &si, &pi)) { fail(); return 1; }
     CloseHandle(pi.hThread);
     CloseHandle(pi.hProcess);
