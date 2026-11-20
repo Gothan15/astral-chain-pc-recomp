@@ -11,6 +11,7 @@
 #include <string.h>
 #include <wchar.h>
 
+#include "bc7_cache.h"   // ac_bc7_hash: el hash con el que Puddz calculó ATLAS_HASH (ver hash_full)
 #include "cfg.h"
 #include "host.h"      // rt_log
 #include "input_map.h"
@@ -345,14 +346,15 @@ static void draw_slot(Canvas *cv, const Slot *sl, const InputMap *m) {
 }
 
 /* ------------------------------------------------------------------ identificación y pintado */
-// FNV-1a de 64 bits sobre todos los bytes: la misma mezcla (xor y multiplicar por 0x100000001B3) que
-// la caché de muestras de Puddz. Su bc7_hash_full no está en este repo: si el hash completo de la
-// candidata no casa con ATLAS_HASH, el log lo imprime para corregir la constante con un arranque.
-static uint64_t hash_full(const uint8_t *mem, uint64_t n) {
-    uint64_t h = 1469598103934665603ull;
-    for (uint64_t i = 0; i < n; i++) h = (h ^ mem[i]) * 0x100000001B3ull;
-    return h;
-}
+// El hash completo de la candidata: ATLAS_HASH lo calculó Puddz con su bc7_hash_full (cuatro
+// carriles FNV-1a con semillas doradas y mezcla final), que en este repo vive como ac_bc7_hash
+// en bc7_cache.h. La primera versión de este módulo hasheaba con un FNV-1a simple de un carril —
+// y encima con la semilla mal transcrita (1469598103934665603, sin el 7 final de la base FNV
+// 14695981039346656037) —, así que el hash del atlas real no podía coincidir jamás y los iconos
+// de teclado nunca se identificaban (revisión de ChatGPT del 2026-11-20, verificada contra el
+// código de Puddz). Se usa ac_bc7_hash tal cual, bit a bit el mismo cálculo que produjo la
+// constante. Si aun así no casa, el log imprime el hash real para corregir ATLAS_HASH con un arranque.
+static uint64_t hash_full(const uint8_t *mem, uint64_t n) { return ac_bc7_hash(mem, n); }
 
 int vk_prompts_identify(const void *mem, uint64_t size, uint32_t format, uint32_t w, uint32_t h) {
     if (!mem || w != ATLAS_W || h != ATLAS_H || size != (uint64_t)ATLAS_W * ATLAS_H * 4) return 0;
@@ -389,7 +391,7 @@ int vk_prompts_identify(const void *mem, uint64_t size, uint32_t format, uint32_
 uint32_t vk_prompts_generation(void) {
     InputMap m;
     input_map_snapshot(&m);
-    uint64_t h = 1469598103934665603ull;
+    uint64_t h = 0xcbf29ce484222325ull;   // base FNV-1a de 64 bits (solo detección interna de cambios)
     for (int i = 0; i < m.nkeys; i++) {
         h = (h ^ m.keys[i].key) * 0x100000001B3ull;
         h = (h ^ m.keys[i].action) * 0x100000001B3ull;
