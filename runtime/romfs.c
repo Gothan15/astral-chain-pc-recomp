@@ -748,6 +748,45 @@ static void heapdef_overlay(void) {
     if (ok && serve_generated(HEAPDEF, base, out, out_n, "resolution", "grown heaps", keeps)) res_heapdef_served();
 }
 
+// Volcado de archivos del romfs a disco (AC_ROMFS_DUMP: rutas del romfs separadas por comas), para
+// mirar dentro de romfs.bin sin desempaquetar la imagen: cada archivo pedido se escribe en la
+// carpeta romfs-dump con su nombre base, con los bytes tal y como el romfs lo sirve. Lo usa la
+// fase 0 de la cámara directa para sacar PlayerCamera.pack.zs y ZsDic.pack.zs.
+static void romfs_dump_files(void) {
+    const char *list = cfg_get("AC_ROMFS_DUMP");
+    if (!list || !*list) return;
+    static const char keeps[] = "the game keeps its own files";
+    plat_file_mkdir_p("romfs-dump");
+    const char *p = list;
+    while (*p) {
+        const char *e = strchr(p, ',');
+        size_t len = e ? (size_t)(e - p) : strlen(p);
+        char path[512];
+        if (len && len < sizeof path) {
+            memcpy(path, p, len);
+            path[len] = 0;
+            Overlay *base;
+            size_t n;
+            void *in = read_served(path, &base, &n, keeps);
+            if (in) {
+                const char *name = strrchr(path, '/');
+                char out_path[600];
+                snprintf(out_path, sizeof out_path, "romfs-dump/%s", name ? name + 1 : path);
+                FILE *f = fopen(out_path, "wb");
+                if (f) {
+                    fwrite(in, 1, n, f);
+                    fclose(f);
+                    rt_log("romfs: %s volcado en %s (%zu bytes)", path, out_path, n);
+                }
+                free(in);
+            } else {
+                rt_log("romfs: AC_ROMFS_DUMP no encontro %s", path);
+            }
+        }
+        p = e ? e + 1 : p + len;
+    }
+}
+
 // The player camera's pack with its stick speeds multiplied by AC_STICK_SENS (camera_speed.c). The base is an
 // overlay that replaces the pack (a mod's camera stays), else the RomFS original; the dictionary is the RomFS's own.
 #define CAMPACK "Pack/Actor/PlayerCamera.pack.zs"
@@ -895,6 +934,7 @@ static void overlay_init(void) {
     restbl_overlay();
     heapdef_overlay();
     camera_overlay();
+    romfs_dump_files();
     added_init();
     if (noverlay) qsort(overlays, noverlay, sizeof *overlays, overlay_order);
     for (size_t k = 1; k < noverlay; k++)   // overlay_contest left one per file; the generated ones replace in place
