@@ -615,14 +615,18 @@ def sizes(out):
 
 
 def write_zip(out, path):
+    # LZMA (preset 9) en vez de DEFLATE: medido sobre la release real el 2026-11-20, el zip baja de
+    # 223.957.259 B a 148.304.030 B (−33,8 %). El Explorador de Windows no abre ZIP-LZMA; Gothan usa
+    # Bandizip, que sí, y aceptó el trueque. Si algún día se quiere volver, es ZIP_DEFLATED aquí y en
+    # el compress_type de cada entrada.
     path.parent.mkdir(parents=True, exist_ok=True)
-    with zipfile.ZipFile(path, 'w', zipfile.ZIP_DEFLATED, compresslevel=6) as z:
+    with zipfile.ZipFile(path, 'w', zipfile.ZIP_LZMA, compresslevel=9) as z:
         for p in sorted(out.rglob('*')):
             if p.is_file() and 'temp' not in p.relative_to(out).parts[:1]:
                 info = zipfile.ZipInfo((Path(out.name) / p.relative_to(out)).as_posix(), (1980, 1, 1, 0, 0, 0))
-                info.compress_type = zipfile.ZIP_DEFLATED
+                info.compress_type = zipfile.ZIP_LZMA
                 info.external_attr = 0o644 << 16
-                z.writestr(info, p.read_bytes(), compresslevel=6)
+                z.writestr(info, p.read_bytes(), compresslevel=9)
     print(f'{path}: {mib(path.stat().st_size)}')
 
 
