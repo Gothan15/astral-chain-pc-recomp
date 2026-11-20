@@ -503,6 +503,9 @@ static void portable_paths(RtConfig *c) {
 
 int main(int argc, char **argv) {
     mem_init();   // first: claim the guest address space before anything else can land there; reads astralchain.ini
+    // CONSOLE=0 quita la ventana de consola que acompaña al juego: el registro va también al
+    // archivo de logs, así que no se pierde nada. Se decide nada más leer el ini, cuanto antes.
+    if (!cfg_bool("CONSOLE")) plat_console_hide();
     // A restart from the settings menu (gfx_present.c gfx_window_closed) starts this process while the one it replaces
     // is still exiting: its log, RomFS and saves are free once it is gone.
     if (plat_restart_wait(30000) < 0) rt_log("restart: the previous process still runs after 30 s; starting anyway");
