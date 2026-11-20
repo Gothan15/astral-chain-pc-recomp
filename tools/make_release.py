@@ -525,6 +525,10 @@ def build_launcher(out, llvm):
          ROOT / 'installer' / 'launcher' / 'launcher.rc', '-o', res], env=env)
     run([llvm / 'bin' / 'clang.exe', '-O2', '-mwindows', '-Wall', '-Wl,-s', '-I', work,
          ROOT / 'installer' / 'launcher' / 'launcher.c', res, '-o', out / 'Astral Chain-Setup.exe'], env=env)
+    # El segundo lanzador: la ventana de preparación (installer/prepare_gui.py), el mismo launcher.c
+    # con -DPREPARE_LAUNCHER, que cambia el módulo que arranca.
+    run([llvm / 'bin' / 'clang.exe', '-O2', '-mwindows', '-Wall', '-Wl,-s', '-I', work, '-DPREPARE_LAUNCHER',
+         ROOT / 'installer' / 'launcher' / 'launcher.c', res, '-o', out / 'Astral Chain-Preparar.exe'], env=env)
 
 
 # ---- checks ----------------------------------------------------------------------------------------------------------
