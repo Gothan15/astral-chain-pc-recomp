@@ -3,7 +3,7 @@ name: Addon
 on:
   workflow_dispatch:
   push:
-    branches: [reshade-antes-del-hud]
+    branches: [main]
     paths:
       - "addon/**"
       - ".github/workflows/addon.yml"
@@ -27,7 +27,7 @@ jobs:
       - name: Publish the addon to the reshade release
         uses: softprops/action-gh-release@v2
         with:
-          tag_name: reshade-1.19.3
+          tag_name: reshade-unificado
           files: |
             reshade_hud.addon64
             addon/AstralChainHud.fx
