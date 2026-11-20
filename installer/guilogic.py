@@ -206,6 +206,27 @@ class Folder:
         return ini.canonical_language((self.state or {}).get('lang'))
 
     @property
+    def prepare_record(self):
+        """El registro de preparación de shaders de esta instalación: el de la acción misma
+        (state['shaders_prepared']) o, en instalaciones de cuando preparar era un paso, el nivel de ese paso."""
+        state = self.state or {}
+        if state.get('shaders_prepared'):
+            return state['shaders_prepared']
+        step = (state.get('steps') or {}).get('prepare') or {}
+        return {'level': step['prepare']} if step.get('prepare') in PREPARE_LEVELS else None
+
+    @property
+    def shaders_ready(self):
+        """Si la instalación tiene los shaders preparados: el registro, o los archivos que la acción deja."""
+        if self.kind != 'install':
+            return False
+        if self.prepare_record:
+            return True
+        path = Path(self.path)
+        return ((path / 'shader-prepared.bin').is_file()
+                and (path / 'shader-cache' / 'shader-cache.pack').is_file())
+
+    @property
     def finished(self):
         """Every build step is recorded: the setup of this folder ran to its end at least once."""
         steps = (self.state or {}).get('steps') or {}
@@ -332,8 +353,8 @@ def install_subfolder(path, name=GAME_FOLDER):
 
 INSTALL, UPDATE = 'install', 'update'
 
-# Los niveles de preparación de shaders que la ventana y la CLI ofrecen; installer/steps.py los consume.
-PREPARE_LEVELS = ('full', 'essential', 'off')
+# Los niveles de la acción de preparar shaders (la ventana y la CLI); installer/steps.py la ejecuta.
+PREPARE_LEVELS = ('full', 'essential')
 
 
 @dataclass
@@ -342,7 +363,6 @@ class Form:
     update: str = ''
     keys: str = ''
     lang: str = ''
-    prepare: str = 'full'   # nivel de preparación de shaders (PREPARE_LEVELS)
     dest: str = ''
     mode: str = INSTALL   # the screen the player chose: INSTALL (a first install) or UPDATE (an existing folder)
 
@@ -404,7 +424,7 @@ class Form:
     def command(self, python, root=None, temp=None, verify_hashes=False, accept_version=False):
         cmd = [str(python), '-m', 'installer']
         for flag, value in (('--base', self.base), ('--update', self.update), ('--keys', self.keys),
-                            ('--lang', self.lang), ('--prepare', self.prepare), ('--dest', self.dest)):
+                            ('--lang', self.lang), ('--dest', self.dest)):
             if value.strip():
                 cmd += [flag, value.strip()]
         if root:
@@ -416,6 +436,17 @@ class Form:
         if accept_version:   # the window's "Continue anyway" after a version mismatch
             cmd.append('--accept-unknown-version')
         return cmd
+
+
+def prepare_command(python, dest, level, root=None, temp=None):
+    """El comando de la acción de preparar shaders sobre una instalación ya hecha: la misma CLI con
+    --prepare-shaders, que la ventana corre igual que una instalación y muestra en la pantalla de corrida."""
+    cmd = [str(python), '-m', 'installer', '--prepare-shaders', '--dest', dest.strip(), '--prepare', level]
+    if root:
+        cmd += ['--root', str(root)]
+    if temp:
+        cmd += ['--temp', str(temp)]
+    return cmd
 
 
 # ---- events -> state ---------------------------------------------------------------------------------------------

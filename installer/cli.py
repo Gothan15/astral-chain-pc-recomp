@@ -25,8 +25,8 @@ from . import state as statefile
 from .events import Reporter
 from .guilogic import system_game_language
 from .progress import ProgressLines
-from .runner import Context, run_steps
-from .steps import all_steps, finish_temp
+from .runner import Context, InstallError, run_steps
+from .steps import all_steps, finish_temp, prepare_shaders
 
 EXIT = {'ok': 0, 'failed': 1, 'cancelled': 3}
 
@@ -74,9 +74,12 @@ def build_parser():
     ap.add_argument('--keys', type=Path, help='prod.keys')
     ap.add_argument('--lang', help='game language, a Switch language code (en-US, en-GB, ja, de, ru, ...), or auto: '
                                    "the install folder's own, else the system's")
-    ap.add_argument('--prepare', choices=('full', 'essential', 'off'), default='full',
-                    help='shader preparation: full (the recorded variants and a default of every shader), '
-                         'essential (only the recorded variants) or off (none: shaders compile in play)')
+    ap.add_argument('--prepare-shaders', action='store_true',
+                    help='only prepare the shaders of the installation in --dest (an action of its own, '
+                         'to run after installing or updating) and exit')
+    ap.add_argument('--prepare', choices=('full', 'essential'), default='full',
+                    help='with --prepare-shaders: full (the recorded variants and a default of every '
+                         'shader) or essential (only the recorded variants)')
     ap.add_argument('--dest', type=Path, required=True, help='install folder')
     ap.add_argument('--root', type=Path, help='release folder or repository (default: the folder above installer/)')
     ap.add_argument('--temp', type=Path, help='temp folder (default: temp/ of the release on Windows, .setup-temp in '
@@ -88,6 +91,30 @@ def build_parser():
     ap.add_argument('--progress-lines', action='store_true',
                     help='print "progress <0..1> <text>" lines instead of JSON events, for a launcher')
     return ap
+
+
+def prepare_action_main(args, layout, dest, temp, rep, state, log, t0):
+    """La corrida de --prepare-shaders: prepara los shaders de la instalación de --dest y sale. No instala
+    ni actualiza nada; deja el nivel y la release grabados en el estado de la instalación."""
+    if state is None:
+        rep.error('prepare.not_installed', {'path': str(dest)})
+        rep.emit('end', result='failed', seconds=0)
+        rep.close()
+        return 1
+    ctx = Context(layout, dest, temp, rep, args, state=state)
+    rep.emit('start', release=layout.release, mode='prepare', dest=str(dest), log=str(log), steps=['prepare'])
+    try:
+        record = prepare_shaders(ctx, args.prepare)
+    except InstallError as e:
+        rep.error(e.id, e.params)
+        rep.emit('end', result='failed', seconds=round(time.monotonic() - t0, 1))
+        rep.close()
+        return 1
+    state['shaders_prepared'] = record
+    ctx.save()
+    rep.emit('end', result='ok', seconds=round(time.monotonic() - t0, 1))
+    rep.close()
+    return 0
 
 
 def main(argv=None):
@@ -118,6 +145,8 @@ def main(argv=None):
         rep.error(e.id, {'path': str(e.path)})
         rep.emit('end', result='failed', seconds=0)
         return 1
+    if args.prepare_shaders:
+        return prepare_action_main(args, layout, dest, temp, rep, state, log, t0)
     if args.lang == 'auto':
         args.lang = auto_language(dest, state)
     ctx = Context(layout, dest, temp, rep, args, state=state, verify=args.verify)

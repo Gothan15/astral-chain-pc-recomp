@@ -37,7 +37,7 @@ goes back, and reaches 1 only with a successful end.
 from .events import load_catalog
 from .guilogic import DONE, RUNNING, SKIPPED, Catalog, Model, describe_event, parse_line
 
-WEIGHTS = {'check': 3, 'extract': 35, 'lift': 12, 'compile': 28, 'prepare': 20, 'cleanup': 2}
+WEIGHTS = {'check': 3, 'extract': 35, 'lift': 12, 'compile': 47, 'prepare': 1, 'cleanup': 2}
 OTHER_WEIGHT = 2      # a step this table does not name
 BEFORE_END = 0.99     # the most a run shows before its end event
 
