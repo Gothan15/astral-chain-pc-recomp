@@ -332,6 +332,9 @@ def install_subfolder(path, name=GAME_FOLDER):
 
 INSTALL, UPDATE = 'install', 'update'
 
+# Los niveles de preparación de shaders que la ventana y la CLI ofrecen; installer/steps.py los consume.
+PREPARE_LEVELS = ('full', 'essential', 'off')
+
 
 @dataclass
 class Form:
@@ -339,6 +342,7 @@ class Form:
     update: str = ''
     keys: str = ''
     lang: str = ''
+    prepare: str = 'full'   # nivel de preparación de shaders (PREPARE_LEVELS)
     dest: str = ''
     mode: str = INSTALL   # the screen the player chose: INSTALL (a first install) or UPDATE (an existing folder)
 
@@ -400,7 +404,7 @@ class Form:
     def command(self, python, root=None, temp=None, verify_hashes=False, accept_version=False):
         cmd = [str(python), '-m', 'installer']
         for flag, value in (('--base', self.base), ('--update', self.update), ('--keys', self.keys),
-                            ('--lang', self.lang), ('--dest', self.dest)):
+                            ('--lang', self.lang), ('--prepare', self.prepare), ('--dest', self.dest)):
             if value.strip():
                 cmd += [flag, value.strip()]
         if root:

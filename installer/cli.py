@@ -74,6 +74,9 @@ def build_parser():
     ap.add_argument('--keys', type=Path, help='prod.keys')
     ap.add_argument('--lang', help='game language, a Switch language code (en-US, en-GB, ja, de, ru, ...), or auto: '
                                    "the install folder's own, else the system's")
+    ap.add_argument('--prepare', choices=('full', 'essential', 'off'), default='full',
+                    help='shader preparation: full (the recorded variants and a default of every shader), '
+                         'essential (only the recorded variants) or off (none: shaders compile in play)')
     ap.add_argument('--dest', type=Path, required=True, help='install folder')
     ap.add_argument('--root', type=Path, help='release folder or repository (default: the folder above installer/)')
     ap.add_argument('--temp', type=Path, help='temp folder (default: temp/ of the release on Windows, .setup-temp in '

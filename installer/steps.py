@@ -33,6 +33,7 @@ from pathlib import Path
 from . import ini
 from . import lifeline
 from .layout import EXE, SUPPORTED, running_appimage, version_tag
+from .guilogic import PREPARE_LEVELS
 from .runner import InstallError, Step
 
 sys.path.insert(0, str(Path(__file__).resolve().parent.parent / 'tools'))
@@ -252,6 +253,19 @@ class Watch(threading.Thread):
 def requested_lang(ctx):
     """The language this run uses: --lang, else the one recorded for the install (Check canonicalizes it)."""
     return ini.canonical_language(getattr(ctx.options, 'lang', None) or ctx.state.get('lang'))
+
+
+def requested_prepare(ctx):
+    """El nivel de preparación de shaders de esta corrida. En una instalación nueva manda el pedido (--prepare
+    o la ventana); en una reanudación o actualización manda el nivel grabado en el paso prepare, para que
+    actualizar no rehaga una preparación que el jugador eligió saltarse. Sin nada grabado, full."""
+    if ctx.mode == 'install':
+        level = getattr(ctx.options, 'prepare', None)
+        if level in PREPARE_LEVELS:
+            return level
+    record = ctx.record('prepare') or {}
+    level = record.get('prepare')
+    return level if level in PREPARE_LEVELS else 'full'
 
 
 # ---- 1. check
@@ -887,14 +901,17 @@ class Prepare(Step):
         xlate_id = layout.xlate.with_suffix('.id')
         tools = [layout.tools / n for n in ('prepare_shaders.py', 'shader_census.py', 'pack_shader_cache.py')]
         # not the compile key: a rebuild for the mods' code cheats keeps the prepared shaders
-        return fingerprint('prepare-2', ctx.keys['extract'], runtime_key(ctx), layout.xlate, xlate_id,
-                           layout.shader_answers, *tools)
+        return fingerprint('prepare-3', ctx.keys['extract'], runtime_key(ctx), layout.xlate, xlate_id,
+                           layout.shader_answers, requested_prepare(ctx), *tools)
 
     def current(self, ctx, record):
         dest = ctx.dest
         xlate = dest / ctx.layout.xlate.name
-        return ((dest / 'shader-prepared.bin').is_file() and (dest / 'shader-cache' / 'shader-cache.pack').is_file()
-                and xlate.is_file() and file_sha256(xlate) == record.get('xlate_sha256'))
+        if not (xlate.is_file() and file_sha256(xlate) == record.get('xlate_sha256')):
+            return False
+        if record.get('prepare') == 'off':
+            return True   # omitida a propósito: no hay caché que comprobar, solo el traductor
+        return ((dest / 'shader-prepared.bin').is_file() and (dest / 'shader-cache' / 'shader-cache.pack').is_file())
 
     def run(self, ctx):
         layout, rep, dest = ctx.layout, ctx.reporter, ctx.dest
@@ -931,10 +948,17 @@ class Prepare(Step):
             elif 'gfx_shader: prepare:' in line and 'translated' in line and 'programs' in line:
                 rep.progress('prepare', 'libraries', force=True)
 
+        level = requested_prepare(ctx)
+        if level == 'off':
+            # Sin preparación: el traductor ya quedó copiado arriba; los shaders se traducirán jugando.
+            return {'xlate_sha256': file_sha256(xlate), 'prepare': level}
+
         rep.progress('prepare', 'seed', force=True)
-        code, log = run_tool(ctx, 'prepare', layout.tools / 'prepare_shaders.py',
-                             [dest, '--version', version_tag(game_version(ctx)), '--romfs', dest / 'romfs',
-                              '--answers', layout.shader_answers], parse)
+        args = [dest, '--version', version_tag(game_version(ctx)), '--romfs', dest / 'romfs',
+                '--answers', layout.shader_answers]
+        if level == 'essential':
+            args.append('--no-defaults')   # solo las variantes grabadas, sin la de por defecto de cada shader
+        code, log = run_tool(ctx, 'prepare', layout.tools / 'prepare_shaders.py', args, parse)
         if code or not (dest / 'shader-prepared.bin').is_file():
             raise InstallError('prepare.shaders_failed', code=code, log=str(log))
         if skipped[0]:
@@ -945,7 +969,7 @@ class Prepare(Step):
         code, log = run_tool(ctx, 'prepare', layout.tools / 'pack_shader_cache.py', [dest / 'shader-cache'])
         if code:
             raise InstallError('prepare.pack_failed', code=code, log=str(log))
-        return {'xlate_sha256': file_sha256(xlate)}
+        return {'xlate_sha256': file_sha256(xlate), 'prepare': level}
 
 
 # ---- 7. clean up
