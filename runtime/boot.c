@@ -242,12 +242,45 @@ static void series_shot(const tex_t *t, uint64_t n) {
     free(px);
 }
 
+// La captura de pantalla del jugador (tecla F9; gfx_window_shot la piden los dos back ends de
+// ventana): el próximo frame presentado se guarda entero, tal y como se ve (HUD incluido), en la
+// carpeta capturas con la fecha y la hora en el nombre. La lectura es la de AC_SHOTS (read_texels
+// sobre la textura presentada), porque la captura del sistema operativo con este render devuelve
+// negro o nada: así sale siempre el frame de verdad.
+static volatile int g_shot_wanted;
+void gfx_window_shot(void) { g_shot_wanted = 1; }
+static void single_shot(const tex_t *t) {
+    int fmt = t->d.format;
+    int bgra = fmt == NVN_FORMAT_BGRA8 || fmt == NVN_FORMAT_BGRA8_SRGB;
+    if (!bgra && fmt != NVN_FORMAT_RGBA8 && fmt != NVN_FORMAT_RGBA8_SRGB) return;
+    uint32_t w = t->d.width, h = t->d.height;
+    uint8_t *px = malloc(4ull * w * h);
+    if (!px) return;
+    view_t view;
+    memset(&view, 0, sizeof view);
+    NVNcopyRegion r = {.width = (int)w, .height = (int)h, .depth = 1};
+    if (gfx_replay_async()) gfx_backend()->finish();   // el frame presentado puede seguir en cola
+    gfx_backend()->read_texels(t, &view, &r, px, 4ull * w, 4ull * w * h);
+    if (bgra)   // BGRA -> RGBA en el sitio, como hace la serie de AC_SHOTS
+        for (uint64_t i = 0; i < 4ull * w * h; i += 4) { uint8_t x = px[i]; px[i] = px[i + 2]; px[i + 2] = x; }
+    struct tm tmv;
+    plat_local_time(&tmv);
+    plat_file_mkdir_p("capturas");
+    char path[PLAT_PATH_MAX];
+    snprintf(path, sizeof path, "capturas/astral-%04d%02d%02d-%02d%02d%02d.png",
+             tmv.tm_year + 1900, tmv.tm_mon + 1, tmv.tm_mday, tmv.tm_hour, tmv.tm_min, tmv.tm_sec);
+    rt_write_png(path, px, w, h);
+    free(px);
+    rt_logf("boot: captura %s (%ux%u)\n", path, w, h);
+}
+
 // A --seconds run ends at the first present after the world clock (game time since the save's first frame,
 // frame_step_world_us) passed S seconds, so a run covers the same game time at any frame rate; any other frame is
 // counted by the back end only.
 void rt_frame_presented(const tex_t *t, uint64_t n) {
     const RtConfig *cfg = rt_config();
     series_shot(t, n);
+    if (g_shot_wanted) { g_shot_wanted = 0; single_shot(t); }   // la captura del jugador (F9)
     int64_t w = cfg->seconds ? frame_step_world_us() : -1;
     static int present_shot;   // AC_PRESENT_SHOT=<file>: the window's picture half a second before the run ends
     if (!present_shot && w >= 0 && (double)w >= cfg->seconds * 1e6 - 5e5) {

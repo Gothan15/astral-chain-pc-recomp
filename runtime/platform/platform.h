@@ -280,6 +280,7 @@ uint64_t plat_process_cpu_ns(void);
 uint64_t plat_process_uptime_ns(void);
 uint64_t plat_unix_time_ns(void);         // wall clock, ns since 1970
 void plat_local_time(struct tm *out);      // the wall clock now in the local time zone
+void plat_console_hide(void);              // Windows: detach the console window (the log file keeps everything); elsewhere nothing
 int plat_localtime(int64_t unix_s, struct tm *out);   // a POSIX time in the local time zone; 0 out of range
 int plat_gmtime(int64_t unix_s, struct tm *out);      // the same in UTC
 long plat_tz_west(void);                  // the local zone's standard offset, seconds west of UTC (UTC-5: 18000)

@@ -652,6 +652,7 @@ uint64_t plat_counter_hz(void) { return 1000000000u; }
 // The timer slack (50 us by default) is how late the kernel may wake a sleeping thread to batch wakeups. New threads
 // inherit it from the thread that creates them.
 void plat_timer_1ms(void) { prctl(PR_SET_TIMERSLACK, 1000ul, 0, 0, 0); }
+void plat_console_hide(void) {}   // sin consola de Windows que ocultar
 
 // Linux has no per-process power throttling to opt out of (the frequency governor is handled by AC_CPU_BOOST).
 int plat_power_full(void) { return -1; }

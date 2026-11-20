@@ -334,6 +334,7 @@ uint64_t plat_counter_hz(void) { return qpc_freq(); }
 
 // The default timer tick is 15.6 ms; a 1 ms wait would cost a full tick.
 void plat_timer_1ms(void) { timeBeginPeriod(1); }
+void plat_console_hide(void) { FreeConsole(); }   // el registro sigue en el archivo de logs
 
 // Windows 11 puts a process it deems in the background under EcoQoS (the E-cores of a hybrid Intel CPU, low clocks)
 // and stops honouring its timer resolution while its window is hidden or minimised. The game keeps running out of
