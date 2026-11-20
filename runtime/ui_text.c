@@ -25,8 +25,8 @@ typedef struct { const char *lang; const char *const *text; } Row;
     [UI_SWKBD_TITLE] = title, [UI_SWKBD_PROMPT] = prompt, [UI_SWKBD_DEFAULT_NAME] = name, [UI_SWKBD_OK] = ok, \
     [UI_SWKBD_CANCEL] = cancel, [UI_SWKBD_PAD_HINT] = hint, LANG_NAMES
 
-static const char *const text_en[UI_TEXT_COUNT] = {
-    SWKBD("Text entry", "Enter a name", "Horse", "OK", "Cancel", "Controller: A = OK, B = Cancel"),
+static const char *const text_en[UI_TEXT_COUNT] = {text_en
+    SWKBD("Text entry", "Enter a name", "Akira", "OK", "Cancel", "Controller: A = OK, B = Cancel"),
 
     [UI_MENU_TITLE] = "Settings",
     [UI_MENU_TAB_SCREEN] = "Screen", [UI_MENU_TAB_GAME] = "Game", [UI_MENU_TAB_MODS] = "Mods", [UI_MENU_TAB_SOUND] = "Sound",
@@ -130,6 +130,21 @@ static const char *const text_en[UI_TEXT_COUNT] = {
     [UI_MENU_PCSS] = "Soft sun shadows (PCSS)",
     [UI_MENU_PCSS_DESC] = "Percentage-closer soft shadows: the sun's shadow is sharp where an object meets the "
                           "ground and softer the further its shadow falls. Takes effect at the next start.",
+    [UI_MENU_TEX_COMPRESSION] = "Texture compression",
+    [UI_MENU_TEX_COMPRESSION_DESC] = "How the game's ASTC textures are stored in video memory. BC1 is the lightest, "
+                                     "BC3 keeps the alpha channel, BC7 is the sharpest and the heaviest to encode. Off "
+                                     "keeps them uncompressed (RGBA8) and takes much more memory. Takes effect at the next start.",
+    [UI_MENU_BC7_CACHE] = "Precomputed BC7 cache",
+    [UI_MENU_BC7_CACHE_DESC] = "With BC7 compression, reads the cache/bc7 folder next to the game (written by the "
+                               "precompute tool) instead of encoding the textures again at every start. Takes effect "
+                               "at the next start.",
+    [UI_MENU_MOUSE_CAMERA] = "Mouse camera",
+    [UI_MENU_MOUSE_CAMERA_DESC] = "How the mouse turns the camera. Sparrow: this port's own conversion, plain and "
+                                  "direct. Puddz: the AstralChain-PC port's conversion, with smoothed speed.",
+    [UI_MENU_RESHADE] = "ReShade before the HUD",
+    [UI_MENU_RESHADE_DESC] = "With the ReShade add-on installed, effects touch only the scene and the game's "
+                             "interface is drawn afterwards, untouched. Needs ReShade with full add-on support and "
+                             "the AstralChainHudComposite technique last in the preset.",
     [UI_MENU_MOTION_BLUR] = "Motion blur",
     [UI_MENU_MOTION_BLUR_DESC] = "The game's own motion blur. Off, the picture stays sharp in motion.",
     [UI_MENU_DEPTH_OF_FIELD] = "Depth of field",
@@ -444,8 +459,8 @@ static const char *const text_en[UI_TEXT_COUNT] = {
                                       "stays off while this mod is on.",
 };
 
-static const char *const text_ru[UI_TEXT_COUNT] = {
-    SWKBD("Ввод текста", "Введите имя", "Лошадь", "ОК", "Отмена", "Контроллер: A — ОК, B — отмена"),
+static const char *const text_ru[UI_TEXT_COUNT] = {text_ru
+    SWKBD("Ввод текста", "Введите имя", "Акира", "ОК", "Отмена", "Контроллер: A — ОК, B — отмена"),
 
     [UI_MENU_TITLE] = "Настройки",
     [UI_MENU_TAB_SCREEN] = "Экран", [UI_MENU_TAB_GAME] = "Игра", [UI_MENU_TAB_MODS] = "Моды", [UI_MENU_TAB_SOUND] = "Звук",
@@ -552,6 +567,22 @@ static const char *const text_ru[UI_TEXT_COUNT] = {
     [UI_MENU_PCSS] = "Мягкие солнечные тени (PCSS)",
     [UI_MENU_PCSS_DESC] = "Тень от солнца резкая там, где объект касается земли, и тем мягче, чем дальше она "
                           "падает. Действует при следующем запуске.",
+    [UI_MENU_TEX_COMPRESSION] = "Сжатие текстур",
+    [UI_MENU_TEX_COMPRESSION_DESC] = "Как текстуры ASTC игры хранятся в видеопамяти. BC1 — самое лёгкое, BC3 "
+                                     "сохраняет альфа-канал, BC7 — самое чёткое и самое тяжёлое для кодирования. "
+                                     "Выкл — без сжатия (RGBA8), занимает намного больше памяти. Действует со "
+                                     "следующего запуска.",
+    [UI_MENU_BC7_CACHE] = "Готовый кэш BC7",
+    [UI_MENU_BC7_CACHE_DESC] = "При сжатии BC7 берёт папку cache/bc7 рядом с игрой (её пишет инструмент "
+                               "предрасчёта) вместо того, чтобы кодировать текстуры заново при каждом запуске. "
+                               "Действует со следующего запуска.",
+    [UI_MENU_MOUSE_CAMERA] = "Камера мышью",
+    [UI_MENU_MOUSE_CAMERA_DESC] = "Как мышь поворачивает камеру. Sparrow: собственное преобразование этого порта, "
+                                  "прямое. Puddz: преобразование порта AstralChain-PC, со сглаженной скоростью.",
+    [UI_MENU_RESHADE] = "ReShade перед интерфейсом",
+    [UI_MENU_RESHADE_DESC] = "С установленным аддоном ReShade эффекты касаются только сцены, а интерфейс игры "
+                             "рисуется после, без изменений. Нужен ReShade с полной поддержкой аддонов и техника "
+                             "AstralChainHudComposite последней в пресете.",
     [UI_MENU_MOTION_BLUR] = "Размытие в движении",
     [UI_MENU_MOTION_BLUR_DESC] = "Размытие в движении самой игры. Выкл. — картинка остаётся резкой в движении.",
     [UI_MENU_DEPTH_OF_FIELD] = "Глубина резкости",
@@ -871,8 +902,8 @@ static const char *const text_ru[UI_TEXT_COUNT] = {
                                       "который выключен, пока этот мод включён.",
 };
 
-static const char *const text_pt_br[UI_TEXT_COUNT] = {
-    SWKBD("Inserir texto", "Insira um nome", "Cavalo", "OK", "Cancelar", "Controle: A = OK, B = Cancelar"),
+static const char *const text_pt_br[UI_TEXT_COUNT] = {text_pt_br
+    SWKBD("Inserir texto", "Insira um nome", "Akira", "OK", "Cancelar", "Controle: A = OK, B = Cancelar"),
 
     [UI_MENU_TITLE] = "Configurações",
     [UI_MENU_TAB_SCREEN] = "Tela", [UI_MENU_TAB_GAME] = "Jogo", [UI_MENU_TAB_SOUND] = "Som",
@@ -1251,6 +1282,22 @@ static const char *const text_pt_br[UI_TEXT_COUNT] = {
     [UI_MENU_PCSS] = "Sombras do sol suaves (PCSS)",
     [UI_MENU_PCSS_DESC] = "A sombra do sol é nítida onde o objeto toca o chão e mais suave quanto mais longe ela "
                           "cai. Vale no próximo início.",
+    [UI_MENU_TEX_COMPRESSION] = "Compressão de texturas",
+    [UI_MENU_TEX_COMPRESSION_DESC] = "Como as texturas ASTC do jogo ficam na memória de vídeo. BC1 é a mais leve, "
+                                     "BC3 mantém o canal alfa, BC7 é a mais nítida e a mais pesada de codificar. "
+                                     "Desligado mantém sem compressão (RGBA8) e usa muito mais memória. Vale a "
+                                     "partir da próxima inicialização.",
+    [UI_MENU_BC7_CACHE] = "Cache BC7 pré-calculado",
+    [UI_MENU_BC7_CACHE_DESC] = "Com a compressão BC7, usa a pasta cache/bc7 ao lado do jogo (gravada pela "
+                               "ferramenta de pré-cálculo) em vez de codificar as texturas de novo a cada início. "
+                               "Vale a partir da próxima inicialização.",
+    [UI_MENU_MOUSE_CAMERA] = "Câmera do mouse",
+    [UI_MENU_MOUSE_CAMERA_DESC] = "Como o mouse gira a câmera. Sparrow: a conversão deste port, direta. Puddz: a "
+                                  "conversão do port AstralChain-PC, com a velocidade suavizada.",
+    [UI_MENU_RESHADE] = "ReShade antes da interface",
+    [UI_MENU_RESHADE_DESC] = "Com o addon do ReShade instalado, os efeitos tocam só a cena e a interface do jogo é "
+                             "desenhada depois, sem alterações. Precisa do ReShade com suporte completo a addons e "
+                             "da técnica AstralChainHudComposite por último no preset.",
     [UI_MENU_MOTION_BLUR] = "Desfoque de movimento",
     [UI_MENU_MOTION_BLUR_DESC] = "O desfoque de movimento do próprio jogo. Desligado, a imagem fica nítida em movimento.",
     [UI_MENU_DEPTH_OF_FIELD] = "Profundidade de campo",
@@ -1325,8 +1372,8 @@ static const char *const text_pt_br[UI_TEXT_COUNT] = {
 // Simplified Chinese: this row covers the software keyboard and the whole menu, so the menu and the overlay read Chinese
 // when the menu language is zh-Hans (ui_text.h menu_text). The rows are fixed width, so the strings stay close to the
 // English length; an id without a Chinese entry falls back to English.
-static const char *const text_zh_hans[UI_TEXT_COUNT] = {
-    SWKBD("文字输入", "请输入名字", "马儿", "确定", "取消", "手柄：A 确定，B 取消"),
+static const char *const text_zh_hans[UI_TEXT_COUNT] = {text_zh_hans
+    SWKBD("文字输入", "请输入名字", "阿基拉", "确定", "取消", "手柄：A 确定，B 取消"),
 
     [UI_MENU_TITLE] = "设置",
     [UI_MENU_TAB_SCREEN] = "显示",
@@ -1802,6 +1849,18 @@ static const char *const text_zh_hans[UI_TEXT_COUNT] = {
     [UI_MENU_CONTACT_SHADOWS_DESC] = "屏幕空间接触阴影：补上阴影贴图遗漏的小阴影——脚边、石头下与草丛中。下次启动时生效。",
     [UI_MENU_PCSS] = "柔和太阳阴影（PCSS）",
     [UI_MENU_PCSS_DESC] = "阳光的阴影在物体接触地面处清晰，落得越远越柔和。下次启动时生效。",
+    [UI_MENU_TEX_COMPRESSION] = "纹理压缩",
+    [UI_MENU_TEX_COMPRESSION_DESC] = "游戏的 ASTC 纹理在显存中的存放方式。BC1 最轻，BC3 保留 alpha 通道，BC7 "
+                                     "最清晰、编码最重。关闭则不压缩（RGBA8），占用显存多得多。下次启动生效。",
+    [UI_MENU_BC7_CACHE] = "预计算 BC7 缓存",
+    [UI_MENU_BC7_CACHE_DESC] = "使用 BC7 压缩时，直接读取游戏旁的 cache/bc7 文件夹（由预计算工具生成），"
+                               "不必每次启动重新编码纹理。下次启动生效。",
+    [UI_MENU_MOUSE_CAMERA] = "鼠标视角",
+    [UI_MENU_MOUSE_CAMERA_DESC] = "鼠标转动视角的方式。Sparrow：本移植自己的转换，直接线性。Puddz："
+                                  "AstralChain-PC 移植的转换，速度带平滑。",
+    [UI_MENU_RESHADE] = "ReShade 在 HUD 之前",
+    [UI_MENU_RESHADE_DESC] = "安装 ReShade 插件后，特效只作用于场景，游戏界面随后绘制、不受影响。需要支持完整"
+                             "插件的 ReShade，并把 AstralChainHudComposite 技术放在预设最后。",
     [UI_MENU_MOTION_BLUR] = "运动模糊",
     [UI_MENU_MOTION_BLUR_DESC] = "游戏自带的运动模糊。关闭后，运动中的画面保持清晰。",
     [UI_MENU_DEPTH_OF_FIELD] = "景深",
@@ -1867,7 +1926,7 @@ SWKBD_ONLY(text_it, "Inserimento testo", "Inserisci un nome", "Cavallo", "OK", "
 SWKBD_ONLY(text_es, "Introducir texto", "Introduce un nombre", "Caballo", "Aceptar", "Cancelar",
            "Mando: A = Aceptar, B = Cancelar");
 SWKBD_ONLY(text_nl, "Tekstinvoer", "Voer een naam in", "Paard", "OK", "Annuleren", "Controller: A = OK, B = Annuleren");
-SWKBD_ONLY(text_pt, "Inserir texto", "Introduz um nome", "Cavalo", "OK", "Cancelar", "Comando: A = OK, B = Cancelar");
+SWKBD_ONLY(text_pt, "Inserir texto", "Introduz um nome", "Akira", "OK", "Cancelar", "Comando: A = OK, B = Cancelar");
 SWKBD_ONLY(text_zh_hant, "文字輸入", "請輸入名字", "馬兒", "確定", "取消", "手把：A 確定，B 取消");
 SWKBD_ONLY(text_ko, "문자 입력", "이름을 입력하세요", "말", "확인", "취소", "컨트롤러: A 확인, B 취소");
 

@@ -55,6 +55,10 @@ typedef enum {
     UI_MENU_AO, UI_MENU_AO_DESC, UI_MENU_AO_OFF, UI_MENU_AO_LOW, UI_MENU_AO_HIGH, UI_MENU_AO_GI,
     // contact shadows and percentage-closer soft shadows (vk_contact.c)
     UI_MENU_CONTACT_SHADOWS, UI_MENU_CONTACT_SHADOWS_DESC, UI_MENU_PCSS, UI_MENU_PCSS_DESC,
+    // the fork's own rows: texture compression and its precomputed cache (vk_astc.c, bc7_cache.h), the mouse
+    // camera conversion (input_mouse_stick) and the ReShade-before-HUD separation (vk_reshade.c)
+    UI_MENU_TEX_COMPRESSION, UI_MENU_TEX_COMPRESSION_DESC, UI_MENU_BC7_CACHE, UI_MENU_BC7_CACHE_DESC,
+    UI_MENU_MOUSE_CAMERA, UI_MENU_MOUSE_CAMERA_DESC, UI_MENU_RESHADE, UI_MENU_RESHADE_DESC,
     // post-processing toggles (vk_post.c): the game's own motion blur, depth of field, chromatic aberration
     UI_MENU_MOTION_BLUR, UI_MENU_MOTION_BLUR_DESC, UI_MENU_DEPTH_OF_FIELD, UI_MENU_DEPTH_OF_FIELD_DESC,
     UI_MENU_CHROMATIC_ABERRATION, UI_MENU_CHROMATIC_ABERRATION_DESC,

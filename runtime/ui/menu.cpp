@@ -742,6 +742,12 @@ static void tab_screen(float scale) {
     static const char *const aniso[] = {"auto", "game", "2", "4", "8", "16"};
     const char *aniso_names[] = {menu_text(UI_MENU_ANISO_AUTO), menu_text(UI_MENU_ANISO_GAME), "2x", "4x", "8x", "16x"};
     opt_choice_list("AC_ANISO", UI_MENU_ANISO, aniso, aniso_names, 6, UI_MENU_ANISO_DESC);
+    // Compresión de texturas del fork (vk_astc.c): los valores que acepta la clave son auto, bc1, 1 (BC3
+    // forzado), bc7 y 0 (sin compresión, RGBA8). La caché BC7 precómputada (bc7_cache.h) solo actúa con BC7.
+    static const char *const astc_bc[] = {"auto", "bc1", "1", "bc7", "0"};
+    static const char *const astc_bc_names[] = {"Auto", "BC1", "BC3", "BC7", "Off (RGBA8)"};
+    opt_choice_list("AC_ASTC_BC", UI_MENU_TEX_COMPRESSION, astc_bc, astc_bc_names, 5, UI_MENU_TEX_COMPRESSION_DESC);
+    opt_toggle("AC_BC7_CACHE", UI_MENU_BC7_CACHE, UI_MENU_BC7_CACHE_DESC);
     row_shadow_scale();
     // off, low, high, gi: the names in the order of cfg.c's values for AO
     static const UiTextId ao[] = {UI_MENU_AO_OFF, UI_MENU_AO_LOW, UI_MENU_AO_HIGH, UI_MENU_AO_GI};
@@ -773,6 +779,9 @@ static void tab_game(float scale) {
     opt_choice("AC_OPERATION_MODE", UI_MENU_OPERATION_MODE, mode, 2, UI_MENU_OPERATION_MODE_DESC);
     opt_toggle("AC_ASSUME_FOCUS", UI_MENU_ASSUME_FOCUS, UI_MENU_ASSUME_FOCUS_DESC);
     opt_toggle("AC_HUD", UI_MENU_HUD, UI_MENU_HUD_DESC);
+    // La separación de ReShade del fork (vk_reshade.c): en vivo, junto al interruptor del HUD porque actúa
+    // sobre cómo se dibuja la interfaz frente a la escena.
+    opt_toggle("AC_RESHADE", UI_MENU_RESHADE, UI_MENU_RESHADE_DESC);
     opt_end();
 }
 
@@ -932,6 +941,10 @@ static void tab_controls(float scale) {
                pad ? stick_note[1] : nullptr, "AC_STICK_DEADZONE");
     opt_slider("AC_STICK_SENS", UI_MENU_STICK_SENS, 0.1f, 3, UI_MENU_STICK_SENS_DESC, 0.05f, "%.2f");
     opt_slider("AC_MOUSE_SENS", UI_MENU_MOUSE_SENS, 0, 10, UI_MENU_MOUSE_SENS_DESC, 0.1f, "%.1f");
+    // La conversión de cámara con ratón del fork: sparrow (la del port) o puddz (la de AstralChain-PC), en vivo.
+    static const char *const mouse_cam[] = {"sparrow", "puddz"};
+    static const char *const mouse_cam_names[] = {"Sparrow", "Puddz"};
+    opt_choice_list("AC_MOUSE_CAMERA", UI_MENU_MOUSE_CAMERA, mouse_cam, mouse_cam_names, 2, UI_MENU_MOUSE_CAMERA_DESC);
     row_walk_key();
     opt_slider("AC_WALK_SCALE", UI_MENU_WALK_SCALE, 0.2f, 0.9f, UI_MENU_WALK_SCALE_DESC, 0.01f, "%.2f");
     binds_rows(scale);
