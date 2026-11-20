@@ -9,12 +9,10 @@
 
 uniform bool HudLayerActive;   // lo gobierna el addon; a 0 la técnica no pinta nada
 
-texture HudLayerTex : HUDLAYER
-{
-	Width = BUFFER_WIDTH;
-	Height = BUFFER_HEIGHT;
-	Format = RGBA8;
-};
+// Una textura alimentada por un addon se declara SIN cuerpo: ReShade la crea y la rellena el addon en
+// cada frame. Con cuerpo (Width/Height/Format) el compilador de efectos la rechaza (error X3000) y la
+// técnica entera no compilaba: la separación del HUD nunca estuvo activa hasta este arreglo.
+texture HudLayerTex : HUDLAYER;
 
 sampler HudLayerSampler
 {
