@@ -304,7 +304,8 @@ static void tex_holding(char *out, size_t n) {
     case VK_ASTC_NATIVE: snprintf(out, n, "ASTC native"); break;
     case VK_ASTC_GPU: case VK_ASTC_CHECK: {
         int bc = vk_astc_bc();
-        snprintf(out, n, bc == 2 ? "ASTC decoded to BC1 (opaque) / BC3" : bc == 1 ? "ASTC decoded to BC3"
+        // El 3 es el BC7 de la Fase 2 del fork: sin este caso caía en el texto de RGBA8 y el panel mentía.
+        snprintf(out, n, bc == 3 ? "ASTC decoded to BC7" : bc == 2 ? "ASTC decoded to BC1 (opaque) / BC3" : bc == 1 ? "ASTC decoded to BC3"
                                                                                  : "ASTC decoded to RGBA8");
         break;
     }
