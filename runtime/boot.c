@@ -10,6 +10,7 @@
 #include <stdlib.h>
 #include <string.h>
 
+#include "cam_direct.h"
 #include "cfg.h"
 #include "cheats.h"
 #include "fs.h"
@@ -246,6 +247,7 @@ static void series_shot(const tex_t *t, uint64_t n) {
 // frame_step_world_us) passed S seconds, so a run covers the same game time at any frame rate; any other frame is
 // counted by the back end only.
 void rt_frame_presented(const tex_t *t, uint64_t n) {
+    cam_direct_frame(n);   // la cámara directa aplica el ratón y, si toca, vuelca el escaneo
     const RtConfig *cfg = rt_config();
     series_shot(t, n);
     int64_t w = cfg->seconds ? frame_step_world_us() : -1;

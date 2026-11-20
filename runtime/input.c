@@ -13,6 +13,7 @@
 #include <string.h>
 #include <SDL3/SDL.h>
 
+#include "cam_direct.h"
 #include "cfg.h"
 #include "fs.h"
 #include "host.h"
@@ -311,24 +312,26 @@ static void walk_get(void) {
 // turn rate, so AC_MOUSE_SENS alone sets the mouse's speed; below 1 the sample stays within the stick's range, so the
 // mouse's top speed drops with the factor.
 //
-// El movimiento tiene dos adaptaciones entre las que elige AC_MOUSE_CAMERA: «sparrow», la del port
-// base (la conversión lineal de input_mouse_stick, sin suelo ni retención), y «puddz», la de Puddz
-// (mouse_look_stick de su port), que va por velocidad suavizada y remapea la deflexión. Los botones
-// del ratón y los binds no cambian con el modo: solo cambia cómo el movimiento se convierte en stick.
-static int mouse_cam_puddz = -1;        // AC_MOUSE_CAMERA: -1 sin leer, 0 = sparrow, 1 = puddz; en vivo (cfg_version)
+// El movimiento tiene tres adaptaciones entre las que elige AC_MOUSE_CAMERA: «sparrow», la del port
+// base (la conversión lineal de input_mouse_stick, sin suelo ni retención); «puddz», la de Puddz
+// (mouse_look_stick de su port), que va por velocidad suavizada y remapea la deflexión; y «direct»,
+// la cámara directa de cam_direct.c, que no emula el stick: los conteos van al módulo que los
+// escribe en el estado de la cámara del juego. Los botones del ratón y los binds no cambian con el
+// modo: solo cambia qué se hace con el movimiento.
+static int mouse_cam_mode = -1;         // AC_MOUSE_CAMERA: -1 sin leer, 0 = sparrow, 1 = puddz, 2 = direct; en vivo
 static unsigned mouse_cam_seen;
 
-static int mouse_camera_puddz(void) {
+static int mouse_camera_mode(void) {
     unsigned ver = cfg_version();
-    if (mouse_cam_puddz >= 0 && ver == mouse_cam_seen) return mouse_cam_puddz;
+    if (mouse_cam_mode >= 0 && ver == mouse_cam_seen) return mouse_cam_mode;
     mouse_cam_seen = ver;
-    const char *v = cfg_value("AC_MOUSE_CAMERA");   // «sparrow» (el defecto) o «puddz»
-    int p = *v && name_matches(v, "puddz") ? 1 : 0;
-    if (p != mouse_cam_puddz) {
-        mouse_cam_puddz = p;
-        rt_log("input: mouse camera %s", p ? "puddz" : "sparrow");
+    const char *v = cfg_value("AC_MOUSE_CAMERA");   // «sparrow» (el defecto), «puddz» o «direct»
+    int m = *v && name_matches(v, "puddz") ? 1 : *v && name_matches(v, "direct") ? 2 : 0;
+    if (m != mouse_cam_mode) {
+        mouse_cam_mode = m;
+        rt_log("input: mouse camera %s", m == 2 ? "direct" : m == 1 ? "puddz" : "sparrow");
     }
-    return mouse_cam_puddz;
+    return mouse_cam_mode;
 }
 
 // La muestra del modo puddz desde la velocidad suavizada (conteos por segundo): la magnitud se
@@ -352,9 +355,11 @@ static void mouse_camera(int32_t out[2]) {
     static int32_t held[2];
     uint64_t now = plat_now_ns();
     int32_t dx, dy;
-    int puddz = mouse_camera_puddz();
+    int mode = mouse_camera_mode();
+    int puddz = mode == 1;
     if (!ikb_captured()) {
         ikb_mouse_take(&dx, &dy);
+        cam_direct_reset();   // sin captura no queda giro pendiente para la cámara directa
         held[0] = held[1] = 0;
         frame = ~0ull;
         t_report = 0;   // ni la velocidad ni la retención sobreviven a soltar el cursor
@@ -364,7 +369,13 @@ static void mouse_camera(int32_t out[2]) {
         double age = frame == ~0ull ? 0 : (double)(now - t0) / 1e9;
         if (fr != frame) {
             ikb_mouse_take(&dx, &dy);
-            if (!puddz) {
+            if (mode == 2 && cam_direct_active()) {
+                // Cámara directa: los conteos van al módulo, que los suma al estado de la cámara;
+                // el stick queda centrado para que el juego no sume su propio giro. Si el módulo
+                // no está activo (estado sin localizar), se cae a la conversión sparrow de debajo.
+                cam_direct_push(dx, dy);
+                held[0] = held[1] = 0;
+            } else if (!puddz) {
                 // Sparrow, tal cual el port base: la muestra de este frame, sin suelo ni retención.
                 double dt = age < 0.004 ? 0.004 : age > 0.1 ? 0.1 : age;
                 input_mouse_stick(dx, dy, dt, mouse_sens_get(), held);

@@ -37,7 +37,7 @@ static const char *const known[] = {
     "BIND_PLUS", "BIND_R", "BIND_RCLICK", "BIND_RIGHT", "BIND_RSTICK_DOWN", "BIND_RSTICK_LEFT", "BIND_RSTICK_RIGHT", "BIND_RSTICK_UP",
     "BIND_SKIP", "BIND_STATS", "BIND_UP", "BIND_X", "BIND_Y",
     "BAR_ELIDE", "BAR_NARROW",
-    "BIND_ZL", "BIND_ZR", "BLOCK_VIEWS_3D", "CHROMATIC_ABERRATION", "CLEAR_LOAD", "CLOTH_REALTIME", "COLOR_BRIGHTNESS", "COLOR_CONTRAST", "COLOR_GAMMA",
+    "BIND_ZL", "BIND_ZR", "BLOCK_VIEWS_3D", "CAM_SCAN", "CHROMATIC_ABERRATION", "CLEAR_LOAD", "CLOTH_REALTIME", "COLOR_BRIGHTNESS", "COLOR_CONTRAST", "COLOR_GAMMA",
     "COLOR_PRESET", "COLOR_SATURATION", "CONTACT_DEBUG", "CONTACT_SHADOWS", "CORE_DIAG", "CPU_BOOST", "CPU_BOOST_SPIN_US", "CRIT", "CRIT_OUT",
     "DECK_AA_MIGRATED", "DECK_RES_MIGRATED", "DEPTH_OF_FIELD", "DESC_TEMPLATE", "DEVICE_PROFILE", "DISPATCH_CACHE", "DLAA", "DLAA_JITTER", "DLAA_MV", "DLAA_MVDEBUG", "DLAA_OBJMV", "DLAA_TIMES", "DLSS", "DRAW_DISTANCE", "DRAW_DISTANCE_PATCH", "DUMP", "DUMP_AUTO", "DUMP_BUF", "DUMP_DIR", "DUMP_DRAWS",
     "DUMP_KEY", "DUMP_LOG", "DUMP_N", "DUMP_SKIP_RUNS", "DUMP_TEX", "DUMP_UBO", "DYN_DELTA", "EXEFS", "FEEDBACK", "FIX_C0", "FIX_ZERO", "FLIGHT", "FLIGHT_AT", "FLIGHT_DIR", "FLIGHT_FRAMES",
@@ -55,7 +55,7 @@ static const char *const known[] = {
     "SHADER_MEMO", "SHADOW", "SHADOW_RANGE", "SHADOW_RES", "SHADOW_SCALE", "SHADOW_SNAP", "SHARED_FONTS", "SHARPNESS", "SHOTS", "SHOTS_DIR",
     "SHOTS_FULL", "SKIP_FS", "SKIP_VS", "SPEED_PROBE", "SPIN", "SPIN_HANDOFF_US", "SPIN_SLEEP_US", "SPLIT_DRAWS", "SPLIT_US", "STICK_DEADZONE", "STICK_SENS",
     "SWKBD_ANSWER",
-    "SWKBD_TEST", "TEST_AUDIO_STALL", "TEST_FREEZE", "TEST_HITCH", "TEST_PAD", "TEST_PREPARE_SHADERS", "TEX_ALIAS", "TEX_CACHE_MB", "TEX_LOD_BIAS", "TEX_MEMO", "TEX_MIP_SKIP", "TEX_PREFETCH", "TEX_VRAM_PRESSURE", "TIMER_1MS", "TRACE", "UBO_SNAPSHOT", "UPSCALER", "UPSCALING", "UPSCALING_FAIL",
+    "SWKBD_TEST", "TEST_AUDIO_STALL", "TEST_FREEZE", "TEST_HITCH", "TEST_PAD", "TEST_PREPARE_SHADERS", "TEX_ALIAS", "TEX_CACHE_MB", "TEX_MEMO", "TEX_MIP_SKIP", "TEX_PREFETCH", "TEX_VRAM_PRESSURE", "TIMER_1MS", "TRACE", "UBO_SNAPSHOT", "UPSCALER", "UPSCALING", "UPSCALING_FAIL",
     "UPSCALING_QUALITY", "VERIFY_MIB", "VK_DYN_A2C", "VK_DYN_VERTEX", "VK_NO_FLOAT64",
     "VK_PRESENT", "VK_RECORDER", "VK_SSBO_ALIGN", "VK_SUBGROUP", "VK_SUBGROUP_PIN", "VK_VALIDATION", "VOLUME", "VRAM_HEADROOM", "VRAM_LIMIT_MIB", "VS_OUTS",
     "WALK_KEY", "WALK_SCALE", "WATCH_USED", "WB_EXACT", "WB_FENCE_LIMIT", "WIDE_PATCH", "WINDOW_SIZE", "XESS", "XESS_JITTER_SCALE", "XESS_MV_SCALE",
@@ -89,7 +89,7 @@ static const struct { const char *key, *section; } sections[] = {
     {"MOTION", "input"}, {"RUMBLE_STRENGTH", "input"}, {"RUMBLE_CURVE", "input"}, {"RUMBLE_TRIGGERS", "input"},
     {"PAD_LAYOUT", "input"}, {"PROMPTS", "input"}, {"STICK_DEADZONE", "input"}, {"LSTICK_DEADZONE", "input"}, {"RSTICK_DEADZONE", "input"},
     {"STICK_SENS", "input"},
-    {"MOUSE_CAMERA", "input"}, {"MOUSE_SENS", "input"}, {"WALK_KEY", "input"}, {"WALK_SCALE", "input"}, {"INPUT_RECORD", "input"},
+    {"CAM_SCAN", "input"}, {"MOUSE_CAMERA", "input"}, {"MOUSE_SENS", "input"}, {"WALK_KEY", "input"}, {"WALK_SCALE", "input"}, {"INPUT_RECORD", "input"},
     {"BIND_A", "input"}, {"BIND_B", "input"}, {"BIND_X", "input"}, {"BIND_Y", "input"}, {"BIND_LCLICK", "input"},
     {"BIND_RCLICK", "input"}, {"BIND_L", "input"}, {"BIND_R", "input"}, {"BIND_ZL", "input"}, {"BIND_ZR", "input"},
     {"BIND_PLUS", "input"}, {"BIND_MINUS", "input"}, {"BIND_LEFT", "input"}, {"BIND_UP", "input"},
@@ -102,14 +102,11 @@ static const struct { const char *key, *section; } sections[] = {
     {"PIPE_PREBUILD", "performance"},
     {"PREWARM_XLATE", "performance"}, {"GPL", "performance"}, {"ASTC", "performance"}, {"MEMORY", "performance"},
     {"TEX_ALIAS", "performance"}, {"TEX_CACHE_MB", "performance"}, {"TEX_VRAM_PRESSURE", "performance"}, {"ASTC_BC", "performance"}, {"BC7_CACHE", "performance"}, {"TEX_MIP_SKIP", "performance"}, {"TEX_PREFETCH", "performance"}, {"LOD_GUARD", "performance"}, {"FIX_C0", "performance"}, {"FIX_ZERO", "performance"},
-    {"TEX_LOD_BIAS", "performance"},
     {"BIND_SKIP", "performance"}, {"SHADER_MEMO", "performance"}, {"PIPE_MEMO", "performance"}, {"TEX_MEMO", "performance"}, {"DESC_TEMPLATE", "performance"},
     {"PUSH_SKIP", "performance"}, {"SPLIT_DRAWS", "performance"}, {"SPLIT_US", "performance"}, {"VK_VALIDATION", "performance"},
     {"VK_DYN_VERTEX", "performance"}, {"VK_DYN_A2C", "performance"}, {"VK_SUBGROUP_PIN", "performance"},
     {"TRACE", "diagnostics"}, {"FLIGHT", "diagnostics"}, {"FLIGHT_SPIKE_MS", "diagnostics"},
     {"WB_FENCE_LIMIT", "diagnostics"}, {"WB_EXACT", "diagnostics"},
-    {"POST_DEBUG", "diagnostics"}, {"CONTACT_DEBUG", "diagnostics"}, {"AO_DEBUG", "diagnostics"},
-    {"BC7_CACHE_LOG", "diagnostics"},
 };
 
 // The settings the menu shows: the value in effect when the key is unset, and what the key accepts. The only place a
@@ -170,8 +167,9 @@ static const CfgMeta metas[] = {
     {"PROMPTS", "auto", "auto|nintendo|xbox|playstation|keyboard", RESTART},
     {"STICK_DEADZONE", "8", "0..50", LIVE}, {"STICK_SENS", "1", "0.1..3", RESTART},
     {"LSTICK_DEADZONE", "", "0..50", LIVE}, {"RSTICK_DEADZONE", "", "0..50", LIVE},
-    {"MOUSE_CAMERA", "sparrow", "sparrow|puddz", LIVE},
+    {"MOUSE_CAMERA", "sparrow", "sparrow|puddz|direct", LIVE},
     {"MOUSE_SENS", "1", "0..10", LIVE},
+    {"CAM_SCAN", "0", "0|1", LIVE},   // escáner de la cámara directa: vuelca el montón del huésped (cam_direct.c)
     {"WALK_KEY", "none", NULL, LIVE}, {"WALK_SCALE", "0.51", "0.2..0.9", LIVE},
     {"MENU_LANG", "", "en|ru|pt-BR|zh-Hans", LIVE},
     {"AMIIBO_DIR", "", NULL, LIVE},
@@ -186,7 +184,6 @@ static const CfgMeta metas[] = {
     // textures and memory
     {"ASTC", "auto", "auto|gpu|native|cpu", RESTART}, {"MEMORY", "auto", "auto|import|mirror|verify", RESTART},
     {"TEX_ALIAS", "1", "0|1", RESTART}, {"TEX_CACHE_MB", "", "", RESTART}, {"TEX_VRAM_PRESSURE", "90", "0..100", RESTART}, {"ASTC_BC", "auto", "auto|bc1|bc7|1|0", RESTART}, {"BC7_CACHE", "1", "0|1", RESTART}, {"TEX_MIP_SKIP", "0", "0|1024|2048", RESTART}, {"TEX_PREFETCH", "1", "0|1", RESTART}, {"ZSTD_NATIVE", "1", "0|1", RESTART}, {"ZSTD_CHECK", "0", "0|1", RESTART},
-    {"TEX_LOD_BIAS", "0", "-2..0", RESTART},
     // render fixes
     {"LOD_GUARD", "1", "0|1", RESTART}, {"FIX_C0", "1", "0|1", RESTART}, {"FIX_ZERO", "1", "0|1", RESTART},
     {"BIND_SKIP", "1", "0|1", RESTART}, {"SHADER_MEMO", "1", "0|1", RESTART}, {"PIPE_MEMO", "1", "0|1", RESTART}, {"TEX_MEMO", "1", "0|1", RESTART},
@@ -200,9 +197,6 @@ static const CfgMeta metas[] = {
     {"TRACE", "", NULL, RESTART}, {"FLIGHT", "0", "0|1", RESTART}, {"FLIGHT_SPIKE_MS", "100", "0..60000", RESTART},
     {"WB_FENCE_LIMIT", "65536", "0..1073741824", RESTART}, {"WB_EXACT", "1", "0|1", RESTART},
     {"INPUT_RECORD", "", NULL, RESTART},
-    // la pestaña Debug del menú: vistas y registros de depuración, todos leídos al arrancar
-    {"POST_DEBUG", "0", "0|1", RESTART}, {"CONTACT_DEBUG", "0", "0|1", RESTART},
-    {"AO_DEBUG", "0", "0|1|2|3", RESTART}, {"BC7_CACHE_LOG", "0", "0|1", RESTART},
 };
 
 static int is_known(const char *key) {
