@@ -31,10 +31,10 @@ from . import ini
 from . import layout as layouts
 from . import state as statefile
 from .layout import SUPPORTED
-from .guilogic import (DONE, FAILED, INSTALL, PENDING, PREPARE_LEVELS, RUNNING, SKIPPED, UI_LANGUAGE_LABELS,
-                       UI_LANGUAGES, UPDATE, Catalog, Form, Model, Process, amount, default_game_language,
-                       describe_event, find_keys, inspect_folder, install_subfolder, launcher_game_folder,
-                       parse_line, prepare_command, sibling_game_files, windows_ui_language)
+from .guilogic import (DONE, FAILED, INSTALL, PENDING, RUNNING, SKIPPED, UI_LANGUAGE_LABELS, UI_LANGUAGES, UPDATE,
+                       Catalog, Form, Model, Process, amount, default_game_language, describe_event, find_keys,
+                       inspect_folder, install_subfolder, launcher_game_folder, parse_line, sibling_game_files,
+                       windows_ui_language)
 
 POLL_MS = 100
 GLYPH = {PENDING: '\u25cb', RUNNING: '\u25b6', DONE: '\u2714', SKIPPED: '\u2013', FAILED: '\u2716'}
@@ -89,8 +89,6 @@ class App:
         # base, update, keys: shared by both forms; dest: the first install's folder; update_dest: the installed folder
         self.vars = {n: tk.StringVar() for n in ('base', 'update', 'keys', 'dest', 'update_dest')}
         self.lang_vars = {INSTALL: tk.StringVar(), UPDATE: tk.StringVar()}
-        self.prepare_var = tk.StringVar()
-        self.prepare_code = 'full'   # nivel de preparación elegido; selected_prepare() lo lee del desplegable
         self.lang_codes = {INSTALL: default_game_language(ui_lang), UPDATE: default_game_language(ui_lang)}
         self.lang_boxes = {}
         self.lang_touched = {INSTALL: False, UPDATE: False}
@@ -227,10 +225,6 @@ class App:
             code = self.selected_lang(mode)
             box.configure(values=[self.lang_label(c) for c in ini.LANGUAGES])
             self.lang_vars[mode].set(self.lang_label(code))
-        if hasattr(self, 'prepare_box'):
-            level = self.selected_prepare()
-            self.prepare_box.configure(values=[self.cat('ui.prepare_' + c) for c in PREPARE_LEVELS])
-            self.prepare_var.set(self.cat('ui.prepare_' + level))
 
     def selected_lang(self, mode):
         """The game language code behind a form's combobox text (kept when it is not one of the labels)."""
@@ -240,24 +234,6 @@ class App:
                 if shown == Catalog(lang)('lang.' + code):
                     return code
         return self.lang_codes[mode]
-
-    def selected_prepare(self):
-        """El nivel de preparación tras el texto del desplegable (se conserva si no es una de las etiquetas)."""
-        shown = self.prepare_var.get()
-        for code in PREPARE_LEVELS:
-            for lang in UI_LANGUAGES:
-                if shown == Catalog(lang)('ui.prepare_' + code):
-                    return code
-        return self.prepare_code
-
-    def prepare_row(self, parent, row):
-        self.label(parent, 'ui.prepare').grid(row=row, column=0, sticky='w', pady=self.px(3),
-                                              padx=(0, self.px(10)))
-        box = ttk.Combobox(parent, textvariable=self.prepare_var, state='readonly', width=30)
-        box.grid(row=row, column=1, sticky='w', pady=self.px(3))
-        self.prepare_box = box
-        box.configure(values=[self.cat('ui.prepare_' + c) for c in PREPARE_LEVELS])
-        self.prepare_var.set(self.cat('ui.prepare_' + self.prepare_code))
 
     # ---- screens --------------------------------------------------------------------------------------------------
 
@@ -437,17 +413,6 @@ class App:
         grid.columnconfigure(1, weight=1)
         self.update_marks = self.file_rows(grid)
 
-        # Preparar shaders: una acción sobre la instalación ya hecha, no parte de la actualización.
-        self.prepare_frame = ttk.Frame(f)
-        self.prepare_frame.columnconfigure(1, weight=1)
-        self.label(self.prepare_frame, 'ui.prepare').grid(
-            row=0, column=0, columnspan=4, sticky='w', pady=(0, self.px(2)))
-        self.prepare_row(self.prepare_frame, 1)
-        self.prepare_button = self.button(self.prepare_frame, 'ui.prepare_run', self.start_prepare)
-        self.prepare_button.grid(row=1, column=2, padx=(self.px(8), 0), pady=self.px(3))
-        self.prepare_status = self.wrapped(self.prepare_frame, width=WRAP - 180, style='Muted.TLabel')
-        self.prepare_status.grid(row=2, column=1, columnspan=3, sticky='w', pady=(self.px(1), self.px(2)))
-
         self.update_error_row = ttk.Frame(f)
         self.update_error_row.pack(side='bottom', fill='x', pady=(self.px(8), 0))
         self.update_error = self.wrapped(self.update_error_row, width=WRAP - 160, style='Err.TLabel')
@@ -532,8 +497,7 @@ class App:
                         keys=self.vars['keys'].get() if files else '', lang=self.selected_lang(UPDATE),
                         dest=self.vars['update_dest'].get(), mode=UPDATE)
         return Form(base=self.vars['base'].get(), update=self.vars['update'].get(), keys=self.vars['keys'].get(),
-                    lang=self.selected_lang(INSTALL),
-                    dest=self.vars['dest'].get(), mode=INSTALL)
+                    lang=self.selected_lang(INSTALL), dest=self.vars['dest'].get(), mode=INSTALL)
 
     def update_files_shown(self):
         folder = inspect_folder(self.vars['update_dest'].get())
@@ -607,20 +571,6 @@ class App:
                 self.update_files.pack(fill='x', pady=(self.px(10), 0), after=self.update_lang_frame)
         else:
             self.update_files.pack_forget()
-        if folder.kind == 'install':
-            anchor = self.update_files if self.update_files.winfo_manager() else self.update_lang_frame
-            if not self.prepare_frame.winfo_manager():
-                self.prepare_frame.pack(fill='x', pady=(self.px(10), 0), after=anchor)
-            record = folder.prepare_record
-            if record:
-                self.prepare_status.configure(
-                    text=self.cat('ui.prepare_done', level=self.cat('ui.prepare_' + record.get('level', 'full'))))
-            elif folder.shaders_ready:
-                self.prepare_status.configure(text=self.cat('ui.prepare_done_files'))
-            else:
-                self.prepare_status.configure(text=self.cat('ui.prepare_missing'))
-        else:
-            self.prepare_frame.pack_forget()
         self.refresh_marks(self.update_marks)
         self.show_problems(UPDATE, only_folder=True)
 
@@ -717,19 +667,6 @@ class App:
         self.run_dest = form.dest.strip()
         self.begin(command, self.layout.root)
 
-    def start_prepare(self):
-        """El botón de preparar shaders de la pantalla de actualización: corre la acción --prepare-shaders
-        sobre la carpeta elegida, con el nivel del desplegable, en la misma pantalla de corrida."""
-        folder = inspect_folder(self.vars['update_dest'].get())
-        if folder.kind != 'install':
-            return
-        python = Path(sys.executable) if self.layout.dev else self.layout.python
-        command = prepare_command(python, self.vars['update_dest'].get(), self.selected_prepare(),
-                                  root=self.layout.root if self.layout.dev else None,
-                                  temp=self.run_args.get('temp'))
-        self.run_dest = self.vars['update_dest'].get().strip()
-        self.begin(command, self.layout.root)
-
     def begin(self, command, cwd):
         self.model = Model()
         self.model.dest = self.run_dest
@@ -805,7 +742,7 @@ class App:
                                                           if state in (SKIPPED, FAILED) else ''),
                            font=(self.ui_font, 10, 'bold') if state == RUNNING else (self.ui_font, 10))
         mode = m.mode or ('update' if self.mode == UPDATE else 'install')
-        self.run_header.configure(text=self.cat('ui.running_' + mode if mode in ('install', 'resume', 'update', 'prepare')
+        self.run_header.configure(text=self.cat('ui.running_' + mode if mode in ('install', 'resume', 'update')
                                                 else 'ui.running_install'))
         if m.current and m.phase:
             text = self.cat(f'phase.{m.current}.{m.phase}')

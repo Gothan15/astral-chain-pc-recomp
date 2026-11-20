@@ -885,15 +885,16 @@ class Prepare(Step):
     def key(self, ctx):
         layout = ctx.layout
         xlate_id = layout.xlate.with_suffix('.id')
+        tools = [layout.tools / n for n in ('prepare_shaders.py', 'shader_census.py', 'pack_shader_cache.py')]
         # not the compile key: a rebuild for the mods' code cheats keeps the prepared shaders
-        return fingerprint('prepare-4', ctx.keys['extract'], runtime_key(ctx), layout.xlate, xlate_id)
+        return fingerprint('prepare-2', ctx.keys['extract'], runtime_key(ctx), layout.xlate, xlate_id,
+                           layout.shader_answers, *tools)
 
     def current(self, ctx, record):
-        # El paso solo coloca el traductor: preparar los shaders ya no es parte de instalar ni de actualizar,
-        # es la acción aparte de la CLI (--prepare-shaders) que el jugador corre después.
         dest = ctx.dest
         xlate = dest / ctx.layout.xlate.name
-        return xlate.is_file() and file_sha256(xlate) == record.get('xlate_sha256')
+        return ((dest / 'shader-prepared.bin').is_file() and (dest / 'shader-cache' / 'shader-cache.pack').is_file()
+                and xlate.is_file() and file_sha256(xlate) == record.get('xlate_sha256'))
 
     def run(self, ctx):
         layout, rep, dest = ctx.layout, ctx.reporter, ctx.dest
@@ -917,45 +918,34 @@ class Prepare(Step):
         else:
             remove(xlate.with_suffix('.id'))
 
+        skipped = [0]
+
+        def parse(line):
+            m = TRANSLATED.search(line)
+            if m:
+                rep.progress('prepare', 'translate', int(m.group(1)), int(m.group(2)), 'shaders')
+            elif SKIPPED.search(line):
+                skipped[0] = int(SKIPPED.search(line).group(1))
+            elif 'variants' in line:
+                rep.progress('prepare', 'translate', force=True)
+            elif 'gfx_shader: prepare:' in line and 'translated' in line and 'programs' in line:
+                rep.progress('prepare', 'libraries', force=True)
+
+        rep.progress('prepare', 'seed', force=True)
+        code, log = run_tool(ctx, 'prepare', layout.tools / 'prepare_shaders.py',
+                             [dest, '--version', version_tag(game_version(ctx)), '--romfs', dest / 'romfs',
+                              '--answers', layout.shader_answers], parse)
+        if code or not (dest / 'shader-prepared.bin').is_file():
+            raise InstallError('prepare.shaders_failed', code=code, log=str(log))
+        if skipped[0]:
+            rep.warning('warn.shaders_skipped', count=skipped[0], log=str(log))
+
+        # One shader-cache.pack instead of four files per shader (~117,000): astralchain.exe reads the pack first.
+        rep.progress('prepare', 'pack', force=True)
+        code, log = run_tool(ctx, 'prepare', layout.tools / 'pack_shader_cache.py', [dest / 'shader-cache'])
+        if code:
+            raise InstallError('prepare.pack_failed', code=code, log=str(log))
         return {'xlate_sha256': file_sha256(xlate)}
-
-
-def prepare_shaders(ctx, level):
-    """La acción de preparar los shaders de una instalación ya hecha (la CLI con --prepare-shaders): no es un
-    paso de instalar ni de actualizar, sino algo que el jugador corre después, cuando quiere. Traduce las
-    variantes del nivel pedido, calienta la caché del driver y empaqueta la caché en un solo archivo;
-    devuelve el registro que la CLI guarda en el estado de la instalación."""
-    layout, rep, dest = ctx.layout, ctx.reporter, ctx.dest
-    skipped = [0]
-
-    def parse(line):
-        m = TRANSLATED.search(line)
-        if m:
-            rep.progress('prepare', 'translate', int(m.group(1)), int(m.group(2)), 'shaders')
-        elif SKIPPED.search(line):
-            skipped[0] = int(SKIPPED.search(line).group(1))
-        elif 'variants' in line:
-            rep.progress('prepare', 'translate', force=True)
-        elif 'gfx_shader: prepare:' in line and 'translated' in line and 'programs' in line:
-            rep.progress('prepare', 'libraries', force=True)
-
-    rep.progress('prepare', 'seed', force=True)
-    args = [dest, '--version', version_tag(game_version(ctx)), '--romfs', dest / 'romfs',
-            '--answers', layout.shader_answers]
-    if level == 'essential':
-        args.append('--no-defaults')   # solo las variantes grabadas, sin la de por defecto de cada shader
-    code, log = run_tool(ctx, 'prepare', layout.tools / 'prepare_shaders.py', args, parse)
-    if code or not (dest / 'shader-prepared.bin').is_file():
-        raise InstallError('prepare.shaders_failed', code=code, log=str(log))
-    if skipped[0]:
-        rep.warning('warn.shaders_skipped', count=skipped[0], log=str(log))
-
-    # One shader-cache.pack instead of four files per shader (~117,000): astralchain.exe reads the pack first.
-    rep.progress('prepare', 'pack', force=True)
-    code, log = run_tool(ctx, 'prepare', layout.tools / 'pack_shader_cache.py', [dest / 'shader-cache'])
-    if code:
-        raise InstallError('prepare.pack_failed', code=code, log=str(log))
-    return {'level': level, 'release': layout.release}
 
 
 # ---- 7. clean up
