@@ -36,7 +36,7 @@ static struct {
     uint64_t c4;
     // Diagnóstico de una sola vez por puerta (2026-11-20: en la sesión de Gothan la marcha no disparó y
     // ninguna puerta escribía nada): cada línea marca hasta dónde llegó la cadena en una corrida suya.
-    int d_scene, d_storage, d_pair, d_comp, d_inpass, d_sanity, d_views;
+    int d_scene, d_storage, d_pair, d_comp, d_inpass, d_sanity, d_views, d_scan;
     uint64_t c4_size;                  // el último tamaño visto en el ubo[1][1] de fragmento
 } C;
 
@@ -224,6 +224,10 @@ void vk_contact_pass_begin(VkExec *ex) {
     if (!C.ok) return;
     // The camera block: c4 of the fragment stage, 0x940 bytes. The composite binds it only after its pass begins, so
     // the newest one seen at any pass start serves.
+    // (2026-11-21: en Astral Chain el hueco [1][1] trae bloques de 0x100, no el de cámara de 0x940 heredado de
+    // TotK — la sesión de Gothan lo confirmó con la línea de diagnóstico. Por eso el escaneo del composite,
+    // más abajo, busca el bloque en los 18 huecos de fragmento y lo adopta si su contenido pasa la misma
+    // comprobación de cordura que hace el flush: sol casi unitario, proyección positiva y far razonable.)
     const p_bind_buf *b = &ex->ubo[1][1];
     if (b->addr) {
         C.c4_size = b->size;
@@ -245,6 +249,29 @@ void vk_contact_pass_begin(VkExec *ex) {
         return;
     }
     if (is_composite(ex)) {
+        // Escaneo de descubrimiento (una sola vez por sesión): sin bloque de cámara, se recorren los huecos
+        // de fragmento ligados al empezar el composite; cada candidato con tamaño para los desplazamientos
+        // que lee el flush (el mayor es el float 178) se sonda con la misma cordura, y el primero que la
+        // pasa queda adoptado como bloque de cámara. El log deja el mapa completo para afinar a mano si
+        // ninguno pasa (el diseño interno del bloque de este juego podría diferir del heredado).
+        if (!C.c4 && !C.d_scan) {
+            C.d_scan = 1;
+            for (int i = 0; i < 18; i++) {
+                const p_bind_buf *s = &ex->ubo[1][i];
+                if (!s->addr) continue;
+                rt_log("vk: contact diag: fragment ubo[1][%d] size 0x%llx", i, (unsigned long long)s->size);
+                if (s->size < 720) continue;
+                const float *u = (const float *)(uintptr_t)s->addr;
+                float lx = -u[44 * 4 + 0], ly = -u[44 * 4 + 1], lz = -u[44 * 4 + 2];
+                float ll = sqrtf(lx * lx + ly * ly + lz * lz);
+                float px = u[7 * 4 + 0], py = u[8 * 4 + 1], zfar = u[14 * 4 + 1];
+                int sane = ll > 0.5f && ll < 2.0f && px > 0 && py > 0 && zfar > 1 && zfar < 100000;
+                rt_log("vk: contact diag: probe [1][%d]: sun length %g, projection %g/%g, far %g%s", i,
+                       (double)ll, (double)px, (double)py, (double)zfar,
+                       sane ? " — sane, adopted as the camera block" : "");
+                if (sane && !C.c4) C.c4 = s->addr;
+            }
+        }
         C.pending = C.c4 != 0;
         if (!C.d_comp) {
             C.d_comp = 1;
