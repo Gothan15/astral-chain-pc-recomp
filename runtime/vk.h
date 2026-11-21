@@ -366,10 +366,25 @@ int vk_astc_gpu(void);                  // 1: ASTC images decoded to RGBA8 by th
 int vk_astc_bc(void);                   // the recompression of those images: 0 none (RGBA8), 1 BC3 (AC_ASTC_BC=1),
                                         // 2 BC1 for the textures the alpha scan proves opaque (AC_ASTC_BC=bc1,
                                         // the default), BC3 for the rest; the per-texture choice is vk_texture.c's.
+                                        // 3 BC7 for every texture (AC_ASTC_BC=bc7), sin escaneo alfa.
                                         // 0 turns into 1 when video memory is short (vk_astc_low_memory).
 int vk_astc_low_memory(void);           // vk_texture.c, video memory over its budget or full: new ASTC images are BC3
                                         // for the rest of the run (when they were RGBA8); 1 when the switch happened
                                         // in this call
+// La caché BC7 precómputada (vk_bc7_cache.c, formato en bc7_cache.h): consulta de solo
+// lectura que vk_texture.c hace antes de codificar en vivo cuando AC_ASTC_BC=bc7.
+int vk_bc7_cache_enabled(void);         // 1: clave BC7_CACHE puesta y el modo es bc7
+int vk_bc7_cache_log_on(void);          // 1: AC_BC7_CACHE_LOG puesta (líneas [bc7key])
+void vk_bc7_cache_log_key(const void *guest, uint64_t total, uint32_t format, uint32_t w,
+                          uint32_t h, uint32_t layout_levels, uint32_t layers,
+                          uint32_t pkg_block_h);
+int vk_bc7_cache_fetch(const void *guest, uint64_t total, uint32_t format, uint32_t w,
+                       uint32_t h, uint32_t layout_levels, uint32_t layers,
+                       uint32_t pkg_block_h,
+                       uint8_t **blocks, uint64_t *size);   // 1 = acierto: *blocks es malloc del llamador
+void vk_bc7_cache_record(VkCommandBuffer cb, VkImage image, VkImageAspectFlags aspect,
+                         const uint8_t *blocks, uint32_t w, uint32_t h,
+                         uint32_t layout_levels, uint32_t layers, uint32_t levels);
 // One image region decoded from raw blocks: tight rows of 16-byte blocks at byte src of the source buffer (slices one
 // after the other), w x h texels and slices deep, written at offset of level / layer.
 typedef struct { VkDeviceSize src; uint32_t w, h, slices, level, layer; VkOffset3D offset; } VkAstcRegion;

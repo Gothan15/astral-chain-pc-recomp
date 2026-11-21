@@ -113,7 +113,7 @@ LLVM_SKIP_DIRS = {'aarch64-w64-mingw32', 'armv7-w64-mingw32', 'i686-w64-mingw32'
 LLVM_SKIP_SUFFIXES = {'.idl', '.tlb'}
 
 # tools/ files the installer steps run (and what they import), copied from the repo.
-TOOLS_FILES = ['build_game.py', 'build_shaders.py', 'check_content.py', 'exefs_patches.py', 'extract.py',
+TOOLS_FILES = ['bc7_precompute.py', 'build_game.py', 'build_shaders.py', 'check_content.py', 'exefs_patches.py', 'extract.py',
                'hostmem.py', 'make_prompts_folders.py', 'pack_shader_cache.py', 'prepare_shaders.py', 'romfs_index.py',
                'shader_census.py']
 TOOLS_DIRS = ['data']   # data/: the expected hashes of the base game and the update, pgo/ the profiles
@@ -548,6 +548,10 @@ def build_launcher(out, llvm):
          ROOT / 'installer' / 'launcher' / 'launcher.rc', '-o', res], env=env)
     run([llvm / 'bin' / 'clang.exe', '-O2', '-mwindows', '-Wall', '-Wl,-s', '-I', work,
          ROOT / 'installer' / 'launcher' / 'launcher.c', res, '-o', out / 'Astral Chain-Setup.exe'], env=env)
+    # El segundo lanzador: la ventana de preparación (installer/prepare_gui.py), el mismo launcher.c
+    # con -DPREPARE_LAUNCHER, que cambia el módulo que arranca.
+    run([llvm / 'bin' / 'clang.exe', '-O2', '-mwindows', '-Wall', '-Wl,-s', '-I', work, '-DPREPARE_LAUNCHER',
+         ROOT / 'installer' / 'launcher' / 'launcher.c', res, '-o', out / 'Astral Chain-Preparar.exe'], env=env)
 
 
 # ---- checks ----------------------------------------------------------------------------------------------------------
@@ -639,13 +643,13 @@ def sizes(out):
 
 def write_zip(out, path):
     path.parent.mkdir(parents=True, exist_ok=True)
-    with zipfile.ZipFile(path, 'w', zipfile.ZIP_DEFLATED, compresslevel=6) as z:
+    with zipfile.ZipFile(path, 'w', zipfile.ZIP_LZMA, compresslevel=9) as z:
         for p in sorted(out.rglob('*')):
             if p.is_file() and 'temp' not in p.relative_to(out).parts[:1]:
                 info = zipfile.ZipInfo((Path(out.name) / p.relative_to(out)).as_posix(), (1980, 1, 1, 0, 0, 0))
-                info.compress_type = zipfile.ZIP_DEFLATED
+                info.compress_type = zipfile.ZIP_LZMA
                 info.external_attr = 0o644 << 16
-                z.writestr(info, p.read_bytes(), compresslevel=6)
+                z.writestr(info, p.read_bytes(), compresslevel=9)
     print(f'{path}: {mib(path.stat().st_size)}')
 
 

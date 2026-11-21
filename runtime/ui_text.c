@@ -379,6 +379,17 @@ static const char *const text_en[UI_TEXT_COUNT] = {
     [UI_MENU_GPL] = "Graphics pipeline library",
     [UI_MENU_GPL_DESC] = "Uses the Vulkan pipeline library extension; turn off if your driver misbehaves with it.",
     [UI_MENU_ASTC] = "ASTC texture decoding", [UI_MENU_ASTC_DESC] = "Where compressed ASTC textures are decoded.",
+    [UI_MENU_TEX_COMPRESSION] = "Texture compression",
+    [UI_MENU_TEX_COMPRESSION_DESC] = "How the game's ASTC textures are stored in video memory. BC1 is the lightest, "
+                                     "BC3 keeps the alpha channel, BC7 is the sharpest and the heaviest to encode. Off "
+                                     "keeps them uncompressed (RGBA8) and takes much more memory. Takes effect at the next start.",
+    [UI_MENU_BC7_CACHE] = "Precomputed BC7 cache",
+    [UI_MENU_BC7_CACHE_DESC] = "With BC7 compression, reads the cache/bc7 folder next to the game (written by the "
+                               "precompute tool) instead of encoding the textures again at every start. Takes effect "
+                               "at the next start.",
+    [UI_MENU_BC7_CACHE_LOG] = "BC7 cache key log",
+    [UI_MENU_BC7_CACHE_LOG_DESC] = "Logs a [bc7key] line for every texture the BC7 path uploads, to check the "
+                                   "precomputed cache's keys against the game's. Takes effect at the next start.",
     [UI_MENU_ASTC_AUTO] = "Automatic", [UI_MENU_ASTC_GPU] = "GPU shader", [UI_MENU_ASTC_NATIVE] = "Native",
     [UI_MENU_ASTC_CPU] = "CPU",
     [UI_MENU_MEMORY] = "GPU memory mode", [UI_MENU_MEMORY_DESC] = "How game memory is shared with the GPU.",
@@ -840,6 +851,18 @@ static const char *const text_ru[UI_TEXT_COUNT] = {
     [UI_MENU_GPL] = "Библиотека графических конвейеров",
     [UI_MENU_GPL_DESC] = "Использует расширение Vulkan для библиотек конвейеров; выключите, если драйвер с ним сбоит.",
     [UI_MENU_ASTC] = "Распаковка текстур ASTC", [UI_MENU_ASTC_DESC] = "Где распаковываются сжатые текстуры ASTC.",
+    [UI_MENU_TEX_COMPRESSION] = "Сжатие текстур",
+    [UI_MENU_TEX_COMPRESSION_DESC] = "Как текстуры ASTC игры хранятся в видеопамяти. BC1 — самое лёгкое, BC3 "
+                                     "сохраняет альфа-канал, BC7 — самое чёткое и самое тяжёлое для кодирования. "
+                                     "Выкл — без сжатия (RGBA8), занимает намного больше памяти. Действует со "
+                                     "следующего запуска.",
+    [UI_MENU_BC7_CACHE] = "Готовый кэш BC7",
+    [UI_MENU_BC7_CACHE_DESC] = "При сжатии BC7 берёт папку cache/bc7 рядом с игрой (её пишет инструмент "
+                               "предрасчёта) вместо того, чтобы кодировать текстуры заново при каждом запуске. "
+                               "Действует со следующего запуска.",
+    [UI_MENU_BC7_CACHE_LOG] = "Журнал ключей BC7",
+    [UI_MENU_BC7_CACHE_LOG_DESC] = "Пишет строку [bc7key] для каждой текстуры, загруженной путём BC7, чтобы "
+                                   "сверять ключи готового кэша с игрой. Действует со следующего запуска.",
     [UI_MENU_ASTC_AUTO] = "Автоматически", [UI_MENU_ASTC_GPU] = "Шейдер GPU", [UI_MENU_ASTC_NATIVE] = "Аппаратно",
     [UI_MENU_ASTC_CPU] = "Процессор",
     [UI_MENU_MEMORY] = "Режим памяти GPU", [UI_MENU_MEMORY_DESC] = "Как память игры передаётся видеокарте.",
@@ -1209,6 +1232,19 @@ static const char *const text_pt_br[UI_TEXT_COUNT] = {
     [UI_MENU_GPL_DESC] = "Usa a extensão de biblioteca de pipelines do Vulkan; desligue se o seu driver tiver problemas com ela.",
     [UI_MENU_ASTC] = "Decodificação de texturas ASTC",
     [UI_MENU_ASTC_DESC] = "Onde as texturas comprimidas em ASTC são decodificadas.",
+    [UI_MENU_TEX_COMPRESSION] = "Compressão de texturas",
+    [UI_MENU_TEX_COMPRESSION_DESC] = "Como as texturas ASTC do jogo ficam na memória de vídeo. BC1 é a mais leve, "
+                                     "BC3 mantém o canal alfa, BC7 é a mais nítida e a mais pesada de codificar. "
+                                     "Desligado mantém sem compressão (RGBA8) e usa muito mais memória. Vale a "
+                                     "partir da próxima inicialização.",
+    [UI_MENU_BC7_CACHE] = "Cache BC7 pré-calculado",
+    [UI_MENU_BC7_CACHE_DESC] = "Com a compressão BC7, usa a pasta cache/bc7 ao lado do jogo (gravada pela "
+                               "ferramenta de pré-cálculo) em vez de codificar as texturas de novo a cada início. "
+                               "Vale a partir da próxima inicialização.",
+    [UI_MENU_BC7_CACHE_LOG] = "Registro de chaves BC7",
+    [UI_MENU_BC7_CACHE_LOG_DESC] = "Registra uma linha [bc7key] para cada textura enviada pelo caminho BC7, "
+                                   "para conferir as chaves do cache pré-calculado com as do jogo. Vale a partir "
+                                   "da próxima inicialização.",
     [UI_MENU_ASTC_AUTO] = "Automático", [UI_MENU_ASTC_GPU] = "Shader da GPU", [UI_MENU_ASTC_NATIVE] = "Nativo",
     [UI_MENU_ASTC_CPU] = "CPU",
     [UI_MENU_MEMORY] = "Modo de memória da GPU",
@@ -1794,6 +1830,15 @@ static const char *const text_zh_hans[UI_TEXT_COUNT] = {
     [UI_MENU_GPL_DESC] = "使用 Vulkan 管线库扩展；驱动对此有问题时请关闭。",
     [UI_MENU_ASTC] = "ASTC 纹理解码",
     [UI_MENU_ASTC_DESC] = "压缩的 ASTC 纹理在哪里解码。",
+    [UI_MENU_TEX_COMPRESSION] = "纹理压缩",
+    [UI_MENU_TEX_COMPRESSION_DESC] = "游戏的 ASTC 纹理在显存中的存放方式。BC1 最轻，BC3 保留 alpha 通道，BC7 "
+                                     "最清晰、编码最重。关闭则不压缩（RGBA8），占用显存多得多。下次启动生效。",
+    [UI_MENU_BC7_CACHE] = "预计算 BC7 缓存",
+    [UI_MENU_BC7_CACHE_DESC] = "使用 BC7 压缩时，直接读取游戏旁的 cache/bc7 文件夹（由预计算工具生成），"
+                               "不必每次启动重新编码纹理。下次启动生效。",
+    [UI_MENU_BC7_CACHE_LOG] = "BC7 缓存键日志",
+    [UI_MENU_BC7_CACHE_LOG_DESC] = "为 BC7 路径上传的每张纹理写一行 [bc7key]，用来核对预计算缓存的键与游戏"
+                                   "是否一致。下次启动生效。",
     [UI_MENU_ASTC_AUTO] = "自动",
     [UI_MENU_ASTC_GPU] = "GPU 着色器",
     [UI_MENU_ASTC_NATIVE] = "原生",
