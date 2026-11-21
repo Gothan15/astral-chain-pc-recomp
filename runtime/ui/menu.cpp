@@ -1122,6 +1122,10 @@ static void tab_controls(float scale) {
                pad ? stick_note[1] : nullptr, "AC_STICK_DEADZONE");
     opt_slider("AC_STICK_SENS", UI_MENU_STICK_SENS, 0.1f, 3, UI_MENU_STICK_SENS_DESC, 0.05f, "%.2f");
     opt_slider("AC_MOUSE_SENS", UI_MENU_MOUSE_SENS, 0, 10, UI_MENU_MOUSE_SENS_DESC, 0.1f, "%.1f");
+    // Adaptación de la cámara de ratón (input.c): la de Sparrow (lineal) o la de Puddz (suavizada).
+    static const char *const mouse_cam[] = {"sparrow", "puddz"};
+    static const char *const mouse_cam_names[] = {"Sparrow", "Puddz"};
+    opt_choice_list("AC_MOUSE_CAMERA", UI_MENU_MOUSE_CAMERA, mouse_cam, mouse_cam_names, 2, UI_MENU_MOUSE_CAMERA_DESC);
     row_walk_key();
     opt_slider("AC_WALK_SCALE", UI_MENU_WALK_SCALE, 0.2f, 0.9f, UI_MENU_WALK_SCALE_DESC, 0.01f, "%.2f");
     binds_rows(scale);
