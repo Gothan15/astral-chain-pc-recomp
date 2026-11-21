@@ -8,6 +8,11 @@
 // bilateral contrast-adaptive sharpener, CC BY-ND — private fork only) at the same two places in the present,
 // with AC_SHARPNESS mapped onto its 0..2 strength scale (80 = the preset's own 0.625); the scene sharpening
 // below (vk_fsr_rcas) stays RCAS.
+// Su máscara por distancia va tal cual el original: vk_fsr_depth_pass (llamada desde vk_exec_pass_begin)
+// recuerda el destino de profundidad del pase de escena — el mismo criterio de detección que el pase de
+// luz de vk_ao.c — y en el present se enlaza como binding 2 con una vista de solo profundidad; el shader
+// linealiza la profundidad cruda con la fórmula del .fx y mezcla el afilado con la imagen sin afilar.
+// Sin pase de escena (menús), la constante has_depth va a 0 y el afilado es uniforme, como su No_Depth_Map.
 // A scene an upscaler (DLSS, XeSS, FSR 3) scaled is sharpened by vk_dlaa.c before the game draws its HUD, with RCAS
 // from here (vk_fsr_rcas), when the window copies the picture 1:1: the present then copies it without RCAS
 // (vk_fsr_presharp_set), so the HUD stays as the game drew it and the scene is not sharpened twice. Where the window
@@ -25,6 +30,7 @@
 // The two intermediate images are shared by all slots; each frame's first barrier orders it after the previous
 // frame's reads (one queue, so the barrier covers earlier submissions).
 #include "vk.h"
+#include "vk_exec.h"
 
 #include <string.h>
 
@@ -51,6 +57,9 @@ static struct {
     VkImageView view[2];
     uint32_t w, h;                 // their size
     VkImageView src_view[SLOTS];   // the source view each slot's last frame read
+    VkSampler depth_sampler;       // NEAREST, for the scene depth Smart Sharp samples
+    VkExecTarget depth;            // the scene depth target of the last scene pass (written by the replay)
+    int depth_have, depth_logged;  // depth_have: a scene depth is remembered for the present
     int lcw, lch;                  // the last source size logged
     uint32_t ldw, ldh;             // the last destination size logged
 } F;
@@ -75,14 +84,18 @@ static int init(VkCtx *c) {
         rt_log("vk: FSR off: no VK_KHR_push_descriptor; the present scales bilinearly");
         return 0;
     }
-    VkDescriptorSetLayoutBinding b[2] = {
+    // El binding 2 solo lo declara preset_smart.comp (la profundidad de escena); los demás shaders del
+    // present no lo usan y con descriptores push no hace falta escribir un binding que el shader no lee.
+    VkDescriptorSetLayoutBinding b[3] = {
         {.binding = 0, .descriptorType = VK_DESCRIPTOR_TYPE_COMBINED_IMAGE_SAMPLER, .descriptorCount = 1,
          .stageFlags = VK_SHADER_STAGE_COMPUTE_BIT},
         {.binding = 1, .descriptorType = VK_DESCRIPTOR_TYPE_STORAGE_IMAGE, .descriptorCount = 1,
+         .stageFlags = VK_SHADER_STAGE_COMPUTE_BIT},
+        {.binding = 2, .descriptorType = VK_DESCRIPTOR_TYPE_COMBINED_IMAGE_SAMPLER, .descriptorCount = 1,
          .stageFlags = VK_SHADER_STAGE_COMPUTE_BIT}};
     VkDescriptorSetLayoutCreateInfo dci = {.sType = VK_STRUCTURE_TYPE_DESCRIPTOR_SET_LAYOUT_CREATE_INFO,
                                            .flags = VK_DESCRIPTOR_SET_LAYOUT_CREATE_PUSH_DESCRIPTOR_BIT_KHR,
-                                           .bindingCount = 2, .pBindings = b};
+                                           .bindingCount = 3, .pBindings = b};
     VkPushConstantRange pr = {VK_SHADER_STAGE_COMPUTE_BIT, 0, 32};
     VkPipelineLayoutCreateInfo li = {.sType = VK_STRUCTURE_TYPE_PIPELINE_LAYOUT_CREATE_INFO, .setLayoutCount = 1,
                                      .pSetLayouts = &F.dsl, .pushConstantRangeCount = 1, .pPushConstantRanges = &pr};
@@ -91,9 +104,12 @@ static int init(VkCtx *c) {
                               .addressModeU = VK_SAMPLER_ADDRESS_MODE_CLAMP_TO_EDGE,
                               .addressModeV = VK_SAMPLER_ADDRESS_MODE_CLAMP_TO_EDGE,
                               .addressModeW = VK_SAMPLER_ADDRESS_MODE_CLAMP_TO_EDGE, .maxLod = 0};
+    VkSamplerCreateInfo sn = si;   // la profundidad se muestrea al téxel, como hace vk_ao.c con la suya
+    sn.magFilter = VK_FILTER_NEAREST, sn.minFilter = VK_FILTER_NEAREST;
     if (vkCreateDescriptorSetLayout(c->device, &dci, NULL, &F.dsl) != VK_SUCCESS ||
         vkCreatePipelineLayout(c->device, &li, NULL, &F.layout) != VK_SUCCESS ||
         vkCreateSampler(c->device, &si, NULL, &F.sampler) != VK_SUCCESS ||
+        vkCreateSampler(c->device, &sn, NULL, &F.depth_sampler) != VK_SUCCESS ||
         !(F.easu = make_pipeline(c, fsr_easu_spv, sizeof fsr_easu_spv)) ||
         !(F.rcas = make_pipeline(c, fsr_rcas_spv, sizeof fsr_rcas_spv)) ||
         !(F.smart = make_pipeline(c, preset_smart_spv, sizeof preset_smart_spv)) ||
@@ -179,6 +195,54 @@ static int sharpness(void) {
 
 static int smart_on(void) { return !strcmp(cfg_value("AC_SHARPENER"), "smart"); }
 static const char *sharp_name(void) { return smart_on() ? "Smart Sharp" : "RCAS"; }
+
+// El pase de escena (y el composite, que adjunta la misma profundidad): se recuerda su destino de
+// profundidad para muestrearlo en el present. El criterio es el del pase de luz de vk_ao.c: un solo
+// color de escena (B10G11R11 o RGBA16F) con una profundidad D32F(S8) del mismo tamaño, sin niveles.
+// Lo llama vk_exec_pass_begin en el hilo del replay; el present solo lee lo recordado.
+void vk_fsr_depth_pass(VkExec *ex) {
+    if (!smart_on()) return;
+    const VkExecTarget *co = &ex->color[0], *z = &ex->depth;
+    if (ex->pass_ncolor != 1 || !co->image || !z->image) return;
+    if (co->format != VK_FORMAT_B10G11R11_UFLOAT_PACK32 && co->format != VK_FORMAT_R16G16B16A16_SFLOAT) return;
+    if (z->format != VK_FORMAT_D32_SFLOAT && z->format != VK_FORMAT_D32_SFLOAT_S8_UINT) return;
+    if (z->width < 640 || co->width != z->width || co->height != z->height || co->samples > 1 || co->is3d ||
+        co->level || z->level)
+        return;
+    F.depth = *z, F.depth_have = 1;
+}
+
+// La vista de solo profundidad de la profundidad recordada (vk_exec_target_view la cachea por imagen,
+// como con la de vk_ao.c); VK_NULL_HANDLE si este frame no ha tenido pase de escena.
+static VkImageView smart_depth_view(void) {
+    if (!F.depth_have || !F.depth.img) return VK_NULL_HANDLE;
+    VkImageView v = vk_exec_target_view(F.depth.img, F.depth.format, VK_IMAGE_VIEW_TYPE_2D,
+                                        VK_IMAGE_ASPECT_DEPTH_BIT, F.depth.level, F.depth.base_layer, 1, 0);
+    if (v && !F.depth_logged) {
+        F.depth_logged = 1;
+        rt_log("vk: Smart Sharp masks its sharpening with the scene depth (%ux%u)", F.depth.width, F.depth.height);
+    }
+    return v;
+}
+
+// Como bind_pass, pero escribiendo también el binding 2: la profundidad de escena para Smart Sharp.
+// Sin profundidad este frame, se enlaza la propia entrada (el shader no la lee: has_depth va a 0),
+// porque un binding declarado por el shader no puede quedar sin escribir.
+static void bind_smart(VkCommandBuffer cb, VkImageView in, VkImageView out, VkImageView dep, const float pc[8]) {
+    VkDescriptorImageInfo ii = {F.sampler, in, VK_IMAGE_LAYOUT_GENERAL},
+                          oi = {VK_NULL_HANDLE, out, VK_IMAGE_LAYOUT_GENERAL},
+                          di = {F.depth_sampler, dep ? dep : in, VK_IMAGE_LAYOUT_GENERAL};
+    VkWriteDescriptorSet w[3] = {
+        {.sType = VK_STRUCTURE_TYPE_WRITE_DESCRIPTOR_SET, .dstBinding = 0, .descriptorCount = 1,
+         .descriptorType = VK_DESCRIPTOR_TYPE_COMBINED_IMAGE_SAMPLER, .pImageInfo = &ii},
+        {.sType = VK_STRUCTURE_TYPE_WRITE_DESCRIPTOR_SET, .dstBinding = 1, .descriptorCount = 1,
+         .descriptorType = VK_DESCRIPTOR_TYPE_STORAGE_IMAGE, .pImageInfo = &oi},
+        {.sType = VK_STRUCTURE_TYPE_WRITE_DESCRIPTOR_SET, .dstBinding = 2, .descriptorCount = 1,
+         .descriptorType = VK_DESCRIPTOR_TYPE_COMBINED_IMAGE_SAMPLER, .pImageInfo = &di}};
+    vkCmdBindPipeline(cb, VK_PIPELINE_BIND_POINT_COMPUTE, F.smart);
+    rec_push(F.push, cb, VK_PIPELINE_BIND_POINT_COMPUTE, F.layout, 0, 3, w);
+    vkCmdPushConstants(cb, F.layout, VK_SHADER_STAGE_COMPUTE_BIT, 0, 32, pc);
+}
 
 static void bind_pass(VkCommandBuffer cb, VkPipeline p, VkImageView in, VkImageView out, const float pc[8]);
 
@@ -272,9 +336,10 @@ int vk_fsr_record(VkCommandBuffer cb, unsigned slot, VkImage src, VkFormat fmt, 
         // The sharpening reads the crop rectangle where it lies in the source (crop[0], crop[1]), not from the
         // image's corner. AC_SHARPENER picks the filter; Smart Sharp takes AC_SHARPNESS on its own scale.
         if (smart_on()) {
-            float smart[8] = {(float)dw, (float)dh, sharp / 128.0f, 0,
+            VkImageView dv = smart_depth_view();
+            float smart[8] = {(float)dw, (float)dh, sharp / 128.0f, dv ? 1.0f : 0.0f,
                               (float)crop[0], (float)crop[1], (float)cw, (float)ch};
-            bind_pass(cb, F.smart, F.src_view[slot], F.view[1], smart);
+            bind_smart(cb, F.src_view[slot], F.view[1], dv, smart);
             vkCmdDispatch(cb, (dw + 7) / 8, (dh + 7) / 8, 1);
         } else {
             float rcas[8] = {(float)dw, (float)dh, (float)(100 - sharp) / 50.0f, 0,
@@ -305,8 +370,9 @@ int vk_fsr_record(VkCommandBuffer cb, unsigned slot, VkImage src, VkFormat fmt, 
         barrier(cb, F.img[0], VK_IMAGE_LAYOUT_GENERAL, VK_IMAGE_LAYOUT_GENERAL, CS, VK_ACCESS_2_SHADER_STORAGE_WRITE_BIT,
                 CS, VK_ACCESS_2_SHADER_SAMPLED_READ_BIT);
         if (smart_on()) {
-            float smart[8] = {(float)dw, (float)dh, sharp / 128.0f, 0, 0, 0, (float)dw, (float)dh};
-            bind_pass(cb, F.smart, F.view[0], F.view[1], smart);
+            VkImageView dv = smart_depth_view();
+            float smart[8] = {(float)dw, (float)dh, sharp / 128.0f, dv ? 1.0f : 0.0f, 0, 0, (float)dw, (float)dh};
+            bind_smart(cb, F.view[0], F.view[1], dv, smart);
             vkCmdDispatch(cb, (dw + 7) / 8, (dh + 7) / 8, 1);
         } else {
             float rcas[8] = {(float)dw, (float)dh, (float)(100 - sharp) / 50.0f, 0, 0, 0, (float)dw, (float)dh};
@@ -339,6 +405,7 @@ void vk_fsr_release(void) {
     if (F.smart) vkDestroyPipeline(c->device, F.smart, NULL);
     if (F.down) vkDestroyPipeline(c->device, F.down, NULL);
     if (F.sampler) vkDestroySampler(c->device, F.sampler, NULL);
+    if (F.depth_sampler) vkDestroySampler(c->device, F.depth_sampler, NULL);
     if (F.layout) vkDestroyPipelineLayout(c->device, F.layout, NULL);
     if (F.dsl) vkDestroyDescriptorSetLayout(c->device, F.dsl, NULL);
     memset(&F, 0, sizeof F);

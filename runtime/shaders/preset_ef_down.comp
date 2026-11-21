@@ -13,9 +13,11 @@ layout(push_constant) uniform P {
     ivec2 dir;       // x=1: pasada horizontal; y=1: vertical
 } pc;
 
-// Math::inside_screen del original: 1 dentro de [0,1]², 0 fuera (las muestras fuera no votan)
+// Math::inside_screen del original (mmx_math.fxh): all(saturate(uv - uv*uv)) — vale 1 solo con la
+// uv estrictamente dentro de (0,1)²; en el borde exacto y fuera da 0 y la muestra no vota.
 float inside_screen(vec2 uv) {
-    return (all(greaterThanEqual(uv, vec2(0.0))) && all(lessThanEqual(uv, vec2(1.0)))) ? 1.0 : 0.0;
+    vec2 s = clamp(uv - uv * uv, 0.0, 1.0);
+    return (s.x != 0.0 && s.y != 0.0) ? 1.0 : 0.0;
 }
 
 vec2 downsample_kuwahara(vec2 uv, bool horizontal) {

@@ -1,15 +1,16 @@
 #version 450
 // Smart Sharp (runtime/vk_fsr.c): porte del Smart_Sharp.fx de BlueSkyDefender (CC BY-ND 4.0; solo para el
 // fork privado de Gothan, ver vk_fsr.c) como alternativa al RCAS en el present, con los ajustes del preset
-// ELZELDAPA y la ruta que ese preset usa: calidad 2 (bilateral 5×5), sin mapa de profundidad (en el present
-// no hay profundidad: el enmascarado por distancia del original no se aplica), sin motion sharpen y sin
-// denoiser. El bilateral suaviza el ruido, la máscara CAS limita el afilado cerca de los extremos y el
+// ELZELDAPA y la ruta que ese preset usa: calidad 2 (bilateral 5×5), sin motion sharpen y sin denoiser.
+// La máscara por distancia del original sí se aplica: vk_fsr.c enlaza en el binding 2 la profundidad
+// cruda de la escena del frame y el final mezcla el afilado con la imagen sin afilar según su Depth(). El bilateral suaviza el ruido, la máscara CAS limita el afilado cerca de los extremos y el
 // delta va en YCbCr con la luminancia escalada, como en el original.
 layout(local_size_x = 8, local_size_y = 8) in;
 layout(binding = 0) uniform sampler2D src;
 layout(binding = 1, rgba16f) uniform writeonly image2D dst;
+layout(binding = 2) uniform sampler2D dep;   // la profundidad cruda de la escena (vista de solo profundidad)
 layout(push_constant) uniform P {
-    vec4 size;   // ancho y alto de salida, fuerza (0..2, la escala del original), sin uso
+    vec4 size;   // ancho y alto de salida, fuerza (0..2, la escala del original), 1 si dep es la profundidad
     vec4 rect;   // el rectángulo de entrada: x, y, ancho, alto
 } pc;
 
@@ -75,5 +76,17 @@ void main() {
     delta = mix(max(vec3(0.0), mix(vec3(0.0), delta, noise)), delta, edge01);
 
     vec3 outc = mix(c, c + delta, cam * clamp(power, 0.0, 1.0));
+    // La máscara por distancia del original (su ShaderOut con Debug_View=0): DB es la profundidad
+    // linealizada con su fórmula Depth() y los ajustes del preset (Depth_Map=0 «Normal»,
+    // Depth_Map_Adjust=250: Near = 0.125/250 = 0.0005, Far = 1), y la salida es
+    // lerp(afilado, imagen sin afilar, DB): cerca afila entero y lejos se queda como venía.
+    // Sin profundidad enlazada (pc.size.w = 0), DB = 0, como su No_Depth_Map. La uv del téxel en el
+    // rectángulo de entrada cubre el frame entero en los dos sitios del present, como la de dep.
+    float db = 0.0;
+    if (pc.size.w > 0.5) {
+        float z = textureLod(dep, (vec2(p) + 0.5) / pc.rect.zw, 0.0).r;
+        db = clamp(0.0005 / (1.0 - 0.9995 * z), 0.0, 1.0);
+    }
+    outc = mix(outc, c, db);
     imageStore(dst, p, vec4(outc, 1.0));
 }
