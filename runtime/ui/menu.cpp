@@ -394,7 +394,7 @@ extern "C" void menu_vk_release(void) {
 // the pseudo-key SAVE=1 (cfg_save, as a row change does; a failed write shows the menu's save note).
 // The Cheats tab (ui/cheats_tab.cpp tab_cheats) is not listed: the cheats are not ready to be shown. Their switches
 // are still read from astralchain.ini (cheats.c).
-enum { TAB_SCREEN, TAB_GAME, TAB_SOUND, TAB_CONTROLS, TAB_MENU, TAB_MODS, TAB_DEBUG, TAB_COUNT };
+enum { TAB_SCREEN, TAB_GAME, TAB_SOUND, TAB_CONTROLS, TAB_MENU, TAB_MODS, TAB_PERF, TAB_DEBUG, TAB_COUNT };
 enum { TEST_PAGE_FRAMES = 30, TEST_SETS = 16 };
 struct TestSet { uint64_t frame; char key[64], value[64]; };
 static struct {
@@ -733,6 +733,12 @@ static void tab_screen(float scale) {
     static const UiTextId lowlat[] = {UI_MENU_LOW_LATENCY_OFF, UI_MENU_LOW_LATENCY_ON, UI_MENU_LOW_LATENCY_BOOST};
     opt_choice("AC_LOW_LATENCY", UI_MENU_LOW_LATENCY, lowlat, 3, UI_MENU_LOW_LATENCY_DESC, low_latency_note());
     row_gpu();
+    // Perfil de dispositivo y proporción (cfg.c, sección display): qué defaults de dispositivo mandan y cómo
+    // encaja la imagen en la pantalla; el perfil se lee al arrancar, la proporción es en vivo.
+    static const UiTextId profile[] = {UI_MENU_AUTO, UI_MENU_PROFILE_DESKTOP, UI_MENU_PROFILE_DECK};
+    opt_choice("AC_DEVICE_PROFILE", UI_MENU_DEVICE_PROFILE, profile, 3, UI_MENU_DEVICE_PROFILE_DESC);
+    static const UiTextId aspect[] = {UI_MENU_ASPECT_FIT, UI_MENU_ASPECT_STRETCH, UI_MENU_ASPECT_WIDE};
+    opt_choice("AC_ASPECT", UI_MENU_ASPECT, aspect, 3, UI_MENU_ASPECT_DESC);
     static const UiTextId perf[] = {UI_MENU_PERF_OFF, UI_MENU_PERF_FPS, UI_MENU_PERF_FULL};
     opt_choice("AC_PERF_OVERLAY", UI_MENU_PERF_OVERLAY, perf, 3, UI_MENU_PERF_OVERLAY_DESC);
     opt_group(UI_MENU_GRAPHICS);
@@ -763,6 +769,12 @@ static void tab_screen(float scale) {
     opt_choice_list("AC_ASTC_BC", UI_MENU_TEX_COMPRESSION, astc_bc, astc_bc_names, 5, UI_MENU_TEX_COMPRESSION_DESC);
     opt_toggle("AC_BC7_CACHE", UI_MENU_BC7_CACHE, UI_MENU_BC7_CACHE_DESC);
     row_shadow_scale();
+    // Resolución y alcance de las sombras (cfg.c): la escala de arriba multiplica el tamaño que el juego pide;
+    // estas dos fijan el tamaño mismo y hasta dónde llega el mapa.
+    static const char *const shres[] = {"game", "512", "768", "1024", "1536", "2048"};
+    const char *shres_names[] = {menu_text(UI_MENU_ANISO_GAME), "512", "768", "1024", "1536", "2048"};
+    opt_choice_list("AC_SHADOW_RES", UI_MENU_SHADOW_RES, shres, shres_names, 6, UI_MENU_SHADOW_RES_DESC);
+    opt_slider("AC_SHADOW_RANGE", UI_MENU_SHADOW_RANGE, 50, 400, UI_MENU_SHADOW_RANGE_DESC, 5, "%.0f %%");
     // off, low, high, gi: the names in the order of cfg.c's values for AO
     static const UiTextId ao[] = {UI_MENU_AO_OFF, UI_MENU_AO_LOW, UI_MENU_AO_HIGH, UI_MENU_AO_GI};
     opt_choice("AC_AO", UI_MENU_AO, ao, 4, UI_MENU_AO_DESC);
@@ -788,6 +800,11 @@ static void tab_screen(float scale) {
 static void tab_game(float scale) {
     opt_begin("##game", scale);
     row_fps_limit();
+    // La sección «frame rate» de cfg.c: simulación en tiempo real, telas en tiempo real y el arreglo de
+    // físicas a fps altos; las tres se leen al arrancar.
+    opt_toggle("AC_REALTIME", UI_MENU_REALTIME, UI_MENU_REALTIME_DESC);
+    opt_toggle("AC_CLOTH_REALTIME", UI_MENU_CLOTH_REALTIME, UI_MENU_CLOTH_REALTIME_DESC);
+    opt_toggle("AC_HIGHFPS_FIX", UI_MENU_HIGHFPS_FIX, UI_MENU_HIGHFPS_FIX_DESC);
     row_game_lang();
     static const UiTextId mode[] = {UI_MENU_MODE_DOCKED, UI_MENU_MODE_HANDHELD};
     opt_choice("AC_OPERATION_MODE", UI_MENU_OPERATION_MODE, mode, 2, UI_MENU_OPERATION_MODE_DESC);
@@ -796,6 +813,9 @@ static void tab_game(float scale) {
     // La separación de ReShade del fork (vk_reshade.c): en vivo, junto al interruptor del HUD porque actúa
     // sobre cómo se dibuja la interfaz frente a la escena.
     opt_toggle("AC_RESHADE", UI_MENU_RESHADE, UI_MENU_RESHADE_DESC);
+    // Reconstrucción de mods al arrancar (cheats.c): automática cuando cambian los archivos, o nunca.
+    static const UiTextId mods_rebuild[] = {UI_MENU_AUTO, UI_MENU_OFF};
+    opt_choice("AC_MODS_REBUILD", UI_MENU_MODS_REBUILD, mods_rebuild, 2, UI_MENU_MODS_REBUILD_DESC);
     opt_end();
 }
 
@@ -949,6 +969,8 @@ static void tab_controls(float scale) {
     char stick_note[2][64];
     for (int s = 0; s < 2; s++)
         snprintf(stick_note[s], sizeof stick_note[s], menu_text(UI_MENU_STICK_DEADZONE_NOW), now[s]);
+    // La zona muerta compartida: es el valor al que recurren las dos filas de abajo mientras no tengan el suyo.
+    opt_slider("AC_STICK_DEADZONE", UI_MENU_STICK_DEADZONE, 0, 50, UI_MENU_STICK_DEADZONE_DESC, 1, "%.0f %%");
     opt_slider("AC_LSTICK_DEADZONE", UI_MENU_LSTICK_DEADZONE, 0, 50, UI_MENU_STICK_DEADZONE_DESC, 1, "%.0f %%",
                pad ? stick_note[0] : nullptr, "AC_STICK_DEADZONE");
     opt_slider("AC_RSTICK_DEADZONE", UI_MENU_RSTICK_DEADZONE, 0, 50, UI_MENU_STICK_DEADZONE_DESC, 1, "%.0f %%",
@@ -978,7 +1000,7 @@ static void tab_menu(float scale) {
 
 static const UiTextId kTabNames[TAB_COUNT] = {UI_MENU_TAB_SCREEN,   UI_MENU_TAB_GAME,   UI_MENU_TAB_SOUND,
                                               UI_MENU_TAB_CONTROLS, UI_MENU_TAB_MENU,   UI_MENU_TAB_MODS,
-                                              UI_MENU_TAB_DEBUG};
+                                              UI_MENU_TAB_PERF,     UI_MENU_TAB_DEBUG};
 static int g_tab;               // the tab shown
 static int g_tab_request = -1;  // select this tab at the next layout; -1 none
 static int g_focus_page = -1;   // this tab's first row takes the cursor once it is shown; -1 none
@@ -995,6 +1017,83 @@ static void tab_debug(float scale) {
     opt_toggle("AC_BC7_CACHE_LOG", UI_MENU_BC7_CACHE_LOG, UI_MENU_BC7_CACHE_LOG_DESC);
     opt_toggle("AC_FLIGHT", UI_MENU_FLIGHT, UI_MENU_FLIGHT_DESC);
     opt_slider("AC_FLIGHT_SPIKE_MS", UI_MENU_FLIGHT_SPIKE_MS, 0, 1000, UI_MENU_FLIGHT_SPIKE_MS_DESC, 10, "%.0f");
+    // La ventana de consola (main.c) y las comprobaciones de diagnóstico que quedaban solo en el ini:
+    // decodificación zstd por las dos vías (ov_zstd.c) y la escritura exacta de texturas (vk_texture.c).
+    opt_toggle("AC_CONSOLE", UI_MENU_CONSOLE, UI_MENU_CONSOLE_DESC);
+    opt_toggle("AC_ZSTD_NATIVE", UI_MENU_ZSTD_NATIVE, UI_MENU_ZSTD_NATIVE_DESC);
+    opt_toggle("AC_ZSTD_CHECK", UI_MENU_ZSTD_CHECK, UI_MENU_ZSTD_CHECK_DESC);
+    opt_toggle("AC_WB_EXACT", UI_MENU_WB_EXACT, UI_MENU_WB_EXACT_DESC);
+    opt_slider("AC_WB_FENCE_LIMIT", UI_MENU_WB_FENCE_LIMIT, 0, 1073741824, UI_MENU_WB_FENCE_LIMIT_DESC, 65536,
+               "%.0f");
+    opt_end();
+}
+
+// ---- Rendimiento: la sección «performance» de cfg.c entera, agrupada con los títulos que el catálogo ya
+// traía (GROUP_SHADERS / GROUP_VULKAN / GROUP_SCHED / GROUP_TEXMEM / GROUP_FIXES). Todo se lee al arrancar
+// salvo lo que su propia meta marque en vivo; la fila lo dice sola desde cfg.
+static void tab_perf(float scale) {
+    opt_begin("##perf", scale);
+    opt_group(UI_MENU_GROUP_SHADERS);
+    static const UiTextId astc[] = {UI_MENU_ASTC_AUTO, UI_MENU_ASTC_GPU, UI_MENU_ASTC_NATIVE, UI_MENU_ASTC_CPU};
+    opt_choice("AC_ASTC", UI_MENU_ASTC, astc, 4, UI_MENU_ASTC_DESC);
+    static const UiTextId mem[] = {UI_MENU_MEMORY_AUTO, UI_MENU_MEMORY_IMPORT, UI_MENU_MEMORY_MIRROR,
+                                   UI_MENU_MEMORY_VERIFY};
+    opt_choice("AC_MEMORY", UI_MENU_MEMORY, mem, 4, UI_MENU_MEMORY_DESC);
+    opt_toggle("AC_GPL", UI_MENU_GPL, UI_MENU_GPL_DESC);
+    // Hilos con «automático» real: la clave vacía deja que el runtime elija; la lista ofrece ese automático
+    // y los conteos útiles en vez de un deslizador que enseñaría un 0 falso.
+    static const char *const threads[] = {"", "1", "2", "4", "8", "16", "32"};
+    const char *thread_names[] = {menu_text(UI_MENU_AUTO), "1", "2", "4", "8", "16", "32"};
+    opt_choice_list("AC_PREWARM_XLATE", UI_MENU_PREWARM_XLATE, threads, thread_names, 7,
+                    UI_MENU_PREWARM_XLATE_DESC);
+    opt_toggle("AC_PIPE_PREBUILD", UI_MENU_PIPE_PREBUILD, UI_MENU_PIPE_PREBUILD_DESC);
+    opt_toggle("AC_LIB_PREBUILD", UI_MENU_LIB_PREBUILD, UI_MENU_LIB_PREBUILD_DESC);
+    opt_choice_list("AC_LIB_PREBUILD_THREADS", UI_MENU_LIB_PREBUILD_THREADS, threads, thread_names, 7,
+                    UI_MENU_LIB_PREBUILD_THREADS_DESC);
+    opt_slider("AC_LIB_PREBUILD_KEEP", UI_MENU_LIB_PREBUILD_KEEP, 0, 4096, UI_MENU_LIB_PREBUILD_KEEP_DESC, 64,
+               "%.0f");
+    opt_toggle("AC_SHADER_MEMO", UI_MENU_SHADER_MEMO, UI_MENU_SHADER_MEMO_DESC);
+    opt_toggle("AC_PIPE_MEMO", UI_MENU_PIPE_MEMO, UI_MENU_PIPE_MEMO_DESC);
+    opt_group(UI_MENU_GROUP_VULKAN);
+    opt_toggle("AC_VK_DYN_A2C", UI_MENU_VK_DYN_A2C, UI_MENU_VK_DYN_A2C_DESC);
+    opt_toggle("AC_VK_DYN_VERTEX", UI_MENU_VK_DYN_VERTEX, UI_MENU_VK_DYN_VERTEX_DESC);
+    opt_toggle("AC_VK_SUBGROUP_PIN", UI_MENU_VK_SUBGROUP_PIN, UI_MENU_VK_SUBGROUP_PIN_DESC);
+    opt_toggle("AC_VK_VALIDATION", UI_MENU_VK_VALIDATION, UI_MENU_VK_VALIDATION_DESC);
+    opt_group(UI_MENU_GROUP_SCHED);
+    // Expropiación asíncrona (kernel.c): 0 = nada, 1 = completa con interrupción, 2 = sin interrumpir al dueño.
+    static const UiTextId preempt[] = {UI_MENU_OFF, UI_MENU_ON, UI_MENU_ASYNC_PREEMPT_NOINTR};
+    opt_choice("AC_ASYNC_PREEMPT", UI_MENU_ASYNC_PREEMPT, preempt, 3, UI_MENU_ASYNC_PREEMPT_DESC);
+    opt_toggle("AC_REPLAY_ASYNC", UI_MENU_REPLAY_ASYNC, UI_MENU_REPLAY_ASYNC_DESC);
+    static const UiTextId boost[] = {UI_MENU_AUTO, UI_MENU_OFF, UI_MENU_ON};
+    opt_choice("AC_CPU_BOOST", UI_MENU_CPU_BOOST, boost, 3, UI_MENU_CPU_BOOST_DESC);
+    opt_slider("AC_CPU_BOOST_SPIN_US", UI_MENU_CPU_BOOST_SPIN_US, 0, 20000, UI_MENU_CPU_BOOST_SPIN_US_DESC, 100,
+               "%.0f");
+    opt_toggle("AC_FREE_CORES", UI_MENU_FREE_CORES, UI_MENU_FREE_CORES_DESC);
+    opt_toggle("AC_TIMER_1MS", UI_MENU_TIMER_1MS, UI_MENU_TIMER_1MS_DESC);
+    opt_toggle("AC_PUSH_SKIP", UI_MENU_PUSH_SKIP, UI_MENU_PUSH_SKIP_DESC);
+    opt_slider("AC_SPLIT_DRAWS", UI_MENU_SPLIT_DRAWS, 0, 1000, UI_MENU_SPLIT_DRAWS_DESC, 8, "%.0f");
+    opt_slider("AC_SPLIT_US", UI_MENU_SPLIT_US, 0, 20000, UI_MENU_SPLIT_US_DESC, 100, "%.0f");
+    static const UiTextId pwait[] = {UI_MENU_PIPE_WAIT_DEFAULT, UI_MENU_PIPE_WAIT_DRAW};
+    opt_choice("AC_PIPE_WAIT", UI_MENU_PIPE_WAIT, pwait, 2, UI_MENU_PIPE_WAIT_DESC);
+    static const UiTextId pskip[] = {UI_MENU_PIPE_SKIP_STRICT, UI_MENU_PIPE_SKIP_ANY, UI_MENU_PIPE_SKIP_FULLSCREEN};
+    opt_choice("AC_PIPE_SKIP", UI_MENU_PIPE_SKIP, pskip, 3, UI_MENU_PIPE_SKIP_DESC);
+    opt_group(UI_MENU_GROUP_TEXMEM);
+    opt_toggle("AC_TEX_ALIAS", UI_MENU_TEX_ALIAS, UI_MENU_TEX_ALIAS_DESC);
+    // Tamaño de la caché de texturas: vacío = automático (un octavo de la VRAM); presets en MiB.
+    static const char *const tcache[] = {"", "256", "512", "1024", "2048", "4096"};
+    const char *tcache_names[] = {menu_text(UI_MENU_AUTO), "256 MB", "512 MB", "1024 MB", "2048 MB", "4096 MB"};
+    opt_choice_list("AC_TEX_CACHE_MB", UI_MENU_TEX_CACHE_MB, tcache, tcache_names, 6, UI_MENU_TEX_CACHE_MB_DESC);
+    opt_slider("AC_TEX_VRAM_PRESSURE", UI_MENU_TEX_VRAM_PRESSURE, 0, 100, UI_MENU_TEX_VRAM_PRESSURE_DESC, 1,
+               "%.0f %%");
+    static const char *const mipskip[] = {"0", "1024", "2048"};
+    const char *mipskip_names[] = {menu_text(UI_MENU_OFF), "1024", "2048"};
+    opt_choice_list("AC_TEX_MIP_SKIP", UI_MENU_TEX_MIP_SKIP, mipskip, mipskip_names, 3, UI_MENU_TEX_MIP_SKIP_DESC);
+    opt_toggle("AC_TEX_PREFETCH", UI_MENU_TEX_PREFETCH, UI_MENU_TEX_PREFETCH_DESC);
+    opt_toggle("AC_TEX_MEMO", UI_MENU_TEX_MEMO, UI_MENU_TEX_MEMO_DESC);
+    opt_group(UI_MENU_GROUP_FIXES);
+    opt_toggle("AC_LOD_GUARD", UI_MENU_LOD_GUARD, UI_MENU_LOD_GUARD_DESC);
+    opt_toggle("AC_FIX_C0", UI_MENU_FIX_C0, UI_MENU_FIX_C0_DESC);
+    opt_toggle("AC_FIX_ZERO", UI_MENU_FIX_ZERO, UI_MENU_FIX_ZERO_DESC);
     opt_end();
 }
 
@@ -1116,6 +1215,7 @@ static void layout_menu(uint32_t w, uint32_t h, float scale) {
             case TAB_SCREEN: tab_screen(scale); break;
             case TAB_GAME: tab_game(scale); break;
             case TAB_MODS: tab_mods(scale); break;
+            case TAB_PERF: tab_perf(scale); break;
             case TAB_DEBUG: tab_debug(scale); break;
             case TAB_SOUND: tab_sound(scale); break;
             case TAB_CONTROLS: tab_controls(scale); break;
