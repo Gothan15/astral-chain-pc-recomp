@@ -31,7 +31,6 @@
 #include "vk_exec.h"
 #include "platform/platform.h"
 #include "vk_dlaa.h"
-#include "vk_reshade.h"
 
 #define WEAK __attribute__((weak))
 
@@ -142,7 +141,6 @@ static void present_image(const tex_t *t, const int crop[4], uint64_t at_ns, uin
     PresentJob j = {.image = img->image, .format = img->format, .w = (int)img->width, .h = (int)img->height, .frame = frame,
                     .at = at_ns, .queued = queued, .value = value, .presharp = presharp, .shape = shape, .lid = lid};
     vk_hdr_present_source(img, &j.scene, &j.scene_format);   // AC_HDR: the scene the game drew into it, same size
-    vk_reshade_present(img->image, img->format, (int)img->width, (int)img->height);   // la textura de ventana, para la opción reshade
     if (crop) {
         j.has_crop = 1;
         for (int i = 0; i < 4; i++) j.crop[i] = (int)lroundf((float)crop[i] * img->scale);

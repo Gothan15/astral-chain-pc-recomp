@@ -36,6 +36,7 @@ static thread_local int g_font_bad;
 
 extern "C" {
 #include "amiibo.h"
+#include "audio_out.h"
 #include "cheats.h"
 #include "cfg.h"
 #include "fs.h"
@@ -64,8 +65,15 @@ void cheats_frame(uint64_t frame);   // cheats.c
 extern "C" int vk_dlaa_choice_state(const char *up);   // vk_dlaa.h: 0 runs, 1 after restart, 2 not available
 extern "C" const char *vk_dlaa_upscaler_name(void);     // vk_dlaa.h: the upscaler that runs for the setting, or NULL
 extern "C" const char *vk_dlaa_running(void);           // vk_dlaa.h: the upscaler's name while it runs, NULL when off
+extern "C" int vk_fsr4_offered(void);                   // vk_fsr4.h: an AMD RDNA 2 or newer GPU, the library there
+extern "C" const char *vk_fsr4_missing(void);           // vk_fsr4.h: the file FSR 4 needs that is not there, or NULL
 extern "C" int vk_lowlat_backend(void);                 // vk.h: 0 off, 1 Reflex, 2 Anti-Lag 2, 3 built-in
 bool tab_cheats(float scale);        // ui/cheats_tab.cpp; true: restart into the rebuild
+int audout_mix_channels(void);       // ov_audout.c: what the game mixes, 2 or 6; 0 before it opened its output
+void audout_meters(float peak[6]);   // ov_audout.c: the highest sample per speaker since the last call
+void audout_test(int on);            // ov_audout.c: start (1) or stop (0) the speaker test
+int audout_test_channel(void);       // ov_audout.c: the speaker the test plays on now, -1 none
+int audout_test_running(void);       // ov_audout.c: the test runs or is about to
 }
 
 // Roboto Medium (Apache-2.0, ui/fonts/LICENSE-Roboto.txt) with Latin and Cyrillic glyphs.
@@ -394,7 +402,7 @@ extern "C" void menu_vk_release(void) {
 // the pseudo-key SAVE=1 (cfg_save, as a row change does; a failed write shows the menu's save note).
 // The Cheats tab (ui/cheats_tab.cpp tab_cheats) is not listed: the cheats are not ready to be shown. Their switches
 // are still read from astralchain.ini (cheats.c).
-enum { TAB_SCREEN, TAB_GAME, TAB_SOUND, TAB_CONTROLS, TAB_MENU, TAB_MODS, TAB_PERF, TAB_DEBUG, TAB_COUNT };
+enum { TAB_SCREEN, TAB_GAME, TAB_SOUND, TAB_CONTROLS, TAB_MENU, TAB_MODS, TAB_COUNT };
 enum { TEST_PAGE_FRAMES = 30, TEST_SETS = 16 };
 struct TestSet { uint64_t frame; char key[64], value[64]; };
 static struct {
@@ -550,35 +558,48 @@ static void row_output_res(void) {
 // upscaler is live among those that can run in this run (NGX and libxess.dll load at start for the choice made then);
 // the mode sizes the scene at start. A choice that waits for a restart says what runs until then, one that cannot run
 // here says so; the mode row shows the scene size its value gives at this game resolution. The game's anti-aliasing
-// (SMAA, or off) applies while no upscaler runs and is greyed out otherwise. Off Windows, DLSS and XeSS are not offered.
+// (SMAA, or off) applies while no upscaler runs and is greyed out otherwise. Off Windows, DLSS and XeSS are not offered;
+// FSR 4 only on an AMD RDNA 2 or newer GPU with its library's files there. FSR 4 that cannot run says what runs in its
+// place and which file it lacks.
 static void rows_upscaling(void) {
 #ifdef _WIN32
-    static const char *const vals[] = {"off", "auto", "dlss", "xess", "fsr3"};
+    static const char *const vals[] = {"off", "auto", "dlss", "xess", "fsr3", "fsr4"};
     const char *names[] = {menu_text(UI_MENU_UPSCALING_OFF), menu_text(UI_MENU_UPSCALING_AUTO), "NVIDIA DLSS",
-                           "Intel XeSS", "AMD FSR 3"};
+                           "Intel XeSS", "AMD FSR 3", "AMD FSR 4"};
     const UiTextId desc = UI_MENU_UPSCALING_DESC;
 #else
-    static const char *const vals[] = {"off", "auto", "fsr3"};
-    const char *names[] = {menu_text(UI_MENU_UPSCALING_OFF), menu_text(UI_MENU_UPSCALING_AUTO), "AMD FSR 3"};
+    static const char *const vals[] = {"off", "auto", "fsr3", "fsr4"};
+    const char *names[] = {menu_text(UI_MENU_UPSCALING_OFF), menu_text(UI_MENU_UPSCALING_AUTO), "AMD FSR 3",
+                           "AMD FSR 4"};
     const UiTextId desc = UI_MENU_UPSCALING_DESC_OTHER;
 #endif
     enum { N = sizeof vals / sizeof *vals };
     const char *up = cfg_upscaling(), *runs = vk_dlaa_upscaler_name();
+    // FSR 4, the last entry, only on a GPU it can run on (vk_fsr4.c), or while it is the setting (to say it cannot)
+    const int n = vk_fsr4_offered() || !strcmp(up, "fsr4") ? N : N - 1;
     int cur = -1;
-    for (int i = 0; i < N; i++)
+    for (int i = 0; i < n; i++)
         if (!strcmp(up, vals[i])) cur = i;
     int state = vk_dlaa_choice_state(up);
-    static char note_up[96];
+    static char note_up[128];
     const char *note = nullptr;
     if (state == 2) {
         note = menu_text(UI_MENU_UPSCALING_UNAVAILABLE);
+        // FSR 4 that cannot run has another upscaler in its place (vk_dlaa.c pick: FSR 3): the note names it, and the
+        // file FSR 4 lacks when that is why
+        if (!strcmp(up, "fsr4") && runs) {
+            const char *missing = vk_fsr4_missing();
+            if (missing) snprintf(note_up, sizeof note_up, menu_text(UI_MENU_UPSCALING_MISSING), missing, runs);
+            else snprintf(note_up, sizeof note_up, menu_text(UI_MENU_UPSCALING_INSTEAD), runs);
+            note = note_up;
+        }
     } else if (state == 1) {
         if (runs) snprintf(note_up, sizeof note_up, menu_text(UI_MENU_UPSCALING_UNTIL), runs), note = note_up;
         else note = menu_text(UI_MENU_AFTER_RESTART);
     } else if (!strcmp(up, "auto") && runs) {
         snprintf(note_up, sizeof note_up, menu_text(UI_MENU_PRESENT_IN_USE), runs), note = note_up;
     }
-    opt_choice_list("AC_UPSCALING", UI_MENU_UPSCALING, vals, names, N, desc, cur, note);
+    opt_choice_list("AC_UPSCALING", UI_MENU_UPSCALING, vals, names, n, desc, cur, note);
     {
         static const char *const qv[] = {"native", "quality", "balanced", "performance", "ultra_performance"};
         const char *qn[] = {menu_text(UI_MENU_UPSCALING_NATIVE), menu_text(UI_MENU_DLSS_QUALITY),
@@ -598,12 +619,10 @@ static void rows_upscaling(void) {
                         off ? nullptr : note_q);
     }
     {
-        static const char *const av[] = {"off", "smaa", "cmaa2"};
-        const char *an[] = {menu_text(UI_MENU_AA_OFF), "SMAA", "CMAA 2"};
+        static const char *const av[] = {"off", "smaa"};
+        const char *an[] = {menu_text(UI_MENU_AA_OFF), "SMAA"};
         if (vk_dlaa_running()) opt_disable_next(UI_MENU_AA_BY_UPSCALER);
-        const char *aa = cfg_value("AC_ANTI_ALIASING");
-        opt_choice_list("AC_ANTI_ALIASING", UI_MENU_AA, av, an, 3, UI_MENU_AA_DESC,
-                        !strcmp(aa, "smaa") ? 1 : !strcmp(aa, "cmaa2") ? 2 : 0);
+        opt_choice_list("AC_ANTI_ALIASING", UI_MENU_AA, av, an, 2, UI_MENU_AA_DESC, cfg_smaa() ? 1 : 0);
     }
 }
 
@@ -720,8 +739,6 @@ static void rows_color(void) {
         cfg_set("AC_COLOR_PRESET", "custom");
         cfg_save();
     }
-    static const UiTextId postnames[] = {UI_MENU_POST_PRESET_OFF, UI_MENU_POST_PRESET_ELZELDAPA};
-    opt_choice("AC_POST_PRESET", UI_MENU_POST_PRESET, postnames, 2, UI_MENU_POST_PRESET_DESC);
 }
 
 static void tab_screen(float scale) {
@@ -733,59 +750,23 @@ static void tab_screen(float scale) {
     static const UiTextId lowlat[] = {UI_MENU_LOW_LATENCY_OFF, UI_MENU_LOW_LATENCY_ON, UI_MENU_LOW_LATENCY_BOOST};
     opt_choice("AC_LOW_LATENCY", UI_MENU_LOW_LATENCY, lowlat, 3, UI_MENU_LOW_LATENCY_DESC, low_latency_note());
     row_gpu();
-    // Perfil de dispositivo y proporción (cfg.c, sección display): qué defaults de dispositivo mandan y cómo
-    // encaja la imagen en la pantalla; el perfil se lee al arrancar, la proporción es en vivo.
-    static const UiTextId profile[] = {UI_MENU_AUTO, UI_MENU_PROFILE_DESKTOP, UI_MENU_PROFILE_DECK};
-    opt_choice("AC_DEVICE_PROFILE", UI_MENU_DEVICE_PROFILE, profile, 3, UI_MENU_DEVICE_PROFILE_DESC);
-    static const UiTextId aspect[] = {UI_MENU_ASPECT_FIT, UI_MENU_ASPECT_STRETCH, UI_MENU_ASPECT_WIDE};
-    opt_choice("AC_ASPECT", UI_MENU_ASPECT, aspect, 3, UI_MENU_ASPECT_DESC);
     static const UiTextId perf[] = {UI_MENU_PERF_OFF, UI_MENU_PERF_FPS, UI_MENU_PERF_FULL};
     opt_choice("AC_PERF_OVERLAY", UI_MENU_PERF_OVERLAY, perf, 3, UI_MENU_PERF_OVERLAY_DESC);
     opt_group(UI_MENU_GRAPHICS);
     row_output_res();
-    // Escala de renderizado (resolution.c): por encima de 100 es supersampling, la mejora de detalle
-    // más directa; la clave ya aceptaba 25..400 y el menú no la ofrecía.
-    static const char *const rscale[] = {"game", "50", "67", "75", "100", "125", "150", "200"};
-    static const char *const rscale_names[] = {"Game", "50%", "67%", "75%", "100%", "125%", "150%", "200%"};
-    opt_choice_list("AC_RENDER_SCALE", UI_MENU_RENDER_SCALE, rscale, rscale_names, 8, UI_MENU_RENDER_SCALE_DESC);
     rows_upscaling();
     static const UiTextId up[] = {UI_MENU_UPSCALER_FSR, UI_MENU_UPSCALER_BILINEAR};
     opt_choice("AC_UPSCALER", UI_MENU_UPSCALER, up, 2, UI_MENU_UPSCALER_DESC);
     opt_slider("AC_SHARPNESS", UI_MENU_SHARPNESS, 0, 100, UI_MENU_SHARPNESS_DESC, 5, "%.0f %%");
-    static const char *const shv[] = {"rcas", "smart"};
-    static const char *const shn[] = {"RCAS", "Smart Sharp"};
-    opt_choice_list("AC_SHARPENER", UI_MENU_SHARPENER, shv, shn, 2, UI_MENU_SHARPENER_DESC);
     opt_slider("AC_FOV", UI_MENU_FOV, 70, 140, UI_MENU_FOV_DESC, 5, "%.0f %%");
     opt_slider("AC_DRAW_DISTANCE", UI_MENU_DRAW_DISTANCE, 100, 400, UI_MENU_DRAW_DISTANCE_DESC, 25, "%.0f %%");
     static const char *const aniso[] = {"auto", "game", "2", "4", "8", "16"};
     const char *aniso_names[] = {menu_text(UI_MENU_ANISO_AUTO), menu_text(UI_MENU_ANISO_GAME), "2x", "4x", "8x", "16x"};
     opt_choice_list("AC_ANISO", UI_MENU_ANISO, aniso, aniso_names, 6, UI_MENU_ANISO_DESC);
-    // Sesgo de LOD de texturas (vk_texture.c): negativo = mips más finos, más nitidez con algo de shimmer.
-    opt_slider("AC_TEX_LOD_BIAS", UI_MENU_TEX_LOD_BIAS, -2, 0, UI_MENU_TEX_LOD_BIAS_DESC, 0.25f, "%.2f");
-    // Compresión de texturas del fork (vk_astc.c): los valores que acepta la clave son auto, bc1, 1 (BC3
-    // forzado), bc7 y 0 (sin compresión, RGBA8). La caché BC7 precómputada (bc7_cache.h) solo actúa con BC7.
-    static const char *const astc_bc[] = {"auto", "bc1", "1", "bc7", "0"};
-    static const char *const astc_bc_names[] = {"Auto", "BC1", "BC3", "BC7", "Off (RGBA8)"};
-    opt_choice_list("AC_ASTC_BC", UI_MENU_TEX_COMPRESSION, astc_bc, astc_bc_names, 5, UI_MENU_TEX_COMPRESSION_DESC);
-    opt_toggle("AC_BC7_CACHE", UI_MENU_BC7_CACHE, UI_MENU_BC7_CACHE_DESC);
     row_shadow_scale();
-    // Resolución y alcance de las sombras (cfg.c): la escala de arriba multiplica el tamaño que el juego pide;
-    // estas dos fijan el tamaño mismo y hasta dónde llega el mapa.
-    static const char *const shres[] = {"game", "512", "768", "1024", "1536", "2048"};
-    const char *shres_names[] = {menu_text(UI_MENU_ANISO_GAME), "512", "768", "1024", "1536", "2048"};
-    opt_choice_list("AC_SHADOW_RES", UI_MENU_SHADOW_RES, shres, shres_names, 6, UI_MENU_SHADOW_RES_DESC);
-    opt_slider("AC_SHADOW_RANGE", UI_MENU_SHADOW_RANGE, 50, 400, UI_MENU_SHADOW_RANGE_DESC, 5, "%.0f %%");
     // off, low, high, gi: the names in the order of cfg.c's values for AO
     static const UiTextId ao[] = {UI_MENU_AO_OFF, UI_MENU_AO_LOW, UI_MENU_AO_HIGH, UI_MENU_AO_GI};
     opt_choice("AC_AO", UI_MENU_AO, ao, 4, UI_MENU_AO_DESC);
-    // Sombras de contacto y PCSS (vk_contact.c): sliders de porcentaje como los del bloque. Son
-    // claves RESTART y la fila lo dice sola desde la meta de cfg; los defaults (0) no se tocan.
-    opt_slider("AC_CONTACT_SHADOWS", UI_MENU_CONTACT_SHADOWS, 0, 100, UI_MENU_CONTACT_SHADOWS_DESC, 5, "%.0f %%");
-    opt_slider("AC_PCSS", UI_MENU_PCSS, 0, 200, UI_MENU_PCSS_DESC, 5, "%.0f %%");
-    // Post-procesado del propio juego (vk_post.c): interruptores en vivo; 1 es como viene el juego.
-    opt_toggle("AC_MOTION_BLUR", UI_MENU_MOTION_BLUR, UI_MENU_MOTION_BLUR_DESC);
-    opt_toggle("AC_DEPTH_OF_FIELD", UI_MENU_DEPTH_OF_FIELD, UI_MENU_DEPTH_OF_FIELD_DESC);
-    opt_toggle("AC_CHROMATIC_ABERRATION", UI_MENU_CHROMATIC_ABERRATION, UI_MENU_CHROMATIC_ABERRATION_DESC);
     rows_color();
     opt_group(UI_MENU_HDR_GROUP);
     opt_toggle("AC_HDR", UI_MENU_HDR, UI_MENU_HDR_DESC);
@@ -800,28 +781,11 @@ static void tab_screen(float scale) {
 static void tab_game(float scale) {
     opt_begin("##game", scale);
     row_fps_limit();
-    // La sección «frame rate» de cfg.c: simulación en tiempo real, telas en tiempo real y el arreglo de
-    // físicas a fps altos; las tres se leen al arrancar.
-    opt_toggle("AC_REALTIME", UI_MENU_REALTIME, UI_MENU_REALTIME_DESC);
-    opt_toggle("AC_CLOTH_REALTIME", UI_MENU_CLOTH_REALTIME, UI_MENU_CLOTH_REALTIME_DESC);
-    opt_toggle("AC_HIGHFPS_FIX", UI_MENU_HIGHFPS_FIX, UI_MENU_HIGHFPS_FIX_DESC);
     row_game_lang();
     static const UiTextId mode[] = {UI_MENU_MODE_DOCKED, UI_MENU_MODE_HANDHELD};
     opt_choice("AC_OPERATION_MODE", UI_MENU_OPERATION_MODE, mode, 2, UI_MENU_OPERATION_MODE_DESC);
     opt_toggle("AC_ASSUME_FOCUS", UI_MENU_ASSUME_FOCUS, UI_MENU_ASSUME_FOCUS_DESC);
     opt_toggle("AC_HUD", UI_MENU_HUD, UI_MENU_HUD_DESC);
-    // La separación de ReShade del fork (vk_reshade.c): en vivo, junto al interruptor del HUD porque actúa
-    // sobre cómo se dibuja la interfaz frente a la escena.
-    opt_toggle("AC_RESHADE", UI_MENU_RESHADE, UI_MENU_RESHADE_DESC);
-    // Reconstrucción de mods al arrancar (cheats.c): automática cuando cambian los archivos, o nunca.
-    static const UiTextId mods_rebuild[] = {UI_MENU_AUTO, UI_MENU_OFF};
-    opt_choice("AC_MODS_REBUILD", UI_MENU_MODS_REBUILD, mods_rebuild, 2, UI_MENU_MODS_REBUILD_DESC);
-    opt_end();
-}
-
-static void tab_sound(float scale) {
-    opt_begin("##sound", scale);
-    opt_slider("AC_VOLUME", UI_MENU_VOLUME, 0, 100, UI_MENU_VOLUME_DESC, 5, "%.0f %%");
     opt_end();
 }
 
@@ -947,6 +911,180 @@ static void restart_confirm(void) {
     ImGui::EndPopup();
 }
 
+// ---- the Sound tab: the output (stereo or 5.1) and what the device takes, the speaker diagram and test, the 5.1 mix
+
+// The speaker names of the rows and of the test, per channel of the mix (FL FR FC LFE SL SR); a stereo mix's two.
+static const UiTextId kSpeakerRow[6] = {UI_MENU_AUDIO_FRONT_LEFT, UI_MENU_AUDIO_FRONT_RIGHT, UI_MENU_AUDIO_CENTER,
+                                        UI_MENU_AUDIO_SUBWOOFER,  UI_MENU_AUDIO_SURROUND_LEFT,
+                                        UI_MENU_AUDIO_SURROUND_RIGHT};
+static const char *speaker_name(int ch, int nmix) {
+    if (nmix != 6) return menu_text(ch ? UI_MENU_SPK_RIGHT : UI_MENU_SPK_LEFT);
+    return menu_text(kSpeakerRow[ch]);
+}
+
+// The line under the output row (audio_out.h), so a player sees whether the setup is right before switching and that the
+// 5.1 gets through after: what the device takes, then how many channels the game sends it now. A headset with Windows
+// spatial sound on keeps a 2 channel mixer while it takes 5.1, so the line names spatial sound there rather than a count
+// that reads as "no 5.1". NULL before the game opened its output, or with AC_AUDIO=none. *warn: 5.1 is asked for and the
+// device takes none.
+static const char *audio_output_line(bool *warn) {
+    AudioOutInfo info;
+    audio_out_info(&info);
+    *warn = false;
+    if (!info.started) return nullptr;
+    static char line[512];
+    if (!info.open) {
+        snprintf(line, sizeof line, "%s", menu_text(UI_MENU_AUDIO_NO_DEVICE));
+        *warn = true;
+        return line;
+    }
+    int n;
+    if (info.surround_ok && info.spatial == 1)
+        n = snprintf(line, sizeof line, menu_text(UI_MENU_AUDIO_TAKES_51_SPATIAL), info.name);
+    else
+        n = snprintf(line, sizeof line, menu_text(info.surround_ok ? UI_MENU_AUDIO_TAKES_51 : UI_MENU_AUDIO_FOLDS_51),
+                     info.name, info.device_channels);
+#ifdef _WIN32
+    if (!info.surround_ok && n > 0 && n < (int)sizeof line)
+        n += snprintf(line + n, sizeof line - (size_t)n, " %s", menu_text(UI_MENU_AUDIO_SONIC_HINT));
+#endif
+    if (n > 0 && n < (int)sizeof line) {
+        n += snprintf(line + n, sizeof line - (size_t)n, " ");
+        snprintf(line + n, sizeof line - (size_t)n, menu_text(UI_MENU_AUDIO_SENDING), info.stream_channels);
+    }
+    *warn = !info.surround_ok && !strcmp(cfg_value("AC_AUDIO_OUTPUT"), "5.1");
+    return line;
+}
+
+// The room from above with the listener in the middle: each speaker of the mix lights up with its sound (the output's
+// peaks since the last frame on a 48 dB scale, falling 24 dB a second) and is outlined while the speaker test plays on
+// it, so a player sees that every speaker gets sound and which one is which. Not a row: the cursor passes it by.
+static void speaker_map(int nmix) {
+    static float lit[6];
+    static double last;
+    float peak[6];
+    audout_meters(peak);
+    double now = ImGui::GetTime();
+    float dt = (float)(now - last);
+    last = now;
+    if (dt < 0 || dt > 0.2f) dt = 0.2f;
+    for (int c = 0; c < 6; c++) {
+        float db = peak[c] > 1e-6f ? 20.0f * log10f(peak[c]) : -120.0f;
+        float v = fminf(fmaxf((db + 48.0f) / 48.0f, 0.0f), 1.0f);
+        lit[c] = fmaxf(v, lit[c] - dt * 0.5f);
+    }
+    const int testing = audout_test_channel();
+    struct Spot { int ch; float x, y; UiTextId name; };
+    static const Spot spots51[] = {{0, -0.62f, -0.82f, UI_MENU_SPK_LEFT},          {2, 0.0f, -1.0f, UI_MENU_SPK_CENTER},
+                                   {1, 0.62f, -0.82f, UI_MENU_SPK_RIGHT},          {4, -1.0f, 0.42f, UI_MENU_SPK_SURROUND_LEFT},
+                                   {5, 1.0f, 0.42f, UI_MENU_SPK_SURROUND_RIGHT},   {3, 0.62f, 1.0f, UI_MENU_SPK_SUB}};
+    static const Spot spots20[] = {{0, -0.62f, -0.82f, UI_MENU_SPK_LEFT}, {1, 0.62f, -0.82f, UI_MENU_SPK_RIGHT}};
+    const Spot *spots = nmix == 6 ? spots51 : spots20;
+    const int count = nmix == 6 ? 6 : 2;
+
+    float fs = ImGui::GetFontSize(), small = fs * 0.72f, w = ImGui::GetContentRegionAvail().x, h = floorf(fs * 9.0f);
+    ImVec2 p = ImGui::GetCursorScreenPos();
+    ImGui::Dummy(ImVec2(w, h));
+    ImDrawList *dl = ImGui::GetWindowDrawList();
+    ImFont *font = ImGui::GetFont();
+    float r = 9 * fs / 26.0f;
+    dl->AddRectFilled(p, ImVec2(p.x + w, p.y + h), IM_COL32(0, 0, 0, 40), r);
+    dl->AddRect(p, ImVec2(p.x + w, p.y + h), IM_COL32(255, 255, 255, 38), r);
+    float cx = p.x + w * 0.5f, cy = p.y + h * 0.5f, rx = fminf(w * 0.36f, h * 0.9f), ry = h * 0.32f;
+    float box = fs * 1.15f;
+    for (int i = 0; i < count; i++)   // faint lines from the listener to each speaker
+        dl->AddLine(ImVec2(cx, cy), ImVec2(cx + spots[i].x * rx, cy + spots[i].y * ry), IM_COL32(255, 255, 255, 22), 1.0f);
+    dl->AddCircleFilled(ImVec2(cx, cy), fs * 0.5f, IM_COL32(236, 194, 84, 70));
+    dl->AddCircle(ImVec2(cx, cy), fs * 0.5f, IM_COL32(236, 194, 84, 200), 0, 1.5f);
+    const char *you = menu_text(UI_MENU_SPK_YOU);
+    float yw = font->CalcTextSizeA(small, FLT_MAX, 0, you).x;
+    dl->AddText(font, small, ImVec2(cx - yw * 0.5f, cy + fs * 0.6f), IM_COL32(150, 150, 140, 255), you);
+    for (int i = 0; i < count; i++) {
+        const Spot &s = spots[i];
+        float x = cx + s.x * rx, y = cy + s.y * ry, v = lit[s.ch];
+        ImVec2 a(x - box * 0.5f, y - box * 0.5f), b(x + box * 0.5f, y + box * 0.5f);
+        dl->AddRectFilled(a, b, IM_COL32(58, 58, 54, 255), box * 0.22f);
+        dl->AddRectFilled(a, b, IM_COL32(236, 194, 84, (int)(225 * v)), box * 0.22f);
+        dl->AddCircle(ImVec2(x, y), box * 0.27f, IM_COL32(20, 20, 18, 200), 0, 2.0f);   // the driver
+        bool on = s.ch == testing;
+        dl->AddRect(a, b, on ? IM_COL32(255, 244, 214, 255) : IM_COL32(255, 255, 255, 60), box * 0.22f, 0, on ? 2.5f : 1.0f);
+        const char *name = menu_text(s.name);
+        float nw = font->CalcTextSizeA(small, FLT_MAX, 0, name).x;
+        dl->AddText(font, small, ImVec2(x - nw * 0.5f, b.y + fs * 0.12f),
+                    on ? IM_COL32(236, 194, 84, 255) : IM_COL32(205, 205, 195, 255), name);
+    }
+}
+
+// The 5.1 mix: a preset writes the speaker gains and the bass (as the colour presets do); moving one makes it Custom.
+static void rows_mix(void) {
+    static const struct { const char *name, *fl, *fr, *c, *sl, *sr, *sub, *bass; } presets[] = {
+        {"balanced", "0", "0", "-2", "0", "0", "0", "0"},
+        {"voices", "0", "0", "1", "-3", "-3", "0", "0"},
+        {"immersive", "0", "0", "-3", "3", "3", "0", "1"}};
+    static const UiTextId names[] = {UI_MENU_AUDIO_PRESET_BALANCED, UI_MENU_AUDIO_PRESET_VOICES,
+                                     UI_MENU_AUDIO_PRESET_IMMERSIVE, UI_MENU_AUDIO_PRESET_CUSTOM};
+    if (opt_choice("AC_AUDIO_MIX_PRESET", UI_MENU_AUDIO_PRESET, names, 4, UI_MENU_AUDIO_PRESET_DESC)) {
+        const char *p = cfg_value("AC_AUDIO_MIX_PRESET");
+        for (const auto &e : presets)
+            if (!strcmp(p, e.name)) {
+                cfg_set("AC_AUDIO_FRONT_LEFT", e.fl), cfg_set("AC_AUDIO_FRONT_RIGHT", e.fr);
+                cfg_set("AC_AUDIO_CENTER", e.c), cfg_set("AC_AUDIO_SURROUND_LEFT", e.sl);
+                cfg_set("AC_AUDIO_SURROUND_RIGHT", e.sr), cfg_set("AC_AUDIO_SUBWOOFER", e.sub);
+                cfg_set("AC_AUDIO_BASS", e.bass);
+                cfg_save();
+            }
+    }
+    static const char *const keys[6] = {"AC_AUDIO_FRONT_LEFT", "AC_AUDIO_FRONT_RIGHT", "AC_AUDIO_CENTER",
+                                        "AC_AUDIO_SURROUND_LEFT", "AC_AUDIO_SURROUND_RIGHT", "AC_AUDIO_SUBWOOFER"};
+    static const UiTextId labels[6] = {UI_MENU_AUDIO_FRONT_LEFT, UI_MENU_AUDIO_FRONT_RIGHT, UI_MENU_AUDIO_CENTER,
+                                       UI_MENU_AUDIO_SURROUND_LEFT, UI_MENU_AUDIO_SURROUND_RIGHT, UI_MENU_AUDIO_SUBWOOFER};
+    static const UiTextId descs[6] = {UI_MENU_AUDIO_FRONT_DESC,    UI_MENU_AUDIO_FRONT_DESC,    UI_MENU_AUDIO_CENTER_DESC,
+                                      UI_MENU_AUDIO_SURROUND_DESC, UI_MENU_AUDIO_SURROUND_DESC, UI_MENU_AUDIO_SUBWOOFER_DESC};
+    bool moved = false;
+    for (int i = 0; i < 6; i++) moved |= opt_slider(keys[i], labels[i], -12, 6, descs[i], 1, "%+.0f dB");
+    moved |= opt_toggle("AC_AUDIO_BASS", UI_MENU_AUDIO_BASS, UI_MENU_AUDIO_BASS_DESC);
+    if (moved && strcmp(cfg_value("AC_AUDIO_MIX_PRESET"), "custom")) {
+        cfg_set("AC_AUDIO_MIX_PRESET", "custom");
+        cfg_save();
+    }
+}
+
+static void tab_sound(float scale) {
+    opt_begin("##sound", scale);
+    opt_slider("AC_VOLUME", UI_MENU_VOLUME, 0, 100, UI_MENU_VOLUME_DESC, 5, "%.0f %%");
+
+    opt_group(UI_MENU_AUDIO_GROUP_OUTPUT);
+    static const UiTextId output[] = {UI_MENU_AUDIO_STEREO, UI_MENU_AUDIO_51};   // cfg.c's values for AUDIO_OUTPUT
+#ifdef _WIN32
+    const UiTextId output_desc = UI_MENU_AUDIO_OUTPUT_DESC_WIN;   // names Windows Sonic and the other spatial formats
+#else
+    const UiTextId output_desc = UI_MENU_AUDIO_OUTPUT_DESC;
+#endif
+    opt_choice("AC_AUDIO_OUTPUT", UI_MENU_AUDIO_OUTPUT, output, 2, output_desc);
+    bool warn;
+    if (const char *line = audio_output_line(&warn)) opt_text_str(line, warn);
+    // The output is fixed when the game opens it: while the one asked for differs, offer the restart right here.
+    const int nmix = audout_mix_channels(), want = !strcmp(cfg_value("AC_AUDIO_OUTPUT"), "5.1") ? 6 : 2;
+    bool ask = nmix && want != nmix && opt_button("##restart", UI_MENU_RESTART, UI_MENU_AUDIO_RESTART_DESC);
+
+    if (nmix) {
+        opt_group(UI_MENU_AUDIO_GROUP_MIX);
+        speaker_map(nmix);
+        const bool running = audout_test_running() != 0;
+        const int ch = audout_test_channel();
+        const char *value = !running ? menu_text(UI_MENU_AUDIO_TEST_START) : ch >= 0 ? speaker_name(ch, nmix) : "...";
+        if (opt_text_row("##audio_test", menu_text(UI_MENU_AUDIO_TEST), value,
+                         running ? menu_text(UI_MENU_AUDIO_TEST_STOP) : nullptr, menu_text(UI_MENU_AUDIO_TEST_DESC),
+                         false) == 2)
+            audout_test(!running);
+        if (nmix == 6) rows_mix();
+        else opt_text(UI_MENU_AUDIO_MIX_HINT);
+    }
+    opt_end();
+    if (ask) ImGui::OpenPopup("##restart_confirm");   // at the level BeginPopupModal looks it up
+    restart_confirm();
+}
+
 static void tab_controls(float scale) {
     opt_begin("##controls", scale);
     static const UiTextId layout[] = {UI_MENU_PAD_LAYOUT_AUTO, UI_MENU_PAD_LAYOUT_NINTENDO, UI_MENU_PAD_LAYOUT_XBOX,
@@ -969,18 +1107,12 @@ static void tab_controls(float scale) {
     char stick_note[2][64];
     for (int s = 0; s < 2; s++)
         snprintf(stick_note[s], sizeof stick_note[s], menu_text(UI_MENU_STICK_DEADZONE_NOW), now[s]);
-    // La zona muerta compartida: es el valor al que recurren las dos filas de abajo mientras no tengan el suyo.
-    opt_slider("AC_STICK_DEADZONE", UI_MENU_STICK_DEADZONE, 0, 50, UI_MENU_STICK_DEADZONE_DESC, 1, "%.0f %%");
     opt_slider("AC_LSTICK_DEADZONE", UI_MENU_LSTICK_DEADZONE, 0, 50, UI_MENU_STICK_DEADZONE_DESC, 1, "%.0f %%",
                pad ? stick_note[0] : nullptr, "AC_STICK_DEADZONE");
     opt_slider("AC_RSTICK_DEADZONE", UI_MENU_RSTICK_DEADZONE, 0, 50, UI_MENU_STICK_DEADZONE_DESC, 1, "%.0f %%",
                pad ? stick_note[1] : nullptr, "AC_STICK_DEADZONE");
     opt_slider("AC_STICK_SENS", UI_MENU_STICK_SENS, 0.1f, 3, UI_MENU_STICK_SENS_DESC, 0.05f, "%.2f");
     opt_slider("AC_MOUSE_SENS", UI_MENU_MOUSE_SENS, 0, 10, UI_MENU_MOUSE_SENS_DESC, 0.1f, "%.1f");
-    // La conversión de cámara con ratón del fork: sparrow (la del port) o puddz (la de AstralChain-PC), en vivo.
-    static const char *const mouse_cam[] = {"sparrow", "puddz"};
-    static const char *const mouse_cam_names[] = {"Sparrow", "Puddz"};
-    opt_choice_list("AC_MOUSE_CAMERA", UI_MENU_MOUSE_CAMERA, mouse_cam, mouse_cam_names, 2, UI_MENU_MOUSE_CAMERA_DESC);
     row_walk_key();
     opt_slider("AC_WALK_SCALE", UI_MENU_WALK_SCALE, 0.2f, 0.9f, UI_MENU_WALK_SCALE_DESC, 0.01f, "%.2f");
     binds_rows(scale);
@@ -999,103 +1131,10 @@ static void tab_menu(float scale) {
 }
 
 static const UiTextId kTabNames[TAB_COUNT] = {UI_MENU_TAB_SCREEN,   UI_MENU_TAB_GAME,   UI_MENU_TAB_SOUND,
-                                              UI_MENU_TAB_CONTROLS, UI_MENU_TAB_MENU,   UI_MENU_TAB_MODS,
-                                              UI_MENU_TAB_PERF,     UI_MENU_TAB_DEBUG};
+                                              UI_MENU_TAB_CONTROLS, UI_MENU_TAB_MENU,   UI_MENU_TAB_MODS};
 static int g_tab;               // the tab shown
 static int g_tab_request = -1;  // select this tab at the next layout; -1 none
 static int g_focus_page = -1;   // this tab's first row takes the cursor once it is shown; -1 none
-
-// ---- Debug: vistas y registros de depuración; todos se leen al arrancar (RESTART en cfg.c) ----
-static void tab_debug(float scale) {
-    (void)scale;
-    static const char *kAoVals[] = {"0", "1", "2", "3"};
-    static const char *kAoNames[] = {"Off", "Factor", "Surface share", "Whole pixel"};
-    opt_begin("##debug", scale);
-    opt_toggle("AC_POST_DEBUG", UI_MENU_POST_DEBUG, UI_MENU_POST_DEBUG_DESC);
-    opt_toggle("AC_CONTACT_DEBUG", UI_MENU_CONTACT_DEBUG, UI_MENU_CONTACT_DEBUG_DESC);
-    opt_choice_list("AC_AO_DEBUG", UI_MENU_AO_DEBUG, kAoVals, kAoNames, 4, UI_MENU_AO_DEBUG_DESC);
-    opt_toggle("AC_BC7_CACHE_LOG", UI_MENU_BC7_CACHE_LOG, UI_MENU_BC7_CACHE_LOG_DESC);
-    opt_toggle("AC_FLIGHT", UI_MENU_FLIGHT, UI_MENU_FLIGHT_DESC);
-    opt_slider("AC_FLIGHT_SPIKE_MS", UI_MENU_FLIGHT_SPIKE_MS, 0, 1000, UI_MENU_FLIGHT_SPIKE_MS_DESC, 10, "%.0f");
-    // La ventana de consola (main.c) y las comprobaciones de diagnóstico que quedaban solo en el ini:
-    // decodificación zstd por las dos vías (ov_zstd.c) y la escritura exacta de texturas (vk_texture.c).
-    opt_toggle("AC_CONSOLE", UI_MENU_CONSOLE, UI_MENU_CONSOLE_DESC);
-    opt_toggle("AC_ZSTD_NATIVE", UI_MENU_ZSTD_NATIVE, UI_MENU_ZSTD_NATIVE_DESC);
-    opt_toggle("AC_ZSTD_CHECK", UI_MENU_ZSTD_CHECK, UI_MENU_ZSTD_CHECK_DESC);
-    opt_toggle("AC_WB_EXACT", UI_MENU_WB_EXACT, UI_MENU_WB_EXACT_DESC);
-    opt_slider("AC_WB_FENCE_LIMIT", UI_MENU_WB_FENCE_LIMIT, 0, 1073741824, UI_MENU_WB_FENCE_LIMIT_DESC, 65536,
-               "%.0f");
-    opt_end();
-}
-
-// ---- Rendimiento: la sección «performance» de cfg.c entera, agrupada con los títulos que el catálogo ya
-// traía (GROUP_SHADERS / GROUP_VULKAN / GROUP_SCHED / GROUP_TEXMEM / GROUP_FIXES). Todo se lee al arrancar
-// salvo lo que su propia meta marque en vivo; la fila lo dice sola desde cfg.
-static void tab_perf(float scale) {
-    opt_begin("##perf", scale);
-    opt_group(UI_MENU_GROUP_SHADERS);
-    static const UiTextId astc[] = {UI_MENU_ASTC_AUTO, UI_MENU_ASTC_GPU, UI_MENU_ASTC_NATIVE, UI_MENU_ASTC_CPU};
-    opt_choice("AC_ASTC", UI_MENU_ASTC, astc, 4, UI_MENU_ASTC_DESC);
-    static const UiTextId mem[] = {UI_MENU_MEMORY_AUTO, UI_MENU_MEMORY_IMPORT, UI_MENU_MEMORY_MIRROR,
-                                   UI_MENU_MEMORY_VERIFY};
-    opt_choice("AC_MEMORY", UI_MENU_MEMORY, mem, 4, UI_MENU_MEMORY_DESC);
-    opt_toggle("AC_GPL", UI_MENU_GPL, UI_MENU_GPL_DESC);
-    // Hilos con «automático» real: la clave vacía deja que el runtime elija; la lista ofrece ese automático
-    // y los conteos útiles en vez de un deslizador que enseñaría un 0 falso.
-    static const char *const threads[] = {"", "1", "2", "4", "8", "16", "32"};
-    const char *thread_names[] = {menu_text(UI_MENU_AUTO), "1", "2", "4", "8", "16", "32"};
-    opt_choice_list("AC_PREWARM_XLATE", UI_MENU_PREWARM_XLATE, threads, thread_names, 7,
-                    UI_MENU_PREWARM_XLATE_DESC);
-    opt_toggle("AC_PIPE_PREBUILD", UI_MENU_PIPE_PREBUILD, UI_MENU_PIPE_PREBUILD_DESC);
-    opt_toggle("AC_LIB_PREBUILD", UI_MENU_LIB_PREBUILD, UI_MENU_LIB_PREBUILD_DESC);
-    opt_choice_list("AC_LIB_PREBUILD_THREADS", UI_MENU_LIB_PREBUILD_THREADS, threads, thread_names, 7,
-                    UI_MENU_LIB_PREBUILD_THREADS_DESC);
-    opt_slider("AC_LIB_PREBUILD_KEEP", UI_MENU_LIB_PREBUILD_KEEP, 0, 4096, UI_MENU_LIB_PREBUILD_KEEP_DESC, 64,
-               "%.0f");
-    opt_toggle("AC_SHADER_MEMO", UI_MENU_SHADER_MEMO, UI_MENU_SHADER_MEMO_DESC);
-    opt_toggle("AC_PIPE_MEMO", UI_MENU_PIPE_MEMO, UI_MENU_PIPE_MEMO_DESC);
-    opt_group(UI_MENU_GROUP_VULKAN);
-    opt_toggle("AC_VK_DYN_A2C", UI_MENU_VK_DYN_A2C, UI_MENU_VK_DYN_A2C_DESC);
-    opt_toggle("AC_VK_DYN_VERTEX", UI_MENU_VK_DYN_VERTEX, UI_MENU_VK_DYN_VERTEX_DESC);
-    opt_toggle("AC_VK_SUBGROUP_PIN", UI_MENU_VK_SUBGROUP_PIN, UI_MENU_VK_SUBGROUP_PIN_DESC);
-    opt_toggle("AC_VK_VALIDATION", UI_MENU_VK_VALIDATION, UI_MENU_VK_VALIDATION_DESC);
-    opt_group(UI_MENU_GROUP_SCHED);
-    // Expropiación asíncrona (kernel.c): 0 = nada, 1 = completa con interrupción, 2 = sin interrumpir al dueño.
-    static const UiTextId preempt[] = {UI_MENU_OFF, UI_MENU_ON, UI_MENU_ASYNC_PREEMPT_NOINTR};
-    opt_choice("AC_ASYNC_PREEMPT", UI_MENU_ASYNC_PREEMPT, preempt, 3, UI_MENU_ASYNC_PREEMPT_DESC);
-    opt_toggle("AC_REPLAY_ASYNC", UI_MENU_REPLAY_ASYNC, UI_MENU_REPLAY_ASYNC_DESC);
-    static const UiTextId boost[] = {UI_MENU_AUTO, UI_MENU_OFF, UI_MENU_ON};
-    opt_choice("AC_CPU_BOOST", UI_MENU_CPU_BOOST, boost, 3, UI_MENU_CPU_BOOST_DESC);
-    opt_slider("AC_CPU_BOOST_SPIN_US", UI_MENU_CPU_BOOST_SPIN_US, 0, 20000, UI_MENU_CPU_BOOST_SPIN_US_DESC, 100,
-               "%.0f");
-    opt_toggle("AC_FREE_CORES", UI_MENU_FREE_CORES, UI_MENU_FREE_CORES_DESC);
-    opt_toggle("AC_TIMER_1MS", UI_MENU_TIMER_1MS, UI_MENU_TIMER_1MS_DESC);
-    opt_toggle("AC_PUSH_SKIP", UI_MENU_PUSH_SKIP, UI_MENU_PUSH_SKIP_DESC);
-    opt_slider("AC_SPLIT_DRAWS", UI_MENU_SPLIT_DRAWS, 0, 1000, UI_MENU_SPLIT_DRAWS_DESC, 8, "%.0f");
-    opt_slider("AC_SPLIT_US", UI_MENU_SPLIT_US, 0, 20000, UI_MENU_SPLIT_US_DESC, 100, "%.0f");
-    static const UiTextId pwait[] = {UI_MENU_PIPE_WAIT_DEFAULT, UI_MENU_PIPE_WAIT_DRAW};
-    opt_choice("AC_PIPE_WAIT", UI_MENU_PIPE_WAIT, pwait, 2, UI_MENU_PIPE_WAIT_DESC);
-    static const UiTextId pskip[] = {UI_MENU_PIPE_SKIP_STRICT, UI_MENU_PIPE_SKIP_ANY, UI_MENU_PIPE_SKIP_FULLSCREEN};
-    opt_choice("AC_PIPE_SKIP", UI_MENU_PIPE_SKIP, pskip, 3, UI_MENU_PIPE_SKIP_DESC);
-    opt_group(UI_MENU_GROUP_TEXMEM);
-    opt_toggle("AC_TEX_ALIAS", UI_MENU_TEX_ALIAS, UI_MENU_TEX_ALIAS_DESC);
-    // Tamaño de la caché de texturas: vacío = automático (un octavo de la VRAM); presets en MiB.
-    static const char *const tcache[] = {"", "256", "512", "1024", "2048", "4096"};
-    const char *tcache_names[] = {menu_text(UI_MENU_AUTO), "256 MB", "512 MB", "1024 MB", "2048 MB", "4096 MB"};
-    opt_choice_list("AC_TEX_CACHE_MB", UI_MENU_TEX_CACHE_MB, tcache, tcache_names, 6, UI_MENU_TEX_CACHE_MB_DESC);
-    opt_slider("AC_TEX_VRAM_PRESSURE", UI_MENU_TEX_VRAM_PRESSURE, 0, 100, UI_MENU_TEX_VRAM_PRESSURE_DESC, 1,
-               "%.0f %%");
-    static const char *const mipskip[] = {"0", "1024", "2048"};
-    const char *mipskip_names[] = {menu_text(UI_MENU_OFF), "1024", "2048"};
-    opt_choice_list("AC_TEX_MIP_SKIP", UI_MENU_TEX_MIP_SKIP, mipskip, mipskip_names, 3, UI_MENU_TEX_MIP_SKIP_DESC);
-    opt_toggle("AC_TEX_PREFETCH", UI_MENU_TEX_PREFETCH, UI_MENU_TEX_PREFETCH_DESC);
-    opt_toggle("AC_TEX_MEMO", UI_MENU_TEX_MEMO, UI_MENU_TEX_MEMO_DESC);
-    opt_group(UI_MENU_GROUP_FIXES);
-    opt_toggle("AC_LOD_GUARD", UI_MENU_LOD_GUARD, UI_MENU_LOD_GUARD_DESC);
-    opt_toggle("AC_FIX_C0", UI_MENU_FIX_C0, UI_MENU_FIX_C0_DESC);
-    opt_toggle("AC_FIX_ZERO", UI_MENU_FIX_ZERO, UI_MENU_FIX_ZERO_DESC);
-    opt_end();
-}
 
 // ---- Mods: the mods folder (mods.c) with switches and the load order. The folder was read at start; the rows
 // change the order and switches for the next start.
@@ -1215,8 +1254,6 @@ static void layout_menu(uint32_t w, uint32_t h, float scale) {
             case TAB_SCREEN: tab_screen(scale); break;
             case TAB_GAME: tab_game(scale); break;
             case TAB_MODS: tab_mods(scale); break;
-            case TAB_PERF: tab_perf(scale); break;
-            case TAB_DEBUG: tab_debug(scale); break;
             case TAB_SOUND: tab_sound(scale); break;
             case TAB_CONTROLS: tab_controls(scale); break;
             case TAB_MENU: tab_menu(scale); break;
@@ -1241,7 +1278,7 @@ static void layout_menu(uint32_t w, uint32_t h, float scale) {
     ImGui::SameLine();
     if (ImGui::Button(quit, ImVec2(bw, 0))) gfx_window_request_close();
     bool was_modal = g_modal || binds_modal();
-    if (g_tab != TAB_CONTROLS) g_modal = false;
+    if (g_tab != TAB_CONTROLS && g_tab != TAB_SOUND) g_modal = false;   // the two tabs with "Restart now"
     if (!was_modal && (ImGui::IsKeyPressed(ImGuiKey_Escape, false) || ImGui::IsKeyPressed(ImGuiKey_GamepadFaceRight, false)))
         set_open(0);
     ImGui::End();

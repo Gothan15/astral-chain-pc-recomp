@@ -26,54 +26,9 @@ typedef struct { const char *lang; const char *const *text; } Row;
     [UI_SWKBD_CANCEL] = cancel, [UI_SWKBD_PAD_HINT] = hint, LANG_NAMES
 
 static const char *const text_en[UI_TEXT_COUNT] = {
-    SWKBD("Text entry", "Enter a name", "Akira", "OK", "Cancel", "Controller: A = OK, B = Cancel"),
+    SWKBD("Text entry", "Enter a name", "Horse", "OK", "Cancel", "Controller: A = OK, B = Cancel"),
 
     [UI_MENU_TITLE] = "Settings",
-    [UI_MENU_TAB_DEBUG] = "Debug",
-    [UI_MENU_TAB_PERF] = "Performance",
-    [UI_MENU_ASPECT] = "Aspect ratio",
-    [UI_MENU_ASPECT_DESC] = "How the image fits the screen. Fit keeps the game's proportion with bars; Stretch fills the whole screen; Wide lets the game render in widescreen itself.",
-    [UI_MENU_ASPECT_FIT] = "Fit",
-    [UI_MENU_ASPECT_STRETCH] = "Stretch",
-    [UI_MENU_ASPECT_WIDE] = "Wide",
-    [UI_MENU_CONSOLE] = "Console window",
-    [UI_MENU_CONSOLE_DESC] = "Show the console window when the game starts. The log is written to its file either way.",
-    [UI_MENU_CPU_BOOST] = "CPU boost",
-    [UI_MENU_CPU_BOOST_DESC] = "Automatic lets the port raise thread priorities and spin briefly instead of sleeping; Off and On force it.",
-    [UI_MENU_CPU_BOOST_SPIN_US] = "Boost spin time",
-    [UI_MENU_CPU_BOOST_SPIN_US_DESC] = "Microseconds a boosted thread busy-waits before sleeping (0-20000).",
-    [UI_MENU_DEVICE_PROFILE] = "Device profile",
-    [UI_MENU_DEVICE_PROFILE_DESC] = "Which device's default settings to use: Automatic, a desktop PC, or the Steam Deck.",
-    [UI_MENU_PROFILE_DESKTOP] = "Desktop",
-    [UI_MENU_PROFILE_DECK] = "Steam Deck",
-    [UI_MENU_FREE_CORES] = "Free core assignment",
-    [UI_MENU_FREE_CORES_DESC] = "Let game threads run on any core instead of the game's own core plan.",
-    [UI_MENU_LIB_PREBUILD_KEEP] = "Prebuild cache kept",
-    [UI_MENU_LIB_PREBUILD_KEEP_DESC] = "Megabytes of prebuilt stage libraries kept on disk (0-4096).",
-    [UI_MENU_MODS_REBUILD] = "Rebuild mods at start",
-    [UI_MENU_MODS_REBUILD_DESC] = "Automatic rebuilds mods whose files changed; Off never rebuilds them at start.",
-    [UI_MENU_SHADOW_RANGE] = "Shadow range",
-    [UI_MENU_SHADOW_RANGE_DESC] = "How far the shadow maps reach, as a percentage of the game's own range (50-400).",
-    [UI_MENU_SHADOW_RES] = "Shadow resolution",
-    [UI_MENU_SHADOW_RES_DESC] = "The size of the shadow maps: the game's own, or a fixed size.",
-    [UI_MENU_SPLIT_US] = "Draw split budget",
-    [UI_MENU_SPLIT_US_DESC] = "Microseconds of draw work batched before splitting a submission (0-20000).",
-    [UI_MENU_STICK_DEADZONE] = "Stick deadzone",
-    [UI_MENU_TEX_CACHE_MB] = "Texture cache size",
-    [UI_MENU_TEX_CACHE_MB_DESC] = "Megabytes of GPU memory the texture cache may hold. Automatic takes an eighth of the GPU's memory.",
-    [UI_MENU_TEX_MIP_SKIP] = "Skip small texture mips",
-    [UI_MENU_TEX_MIP_SKIP_DESC] = "Do not build mips for ASTC textures whose base level is at most this many bytes.",
-    [UI_MENU_TEX_PREFETCH] = "Texture prefetch",
-    [UI_MENU_TEX_PREFETCH_DESC] = "Upload textures before their first use so they are ready when drawn.",
-    [UI_MENU_WB_EXACT] = "Exact texture write-back",
-    [UI_MENU_WB_EXACT_DESC] = "Decide which texture contents to write back exactly instead of by whole pages: fixes stale textures at some CPU cost.",
-    [UI_MENU_WB_FENCE_LIMIT] = "Write-back fence limit",
-    [UI_MENU_WB_FENCE_LIMIT_DESC] = "Largest texture, in bytes, written back when the CPU waits on a fence.",
-    [UI_MENU_ZSTD_CHECK] = "Verify zstd both ways",
-    [UI_MENU_ZSTD_CHECK_DESC] = "Decode every zstd stream with both decoders and compare: a debugging check, slow.",
-    [UI_MENU_ZSTD_NATIVE] = "Native zstd decoder",
-    [UI_MENU_ZSTD_NATIVE_DESC] = "Use the host's own zstd decoder instead of the game's.",
-    [UI_MENU_ASYNC_PREEMPT_NOINTR] = "On, no interruption",
     [UI_MENU_TAB_SCREEN] = "Screen", [UI_MENU_TAB_GAME] = "Game", [UI_MENU_TAB_MODS] = "Mods", [UI_MENU_TAB_SOUND] = "Sound",
     [UI_MENU_TAB_CONTROLS] = "Controls", [UI_MENU_TAB_MENU] = "Menu", [UI_MENU_TAB_ADVANCED] = "Advanced",
     [UI_MENU_CONTINUE] = "Continue", [UI_MENU_QUIT] = "Quit game",
@@ -124,10 +79,6 @@ static const char *const text_en[UI_TEXT_COUNT] = {
     [UI_MENU_ANISO_AUTO] = "Auto",
     [UI_MENU_SHARPNESS] = "FSR sharpness",
     [UI_MENU_SHARPNESS_DESC] = "Sharpening after FSR scaling; 0 turns it off.",
-    [UI_MENU_SHARPENER] = "Sharpener",
-    [UI_MENU_SHARPENER_DESC] = "Which sharpener the slider above drives. RCAS: AMD's, the one the port has always "
-                               "used. Smart Sharp: a bilateral contrast-adaptive sharpener (the ELZELDAPA preset's), "
-                               "gentler on noise.",
     [UI_MENU_COLOR] = "Colour",
     [UI_MENU_COLOR_PRESET] = "Colour profile",
     [UI_MENU_COLOR_PRESET_DESC] = "Sets the four values below. Vivid: more contrast and saturation, shadows opened a "
@@ -143,11 +94,6 @@ static const char *const text_en[UI_TEXT_COUNT] = {
     [UI_MENU_COLOR_SATURATION_DESC] = "Colour strength against grey; 100 % leaves it.",
     [UI_MENU_COLOR_GAMMA] = "Gamma",
     [UI_MENU_COLOR_GAMMA_DESC] = "Below 1 brightens dark and middle tones, above 1 darkens them; 1 leaves them.",
-    [UI_MENU_POST_PRESET] = "Image preset",
-    [UI_MENU_POST_PRESET_DESC] = "ELZELDAPA: that ReShade preset, built in — Colourfulness at -0.30 and Marty's "
-                                 "Exposure Fusion local tonemapping, in that order, after the colour adjustment "
-                                 "above. Applies to the whole picture, HUD included.",
-    [UI_MENU_POST_PRESET_OFF] = "Off", [UI_MENU_POST_PRESET_ELZELDAPA] = "ELZELDAPA",
     [UI_MENU_HDR_GROUP] = "HDR",
     [UI_MENU_HDR] = "HDR output",
     [UI_MENU_HDR_DESC] = "Bright highlights on an HDR display. Needs HDR turned on in Windows (\"Use HDR\") or in a "
@@ -178,67 +124,22 @@ static const char *const text_en[UI_TEXT_COUNT] = {
     [UI_MENU_AO_LOW] = "Low",
     [UI_MENU_AO_HIGH] = "High",
     [UI_MENU_AO_GI] = "High + bounce light (demanding)",
-    [UI_MENU_CONTACT_SHADOWS] = "Contact shadows",
-    [UI_MENU_CONTACT_SHADOWS_DESC] = "Screen-space contact shadows: adds the small shadows at feet, under stones "
-                                     "and in grass that the shadow maps miss. Takes effect at the next start.",
-    [UI_MENU_PCSS] = "Soft sun shadows (PCSS)",
-    [UI_MENU_PCSS_DESC] = "Percentage-closer soft shadows: the sun's shadow is sharp where an object meets the "
-                          "ground and softer the further its shadow falls. Takes effect at the next start.",
-    [UI_MENU_TEX_COMPRESSION] = "Texture compression",
-    [UI_MENU_TEX_COMPRESSION_DESC] = "How the game's ASTC textures are stored in video memory. BC1 is the lightest, "
-                                     "BC3 keeps the alpha channel, BC7 is the sharpest and the heaviest to encode. Off "
-                                     "keeps them uncompressed (RGBA8) and takes much more memory. Takes effect at the next start.",
-    [UI_MENU_BC7_CACHE] = "Precomputed BC7 cache",
-    [UI_MENU_BC7_CACHE_DESC] = "With BC7 compression, reads the cache/bc7 folder next to the game (written by the "
-                               "precompute tool) instead of encoding the textures again at every start. Takes effect "
-                               "at the next start.",
-    [UI_MENU_MOUSE_CAMERA] = "Mouse camera",
-    [UI_MENU_MOUSE_CAMERA_DESC] = "How the mouse turns the camera. Sparrow: this port's own conversion, plain and "
-                                  "direct. Puddz: the AstralChain-PC port's conversion, with smoothed speed.",
-    [UI_MENU_RESHADE] = "ReShade before the HUD",
-    [UI_MENU_RESHADE_DESC] = "With the ReShade add-on installed, effects touch only the scene and the game's "
-                             "interface is drawn afterwards, untouched. Needs ReShade with full add-on support and "
-                             "the AstralChainHudComposite technique last in the preset.",
-    [UI_MENU_POST_DEBUG] = "Post-processing log",
-    [UI_MENU_POST_DEBUG_DESC] = "Logs every pass after the lighting composite (size, formats, program) to "
-                                "astralchain.log, to assign the post-processing switches their passes. Takes "
-                                "effect at the next start.",
-    [UI_MENU_CONTACT_DEBUG] = "Contact shadows view",
-    [UI_MENU_CONTACT_DEBUG_DESC] = "Shows the contact shadow factor in grey over the picture instead of the "
-                                   "darkening, to check where the march reaches. Takes effect at the next start.",
-    [UI_MENU_AO_DEBUG] = "Ambient occlusion view",
-    [UI_MENU_AO_DEBUG_DESC] = "Replaces the light with an occlusion debug view: 1 the factor alone, 2 the "
-                              "surfaces' share alone, 3 the whole pixel multiplied. Takes effect at the next start.",
-    [UI_MENU_BC7_CACHE_LOG] = "BC7 cache key log",
-    [UI_MENU_BC7_CACHE_LOG_DESC] = "Logs a [bc7key] line for every texture the BC7 path uploads, to check the "
-                                   "precomputed cache's keys against the game's. Takes effect at the next start.",
-    [UI_MENU_RENDER_SCALE] = "Render scale",
-    [UI_MENU_RENDER_SCALE_DESC] = "Scales the rendered scene against the game resolution. Above 100% is "
-                                  "supersampling: 125% renders a 1080p game at 1440p and sharpens everything, "
-                                  "textures included, at a GPU cost. Takes effect at the next start.",
-    [UI_MENU_TEX_LOD_BIAS] = "Texture sharpness (LOD bias)",
-    [UI_MENU_TEX_LOD_BIAS_DESC] = "Shifts every texture toward its finer mip levels: negative values make "
-                                  "surfaces sharper at a distance, at the cost of some shimmer. Pair it with "
-                                  "16x anisotropy. Takes effect at the next start.",
-    [UI_MENU_MOTION_BLUR] = "Motion blur",
-    [UI_MENU_MOTION_BLUR_DESC] = "The game's own motion blur. Off, the picture stays sharp in motion.",
-    [UI_MENU_DEPTH_OF_FIELD] = "Depth of field",
-    [UI_MENU_DEPTH_OF_FIELD_DESC] = "The game's depth of field: what is away from the focus blurs.",
-    [UI_MENU_CHROMATIC_ABERRATION] = "Chromatic aberration",
-    [UI_MENU_CHROMATIC_ABERRATION_DESC] = "The game's colour fringing at the picture's edges.",
     [UI_MENU_UPSCALING] = "Upscaler",
     [UI_MENU_UPSCALING_DESC] = "A temporal upscaler in place of the game's anti-aliasing: smoother edges and less "
                                "shimmer, and with a mode below Native more frames per second. NVIDIA DLSS needs an NVIDIA "
                                "RTX GPU and nvngx_dlss.dll next to astralchain.exe, Intel XeSS a recent GPU and "
-                               "libxess.dll next to astralchain.exe; AMD FSR 3 runs on any GPU. Automatic takes DLSS "
-                               "where it can run and FSR 3 elsewhere. DLSS and XeSS chosen here take effect after a "
-                               "restart. The HUD is not touched.",
+                               "libxess.dll next to astralchain.exe; AMD FSR 3 runs on any GPU, AMD FSR 4 on a Radeon "
+                               "RX 6000 or newer. Automatic takes DLSS where it can run and FSR 3 elsewhere. DLSS, XeSS "
+                               "and FSR 4 chosen here take effect after a restart. The HUD is not touched.",
     [UI_MENU_UPSCALING_DESC_OTHER] = "A temporal upscaler in place of the game's anti-aliasing: smoother edges and less "
                                      "shimmer, and with a mode below Native more frames per second. AMD FSR 3 runs on "
-                                     "any GPU; Automatic is FSR 3 here (NVIDIA DLSS and Intel XeSS are Windows only). "
-                                     "The HUD is not touched.",
+                                     "any GPU, AMD FSR 4 on a Radeon RX 6000 or newer; Automatic is FSR 3 here (NVIDIA "
+                                     "DLSS and Intel XeSS are Windows only). FSR 4 chosen here takes effect after a "
+                                     "restart. The HUD is not touched.",
     [UI_MENU_UPSCALING_OFF] = "Off", [UI_MENU_UPSCALING_AUTO] = "Automatic",
     [UI_MENU_UPSCALING_UNAVAILABLE] = "not available here",
+    [UI_MENU_UPSCALING_INSTEAD] = "not available here: %s in use",
+    [UI_MENU_UPSCALING_MISSING] = "%s is missing: %s in use",
     [UI_MENU_UPSCALING_UNTIL] = "%s until a restart",
     [UI_MENU_UPSCALING_QUALITY] = "Upscaler mode",
     [UI_MENU_UPSCALING_QUALITY_DESC] = "The size the 3D scene is drawn at before the upscaler brings it to the game "
@@ -249,10 +150,8 @@ static const char *const text_en[UI_TEXT_COUNT] = {
     [UI_MENU_UPSCALING_NATIVE] = "Native", [UI_MENU_DLSS_QUALITY] = "Quality", [UI_MENU_DLSS_BALANCED] = "Balanced",
     [UI_MENU_DLSS_PERFORMANCE] = "Performance", [UI_MENU_UPSCALING_ULTRA] = "Ultra performance",
     [UI_MENU_UPSCALING_MODE_OFF] = "no upscaler",
-    [UI_MENU_AA] = "Anti-aliasing",
-    [UI_MENU_AA_DESC] = "Anti-aliasing for when no upscaler runs. SMAA: the game's own. CMAA 2: Intel's "
-                        "morphological anti-aliasing, run by the port on the finished picture, HUD included. Off "
-                        "leaves the edges jagged.",
+    [UI_MENU_AA] = "Game anti-aliasing",
+    [UI_MENU_AA_DESC] = "The game's own anti-aliasing, SMAA, for when no upscaler runs. Off leaves the edges jagged.",
     [UI_MENU_AA_OFF] = "Off",
     [UI_MENU_AA_BY_UPSCALER] = "the upscaler smooths the edges",
     [UI_MENU_OUTPUT_RES_AUTO] = "Automatic",
@@ -303,6 +202,50 @@ static const char *const text_en[UI_TEXT_COUNT] = {
     [UI_MENU_MODS_UNUSED] = "not used",
 
     [UI_MENU_VOLUME] = "Volume", [UI_MENU_VOLUME_DESC] = "Master volume of the game.",
+    [UI_MENU_AUDIO_OUTPUT] = "Audio output",
+    [UI_MENU_AUDIO_OUTPUT_DESC] = "What the game mixes. In 5.1 the centre (the voices) and the surrounds get channels of their own; it needs a 5.1 or 7.1 output. Elsewhere the 5.1 mix is folded down to stereo.",
+    [UI_MENU_AUDIO_OUTPUT_DESC_WIN] = "What the game mixes. In 5.1 the centre (the voices) and the surrounds get channels of their own; it needs a 5.1 or 7.1 output, or a headset with spatial sound on: Windows Sonic for Headphones, Dolby Atmos for Headphones or DTS Headphone:X, in the device's properties in the Windows sound settings. Elsewhere the 5.1 mix is folded down to stereo.",
+    [UI_MENU_AUDIO_STEREO] = "Stereo",
+    [UI_MENU_AUDIO_51] = "5.1",
+    [UI_MENU_AUDIO_TAKES_51_SPATIAL] = "%s: Windows spatial sound is on and turns 5.1 into surround on headphones.",
+    [UI_MENU_AUDIO_TAKES_51] = "%s: %d channels, 5.1 goes out as it is.",
+    [UI_MENU_AUDIO_FOLDS_51] = "%s: %d channels, no 5.1: a 5.1 mix is folded down to stereo.",
+    [UI_MENU_AUDIO_SONIC_HINT] = "With headphones, turn on Windows Sonic for Headphones (or Dolby Atmos, DTS Headphone:X) in the device's properties.",
+    [UI_MENU_AUDIO_SENDING] = "The game sends %d channels.",
+    [UI_MENU_AUDIO_NO_DEVICE] = "No audio output found.",
+    [UI_MENU_AUDIO_MIX_HINT] = "Choose 5.1 above and restart the game to set each speaker.",
+    [UI_MENU_AUDIO_GROUP_OUTPUT] = "Speakers and headphones",
+    [UI_MENU_AUDIO_GROUP_MIX] = "Speaker mix",
+    [UI_MENU_AUDIO_RESTART_DESC] = "Closes the game and starts it again with the new audio output. Progress since your last save is lost.",
+    [UI_MENU_AUDIO_TEST] = "Test speakers",
+    [UI_MENU_AUDIO_TEST_DESC] = "Plays a noise on each speaker in turn, as an A/V receiver does: check that every speaker works and sits where the diagram shows it. The game's sound is muted meanwhile. Press again to stop.",
+    [UI_MENU_AUDIO_TEST_START] = "Start",
+    [UI_MENU_AUDIO_TEST_STOP] = "press to stop",
+    [UI_MENU_AUDIO_PRESET] = "Mix",
+    [UI_MENU_AUDIO_PRESET_DESC] = "Ready-made mixes. Balanced: the recommended mix. Clear voices: the dialogue in front, softer surrounds. Immersive: stronger surrounds, and the bass to the subwoofer. Moving any speaker below makes it Custom.",
+    [UI_MENU_AUDIO_PRESET_BALANCED] = "Balanced",
+    [UI_MENU_AUDIO_PRESET_VOICES] = "Clear voices",
+    [UI_MENU_AUDIO_PRESET_IMMERSIVE] = "Immersive",
+    [UI_MENU_AUDIO_PRESET_CUSTOM] = "Custom",
+    [UI_MENU_AUDIO_FRONT_LEFT] = "Front left",
+    [UI_MENU_AUDIO_FRONT_RIGHT] = "Front right",
+    [UI_MENU_AUDIO_CENTER] = "Centre (voices)",
+    [UI_MENU_AUDIO_SURROUND_LEFT] = "Surround left",
+    [UI_MENU_AUDIO_SURROUND_RIGHT] = "Surround right",
+    [UI_MENU_AUDIO_SUBWOOFER] = "Subwoofer",
+    [UI_MENU_AUDIO_FRONT_DESC] = "Level of this front speaker. The fronts carry mostly the music, which the game mixes in stereo, and the sounds in front of you; lowering them lowers the music most. For the music alone, use the game's own music volume.",
+    [UI_MENU_AUDIO_SURROUND_DESC] = "Level of this surround speaker. The surrounds carry the ambience, the reverb and the sounds beside and behind you.",
+    [UI_MENU_AUDIO_CENTER_DESC] = "Level of the centre speaker, where the voices and the interface sounds are. Lower it if voices or beeps are too loud; -2 dB keeps them near their level in stereo.",
+    [UI_MENU_AUDIO_SUBWOOFER_DESC] = "Level of the subwoofer. The game sends it nothing of its own: turn on Bass to subwoofer to give it the low end of the other speakers.",
+    [UI_MENU_AUDIO_BASS] = "Bass to subwoofer",
+    [UI_MENU_AUDIO_BASS_DESC] = "Sends the bass (below 120 Hz) of the other five speakers to the subwoofer. Leave it off with headphones, or when your receiver already manages the bass.",
+    [UI_MENU_SPK_LEFT] = "Left",
+    [UI_MENU_SPK_RIGHT] = "Right",
+    [UI_MENU_SPK_CENTER] = "Centre",
+    [UI_MENU_SPK_SURROUND_LEFT] = "Surround L",
+    [UI_MENU_SPK_SURROUND_RIGHT] = "Surround R",
+    [UI_MENU_SPK_SUB] = "Sub",
+    [UI_MENU_SPK_YOU] = "You",
 
     [UI_MENU_MOTION] = "Motion controls", [UI_MENU_MOTION_DESC] = "Aiming with the controller's gyroscope.",
     [UI_MENU_RUMBLE_STRENGTH] = "Vibration strength",
@@ -364,7 +307,7 @@ static const char *const text_en[UI_TEXT_COUNT] = {
     [UI_BINDS_GROUP_BUTTONS] = "Buttons", [UI_BINDS_GROUP_MOVE] = "Movement", [UI_BINDS_GROUP_CAMERA] = "Camera",
     [UI_BINDS_PRESS_KEY] = "Press a key or mouse button for %s",
     [UI_BINDS_PRESS_PAD] = "Press a controller button for %s",
-    [UI_BINDS_CANCEL_HINT] = "Wait %d s to cancel",
+    [UI_BINDS_CANCEL_HINT] = "Esc cancels, or wait %d s",
     [UI_BINDS_TAKEN] = "%s was taken from %s", [UI_BINDS_SWAPPED] = "%s swapped with %s",
     [UI_BINDS_RESET] = "Reset all buttons",
     [UI_BINDS_RESET_DESC] = "Back to the default keys and controller buttons. The button layout above applies again: remapped controller buttons stay where you put them until this reset.",
@@ -377,14 +320,13 @@ static const char *const text_en[UI_TEXT_COUNT] = {
     [UI_BIND_LSTICK_DOWN] = "Move back",
     [UI_BIND_RSTICK_LEFT] = "Camera left", [UI_BIND_RSTICK_UP] = "Camera up", [UI_BIND_RSTICK_RIGHT] = "Camera right",
     [UI_BIND_RSTICK_DOWN] = "Camera down",
-    [UI_BIND_DESC_A] = "Interact, pick up, talk.", [UI_BIND_DESC_B] = "Dodge, cancel, go back.",
-    [UI_BIND_DESC_X] = "Use the equipped item.", [UI_BIND_DESC_Y] = "Switch the Legion.",
-    [UI_BIND_DESC_LCLICK] = "Sprint.", [UI_BIND_DESC_RCLICK] = "Re-centre the camera.",
-    [UI_BIND_DESC_L] = "Legion action.", [UI_BIND_DESC_R] = "Recall the Legion.",
-    [UI_BIND_DESC_ZL] = "Legion and chain actions.", [UI_BIND_DESC_ZR] = "Attack.",
-    [UI_BIND_DESC_PLUS] = "Open the IRIS.", [UI_BIND_DESC_MINUS] = "Pause.",
-    [UI_BIND_DESC_DPAD] = "Switch weapons (up and down).",
-    [UI_BIND_DESC_MOVE] = "Moves the character like the left stick. The controller's left stick always works too.",
+    [UI_BIND_DESC_A] = "Interact, pick up, talk.", [UI_BIND_DESC_B] = "Run, cancel, go back.",
+    [UI_BIND_DESC_X] = "Jump.", [UI_BIND_DESC_Y] = "Attack.", [UI_BIND_DESC_LCLICK] = "Crouch.",
+    [UI_BIND_DESC_RCLICK] = "First-person view.", [UI_BIND_DESC_L] = "Abilities.",
+    [UI_BIND_DESC_R] = "Throw a weapon.", [UI_BIND_DESC_ZL] = "Shield, lock on.", [UI_BIND_DESC_ZR] = "Bow.",
+    [UI_BIND_DESC_PLUS] = "Menu, inventory.", [UI_BIND_DESC_MINUS] = "Map.",
+    [UI_BIND_DESC_DPAD] = "Quick-select.",
+    [UI_BIND_DESC_MOVE] = "Moves Link like the left stick. The controller's left stick always works too.",
     [UI_BIND_DESC_CAMERA] = "Turns the camera like the right stick. The mouse and the controller's right stick always "
                             "work too.",
     [UI_KEY_SPACE] = "Space", [UI_KEY_TAB] = "Tab", [UI_KEY_LSHIFT] = "Left Shift", [UI_KEY_LCTRL] = "Left Ctrl",
@@ -537,54 +479,9 @@ static const char *const text_en[UI_TEXT_COUNT] = {
 };
 
 static const char *const text_ru[UI_TEXT_COUNT] = {
-    SWKBD("Ввод текста", "Введите имя", "Акира", "ОК", "Отмена", "Контроллер: A — ОК, B — отмена"),
+    SWKBD("Ввод текста", "Введите имя", "Лошадь", "ОК", "Отмена", "Контроллер: A — ОК, B — отмена"),
 
     [UI_MENU_TITLE] = "Настройки",
-    [UI_MENU_TAB_DEBUG] = "Отладка",
-    [UI_MENU_TAB_PERF] = "Производительность",
-    [UI_MENU_ASPECT] = "Соотношение сторон",
-    [UI_MENU_ASPECT_DESC] = "Как изображение вписывается в экран. «Вписать» сохраняет пропорции игры с полосами; «Растянуть» заполняет весь экран; «Широкий» — игра сама рисует в широком формате.",
-    [UI_MENU_ASPECT_FIT] = "Вписать",
-    [UI_MENU_ASPECT_STRETCH] = "Растянуть",
-    [UI_MENU_ASPECT_WIDE] = "Широкий",
-    [UI_MENU_CONSOLE] = "Окно консоли",
-    [UI_MENU_CONSOLE_DESC] = "Показывать окно консоли при запуске игры. Журнал в любом случае пишется в файл.",
-    [UI_MENU_CPU_BOOST] = "Ускорение CPU",
-    [UI_MENU_CPU_BOOST_DESC] = "«Автоматически» позволяет порту повышать приоритеты потоков и кратко крутиться вместо сна; «Выкл.» и «Вкл.» задают принудительно.",
-    [UI_MENU_CPU_BOOST_SPIN_US] = "Время кручения ускорения",
-    [UI_MENU_CPU_BOOST_SPIN_US_DESC] = "Микросекунды, которые ускоренный поток крутится в ожидании вместо сна (0-20000).",
-    [UI_MENU_DEVICE_PROFILE] = "Профиль устройства",
-    [UI_MENU_DEVICE_PROFILE_DESC] = "Набор настроек по умолчанию какого устройства использовать: автоматически, настольный ПК или Steam Deck.",
-    [UI_MENU_PROFILE_DESKTOP] = "Настольный ПК",
-    [UI_MENU_PROFILE_DECK] = "Steam Deck",
-    [UI_MENU_FREE_CORES] = "Свободное назначение ядер",
-    [UI_MENU_FREE_CORES_DESC] = "Позволяет потокам игры работать на любом ядре, а не по собственному плану игры.",
-    [UI_MENU_LIB_PREBUILD_KEEP] = "Размер кэша предсборки",
-    [UI_MENU_LIB_PREBUILD_KEEP_DESC] = "Мегабайты предсобранных библиотек этапов, хранимых на диске (0-4096).",
-    [UI_MENU_MODS_REBUILD] = "Пересобирать моды при запуске",
-    [UI_MENU_MODS_REBUILD_DESC] = "«Автоматически» пересобирает моды, чьи файлы изменились; «Выкл.» никогда не пересобирает при запуске.",
-    [UI_MENU_SHADOW_RANGE] = "Дальность теней",
-    [UI_MENU_SHADOW_RANGE_DESC] = "Как далеко простираются карты теней, в процентах от собственного диапазона игры (50-400).",
-    [UI_MENU_SHADOW_RES] = "Разрешение теней",
-    [UI_MENU_SHADOW_RES_DESC] = "Размер карт теней: собственный для игры или фиксированный.",
-    [UI_MENU_SPLIT_US] = "Бюджет разделения отрисовок",
-    [UI_MENU_SPLIT_US_DESC] = "Микросекунды работы отрисовки, собираемые перед разделением отправки (0-20000).",
-    [UI_MENU_STICK_DEADZONE] = "Мёртвая зона стика",
-    [UI_MENU_TEX_CACHE_MB] = "Размер кэша текстур",
-    [UI_MENU_TEX_CACHE_MB_DESC] = "Мегабайты видеопамяти под кэш текстур. «Автоматически» берёт восьмую часть памяти GPU.",
-    [UI_MENU_TEX_MIP_SKIP] = "Пропуск мипов мелких текстур",
-    [UI_MENU_TEX_MIP_SKIP_DESC] = "Не строить мипы для текстур ASTC, чей базовый уровень не больше указанного числа байт.",
-    [UI_MENU_TEX_PREFETCH] = "Предзагрузка текстур",
-    [UI_MENU_TEX_PREFETCH_DESC] = "Загружает текстуры до первого использования, чтобы они были готовы к отрисовке.",
-    [UI_MENU_WB_EXACT] = "Точная запись текстур обратно",
-    [UI_MENU_WB_EXACT_DESC] = "Определяет содержимое текстур для записи обратно точно, а не целыми страницами: исправляет устаревшие текстуры ценой нагрузки на CPU.",
-    [UI_MENU_WB_FENCE_LIMIT] = "Лимит записи при ожидании",
-    [UI_MENU_WB_FENCE_LIMIT_DESC] = "Самая большая текстура в байтах, записываемая обратно, когда CPU ждёт fence.",
-    [UI_MENU_ZSTD_CHECK] = "Проверка zstd двумя способами",
-    [UI_MENU_ZSTD_CHECK_DESC] = "Декодирует каждый поток zstd обоими декодерами и сравнивает: отладочная проверка, медленно.",
-    [UI_MENU_ZSTD_NATIVE] = "Нативный декодер zstd",
-    [UI_MENU_ZSTD_NATIVE_DESC] = "Использовать собственный декодер zstd хоста вместо игрового.",
-    [UI_MENU_ASYNC_PREEMPT_NOINTR] = "Вкл., без прерывания",
     [UI_MENU_TAB_SCREEN] = "Экран", [UI_MENU_TAB_GAME] = "Игра", [UI_MENU_TAB_MODS] = "Моды", [UI_MENU_TAB_SOUND] = "Звук",
     [UI_MENU_TAB_CONTROLS] = "Управление", [UI_MENU_TAB_MENU] = "Меню", [UI_MENU_TAB_ADVANCED] = "Дополнительно",
     [UI_MENU_CONTINUE] = "Продолжить", [UI_MENU_QUIT] = "Выйти из игры",
@@ -637,10 +534,6 @@ static const char *const text_ru[UI_TEXT_COUNT] = {
     [UI_MENU_ANISO_AUTO] = "Авто",
     [UI_MENU_SHARPNESS] = "Резкость FSR",
     [UI_MENU_SHARPNESS_DESC] = "Повышение резкости после масштабирования FSR; 0 выключает его.",
-    [UI_MENU_SHARPENER] = "Метод резкости",
-    [UI_MENU_SHARPENER_DESC] = "Какой фильтр управляется ползунком выше. RCAS: фильтр AMD, который порт "
-                               "использовал всегда. Smart Sharp: билатеральный контрастно-адаптивный фильтр "
-                               "(из пресета ELZELDAPA), мягче относится к шуму.",
     [UI_MENU_COLOR] = "Цвет",
     [UI_MENU_COLOR_PRESET] = "Цветовой профиль",
     [UI_MENU_COLOR_PRESET_DESC] = "Задаёт четыре значения ниже. «Яркий»: больше контраста и насыщенности, тени немного "
@@ -657,11 +550,6 @@ static const char *const text_ru[UI_TEXT_COUNT] = {
     [UI_MENU_COLOR_SATURATION_DESC] = "Сила цвета относительно серого; 100 % — без изменений.",
     [UI_MENU_COLOR_GAMMA] = "Гамма",
     [UI_MENU_COLOR_GAMMA_DESC] = "Ниже 1 осветляет тёмные и средние тона, выше 1 затемняет их; 1 — без изменений.",
-    [UI_MENU_POST_PRESET] = "Пресет изображения",
-    [UI_MENU_POST_PRESET_DESC] = "ELZELDAPA: одноимённый пресет ReShade, встроенный в игру: Colourfulness −0,30 "
-                                 "и локальное тональное отображение Exposure Fusion (Marty), в этом порядке, "
-                                 "после настройки цвета выше. Действует на всю картинку, включая интерфейс.",
-    [UI_MENU_POST_PRESET_OFF] = "Выкл.", [UI_MENU_POST_PRESET_ELZELDAPA] = "ELZELDAPA",
     [UI_MENU_HDR_GROUP] = "HDR",
     [UI_MENU_HDR] = "Вывод HDR",
     [UI_MENU_HDR_DESC] = "Яркие блики на HDR-дисплее. Нужен включённый HDR в Windows («Использовать HDR») или "
@@ -692,68 +580,22 @@ static const char *const text_ru[UI_TEXT_COUNT] = {
     [UI_MENU_AO_LOW] = "Низкое",
     [UI_MENU_AO_HIGH] = "Высокое",
     [UI_MENU_AO_GI] = "Высокое + непрямой свет (ресурсоёмко)",
-    [UI_MENU_CONTACT_SHADOWS] = "Контактные тени",
-    [UI_MENU_CONTACT_SHADOWS_DESC] = "Контактные тени в экранном пространстве: маленькие тени у ног, под камнями "
-                                     "и в траве, которых не хватает картам теней. Действует при следующем запуске.",
-    [UI_MENU_PCSS] = "Мягкие солнечные тени (PCSS)",
-    [UI_MENU_PCSS_DESC] = "Тень от солнца резкая там, где объект касается земли, и тем мягче, чем дальше она "
-                          "падает. Действует при следующем запуске.",
-    [UI_MENU_TEX_COMPRESSION] = "Сжатие текстур",
-    [UI_MENU_TEX_COMPRESSION_DESC] = "Как текстуры ASTC игры хранятся в видеопамяти. BC1 — самое лёгкое, BC3 "
-                                     "сохраняет альфа-канал, BC7 — самое чёткое и самое тяжёлое для кодирования. "
-                                     "Выкл — без сжатия (RGBA8), занимает намного больше памяти. Действует со "
-                                     "следующего запуска.",
-    [UI_MENU_BC7_CACHE] = "Готовый кэш BC7",
-    [UI_MENU_BC7_CACHE_DESC] = "При сжатии BC7 берёт папку cache/bc7 рядом с игрой (её пишет инструмент "
-                               "предрасчёта) вместо того, чтобы кодировать текстуры заново при каждом запуске. "
-                               "Действует со следующего запуска.",
-    [UI_MENU_MOUSE_CAMERA] = "Камера мышью",
-    [UI_MENU_MOUSE_CAMERA_DESC] = "Как мышь поворачивает камеру. Sparrow: собственное преобразование этого порта, "
-                                  "прямое. Puddz: преобразование порта AstralChain-PC, со сглаженной скоростью.",
-    [UI_MENU_RESHADE] = "ReShade перед интерфейсом",
-    [UI_MENU_RESHADE_DESC] = "С установленным аддоном ReShade эффекты касаются только сцены, а интерфейс игры "
-                             "рисуется после, без изменений. Нужен ReShade с полной поддержкой аддонов и техника "
-                             "AstralChainHudComposite последней в пресете.",
-    [UI_MENU_POST_DEBUG] = "Журнал постобработки",
-    [UI_MENU_POST_DEBUG_DESC] = "Пишет в astralchain.log каждый проход после светового композита (размер, "
-                                "форматы, программу), чтобы назначить проходы переключателям постобработки. "
-                                "Действует со следующего запуска.",
-    [UI_MENU_CONTACT_DEBUG] = "Вид контактных теней",
-    [UI_MENU_CONTACT_DEBUG_DESC] = "Показывает фактор контактных теней серым поверх картинки вместо затемнения, "
-                                   "чтобы проверить, куда доходит проход. Действует со следующего запуска.",
-    [UI_MENU_AO_DEBUG] = "Вид объёмного затенения",
-    [UI_MENU_AO_DEBUG_DESC] = "Заменяет свет отладочным видом затенения: 1 — только фактор, 2 — только доля "
-                              "поверхностей, 3 — умножение всего пикселя. Действует со следующего запуска.",
-    [UI_MENU_BC7_CACHE_LOG] = "Журнал ключей BC7",
-    [UI_MENU_BC7_CACHE_LOG_DESC] = "Пишет строку [bc7key] для каждой текстуры, загруженной путём BC7, чтобы "
-                                   "сверять ключи готового кэша с игрой. Действует со следующего запуска.",
-    [UI_MENU_RENDER_SCALE] = "Масштаб рендера",
-    [UI_MENU_RENDER_SCALE_DESC] = "Масштабирует рендер сцены относительно разрешения игры. Выше 100% — "
-                                  "суперсемплинг: 125% рендерит игру 1080p в 1440p и делает резче всё, включая "
-                                  "текстуры, ценой нагрузки на GPU. Действует со следующего запуска.",
-    [UI_MENU_TEX_LOD_BIAS] = "Резкость текстур (смещение LOD)",
-    [UI_MENU_TEX_LOD_BIAS_DESC] = "Сдвигает каждую текстуру к более мелким уровням мип-карт: отрицательные "
-                                  "значения делают поверхности резче на расстоянии ценой небольшого мерцания. "
-                                  "Сочетайте с анизотропией 16x. Действует со следующего запуска.",
-    [UI_MENU_MOTION_BLUR] = "Размытие в движении",
-    [UI_MENU_MOTION_BLUR_DESC] = "Размытие в движении самой игры. Выкл. — картинка остаётся резкой в движении.",
-    [UI_MENU_DEPTH_OF_FIELD] = "Глубина резкости",
-    [UI_MENU_DEPTH_OF_FIELD_DESC] = "Глубина резкости самой игры: то, что вне фокуса, размывается.",
-    [UI_MENU_CHROMATIC_ABERRATION] = "Хроматическая аберрация",
-    [UI_MENU_CHROMATIC_ABERRATION_DESC] = "Цветная кайма по краям картинки, которую добавляет игра.",
     [UI_MENU_UPSCALING] = "Апскейлер",
     [UI_MENU_UPSCALING_DESC] = "Временной апскейлер вместо сглаживания игры: ровнее края и меньше мерцания, а в режиме "
                                "ниже «Родного» — больше кадров в секунду. NVIDIA DLSS нужна видеокарта NVIDIA RTX и "
                                "nvngx_dlss.dll рядом с astralchain.exe, Intel XeSS — современная видеокарта и libxess.dll "
-                               "рядом с astralchain.exe; AMD FSR 3 работает на любой видеокарте. «Автоматически» берёт "
-                               "DLSS, где он может работать, иначе FSR 3. DLSS и XeSS, выбранные здесь, действуют после "
-                               "перезапуска. Интерфейс не затрагивается.",
+                               "рядом с astralchain.exe; AMD FSR 3 работает на любой видеокарте, AMD FSR 4 — на Radeon "
+                               "RX 6000 и новее. «Автоматически» берёт DLSS, где он может работать, иначе FSR 3. DLSS, "
+                               "XeSS и FSR 4, выбранные здесь, действуют после перезапуска. Интерфейс не затрагивается.",
     [UI_MENU_UPSCALING_DESC_OTHER] = "Временной апскейлер вместо сглаживания игры: ровнее края и меньше мерцания, а в "
                                      "режиме ниже «Родного» — больше кадров в секунду. AMD FSR 3 работает на любой "
-                                     "видеокарте; «Автоматически» здесь — FSR 3 (NVIDIA DLSS и Intel XeSS — только в "
-                                     "Windows). Интерфейс не затрагивается.",
+                                     "видеокарте, AMD FSR 4 — на Radeon RX 6000 и новее; «Автоматически» здесь — FSR 3 "
+                                     "(NVIDIA DLSS и Intel XeSS — только в Windows). FSR 4, выбранный здесь, действует "
+                                     "после перезапуска. Интерфейс не затрагивается.",
     [UI_MENU_UPSCALING_OFF] = "Выкл.", [UI_MENU_UPSCALING_AUTO] = "Автоматически",
     [UI_MENU_UPSCALING_UNAVAILABLE] = "недоступно здесь",
+    [UI_MENU_UPSCALING_INSTEAD] = "недоступно здесь: используется %s",
+    [UI_MENU_UPSCALING_MISSING] = "нет файла %s: используется %s",
     [UI_MENU_UPSCALING_UNTIL] = "%s до перезапуска",
     [UI_MENU_UPSCALING_QUALITY] = "Режим апскейлера",
     [UI_MENU_UPSCALING_QUALITY_DESC] = "Размер, в котором рисуется 3D-сцена, прежде чем апскейлер доведёт её до разрешения "
@@ -764,10 +606,9 @@ static const char *const text_ru[UI_TEXT_COUNT] = {
     [UI_MENU_UPSCALING_NATIVE] = "Родной", [UI_MENU_DLSS_QUALITY] = "Качество", [UI_MENU_DLSS_BALANCED] = "Баланс",
     [UI_MENU_DLSS_PERFORMANCE] = "Производительность", [UI_MENU_UPSCALING_ULTRA] = "Ультрапроизводительность",
     [UI_MENU_UPSCALING_MODE_OFF] = "апскейлер выключен",
-    [UI_MENU_AA] = "Сглаживание",
-    [UI_MENU_AA_DESC] = "Сглаживание на случай, когда апскейлер не работает. SMAA: собственное, игры. CMAA 2: "
-                        "морфологическое сглаживание Intel, которое порт применяет к готовой картинке, включая "
-                        "интерфейс. «Выкл.» оставляет края зубчатыми.",
+    [UI_MENU_AA] = "Сглаживание игры",
+    [UI_MENU_AA_DESC] = "Собственное сглаживание игры, SMAA, когда апскейлер не работает. «Выкл.» оставляет края "
+                        "зубчатыми.",
     [UI_MENU_AA_OFF] = "Выкл.",
     [UI_MENU_AA_BY_UPSCALER] = "края сглаживает апскейлер",
     [UI_MENU_OUTPUT_RES_AUTO] = "Автоматически",
@@ -817,6 +658,50 @@ static const char *const text_ru[UI_TEXT_COUNT] = {
     [UI_MENU_MODS_UNUSED] = "не используется",
 
     [UI_MENU_VOLUME] = "Громкость", [UI_MENU_VOLUME_DESC] = "Общая громкость игры.",
+    [UI_MENU_AUDIO_OUTPUT] = "Вывод звука",
+    [UI_MENU_AUDIO_OUTPUT_DESC] = "Что микширует игра. В 5.1 центр (голоса) и тыловые каналы выводятся отдельно; нужен выход 5.1 или 7.1. Иначе микс 5.1 сводится в стерео.",
+    [UI_MENU_AUDIO_OUTPUT_DESC_WIN] = "Что микширует игра. В 5.1 центр (голоса) и тыловые каналы выводятся отдельно; нужен выход 5.1 или 7.1 либо гарнитура с включённым пространственным звуком: Windows Sonic for Headphones, Dolby Atmos for Headphones или DTS Headphone:X, в свойствах устройства в параметрах звука Windows. Иначе микс 5.1 сводится в стерео.",
+    [UI_MENU_AUDIO_STEREO] = "Стерео",
+    [UI_MENU_AUDIO_51] = "5.1",
+    [UI_MENU_AUDIO_TAKES_51_SPATIAL] = "%s: включён пространственный звук Windows, он превращает 5.1 в объёмный звук в наушниках.",
+    [UI_MENU_AUDIO_TAKES_51] = "%s: каналов: %d, 5.1 выводится как есть.",
+    [UI_MENU_AUDIO_FOLDS_51] = "%s: каналов: %d, без 5.1: микс 5.1 сводится в стерео.",
+    [UI_MENU_AUDIO_SONIC_HINT] = "Для наушников включите Windows Sonic for Headphones (или Dolby Atmos, DTS Headphone:X) в свойствах устройства.",
+    [UI_MENU_AUDIO_SENDING] = "Игра выводит каналов: %d.",
+    [UI_MENU_AUDIO_NO_DEVICE] = "Вывод звука не найден.",
+    [UI_MENU_AUDIO_MIX_HINT] = "Выберите 5.1 выше и перезапустите игру, чтобы настроить каждую колонку.",
+    [UI_MENU_AUDIO_GROUP_OUTPUT] = "Колонки и наушники",
+    [UI_MENU_AUDIO_GROUP_MIX] = "Микс колонок",
+    [UI_MENU_AUDIO_RESTART_DESC] = "Закрывает игру и запускает её снова с новым выводом звука. Прогресс после последнего сохранения будет потерян.",
+    [UI_MENU_AUDIO_TEST] = "Проверка колонок",
+    [UI_MENU_AUDIO_TEST_DESC] = "Поочерёдно воспроизводит шум в каждой колонке, как AV-ресивер: проверьте, что каждая колонка работает и стоит там, где показано на схеме. Звук игры на это время выключается. Нажмите ещё раз, чтобы остановить.",
+    [UI_MENU_AUDIO_TEST_START] = "Начать",
+    [UI_MENU_AUDIO_TEST_STOP] = "нажмите, чтобы остановить",
+    [UI_MENU_AUDIO_PRESET] = "Микс",
+    [UI_MENU_AUDIO_PRESET_DESC] = "Готовые миксы. Сбалансированный: рекомендуемый. Чёткие голоса: диалоги впереди, тыловые тише. С погружением: тыловые громче, басы в сабвуфер. Изменение любой колонки ниже делает микс пользовательским.",
+    [UI_MENU_AUDIO_PRESET_BALANCED] = "Сбалансированный",
+    [UI_MENU_AUDIO_PRESET_VOICES] = "Чёткие голоса",
+    [UI_MENU_AUDIO_PRESET_IMMERSIVE] = "С погружением",
+    [UI_MENU_AUDIO_PRESET_CUSTOM] = "Пользовательский",
+    [UI_MENU_AUDIO_FRONT_LEFT] = "Передняя левая",
+    [UI_MENU_AUDIO_FRONT_RIGHT] = "Передняя правая",
+    [UI_MENU_AUDIO_CENTER] = "Центр (голоса)",
+    [UI_MENU_AUDIO_SURROUND_LEFT] = "Тыловая левая",
+    [UI_MENU_AUDIO_SURROUND_RIGHT] = "Тыловая правая",
+    [UI_MENU_AUDIO_SUBWOOFER] = "Сабвуфер",
+    [UI_MENU_AUDIO_FRONT_DESC] = "Уровень этой фронтальной колонки. Во фронтальных звучит в основном музыка, которую игра микширует в стерео, и звуки перед вами; уменьшая их, вы в первую очередь уменьшаете музыку. Для одной музыки используйте громкость музыки в настройках самой игры.",
+    [UI_MENU_AUDIO_SURROUND_DESC] = "Уровень этой тыловой колонки. В тыловых звучат атмосфера, реверберация и звуки сбоку и позади вас.",
+    [UI_MENU_AUDIO_CENTER_DESC] = "Уровень центральной колонки, где звучат голоса и звуки интерфейса. Уменьшите его, если голоса или сигналы слишком громкие; при -2 дБ их уровень близок к стерео.",
+    [UI_MENU_AUDIO_SUBWOOFER_DESC] = "Уровень сабвуфера. Игра сама ничего ему не отправляет: включите «Басы в сабвуфер», чтобы передать ему низы остальных колонок.",
+    [UI_MENU_AUDIO_BASS] = "Басы в сабвуфер",
+    [UI_MENU_AUDIO_BASS_DESC] = "Отправляет басы (ниже 120 Гц) остальных пяти колонок в сабвуфер. Оставьте выключенным для наушников или если ресивер уже управляет басами.",
+    [UI_MENU_SPK_LEFT] = "Левая",
+    [UI_MENU_SPK_RIGHT] = "Правая",
+    [UI_MENU_SPK_CENTER] = "Центр",
+    [UI_MENU_SPK_SURROUND_LEFT] = "Тыл. Л",
+    [UI_MENU_SPK_SURROUND_RIGHT] = "Тыл. П",
+    [UI_MENU_SPK_SUB] = "Саб",
+    [UI_MENU_SPK_YOU] = "Вы",
 
     [UI_MENU_MOTION] = "Управление движением", [UI_MENU_MOTION_DESC] = "Прицеливание гироскопом контроллера.",
     [UI_MENU_RUMBLE_STRENGTH] = "Сила вибрации",
@@ -880,7 +765,7 @@ static const char *const text_ru[UI_TEXT_COUNT] = {
     [UI_BINDS_GROUP_BUTTONS] = "Кнопки", [UI_BINDS_GROUP_MOVE] = "Движение", [UI_BINDS_GROUP_CAMERA] = "Камера",
     [UI_BINDS_PRESS_KEY] = "Нажмите клавишу или кнопку мыши для «%s»",
     [UI_BINDS_PRESS_PAD] = "Нажмите кнопку контроллера для «%s»",
-    [UI_BINDS_CANCEL_HINT] = "Подождите %d с для отмены",
+    [UI_BINDS_CANCEL_HINT] = "Esc отменяет, или подождите %d с",
     [UI_BINDS_TAKEN] = "%s: убрано с «%s»", [UI_BINDS_SWAPPED] = "«%s» и «%s» поменялись местами",
     [UI_BINDS_RESET] = "Сбросить все кнопки",
     [UI_BINDS_RESET_DESC] = "Вернуть клавиши и кнопки контроллера по умолчанию. Снова действует раскладка кнопок выше: "
@@ -895,13 +780,13 @@ static const char *const text_ru[UI_TEXT_COUNT] = {
     [UI_BIND_LSTICK_DOWN] = "Назад",
     [UI_BIND_RSTICK_LEFT] = "Камера влево", [UI_BIND_RSTICK_UP] = "Камера вверх",
     [UI_BIND_RSTICK_RIGHT] = "Камера вправо", [UI_BIND_RSTICK_DOWN] = "Камера вниз",
-    [UI_BIND_DESC_A] = "Взаимодействие, подобрать, поговорить.", [UI_BIND_DESC_B] = "Уклонение, отмена, назад.",
-    [UI_BIND_DESC_X] = "Использовать выбранный предмет.", [UI_BIND_DESC_Y] = "Сменить Легиона.", [UI_BIND_DESC_LCLICK] = "Спринт.",
-    [UI_BIND_DESC_RCLICK] = "Центрировать камеру.", [UI_BIND_DESC_L] = "Действие Легиона.",
-    [UI_BIND_DESC_R] = "Отозвать Легиона.", [UI_BIND_DESC_ZL] = "Легион и действия цепью.", [UI_BIND_DESC_ZR] = "Атака.",
-    [UI_BIND_DESC_PLUS] = "Открыть IRIS.", [UI_BIND_DESC_MINUS] = "Пауза.",
-    [UI_BIND_DESC_DPAD] = "Смена оружия (вверх и вниз).",
-    [UI_BIND_DESC_MOVE] = "Двигает персонажа, как левый стик. Левый стик контроллера тоже всегда работает.",
+    [UI_BIND_DESC_A] = "Взаимодействие, подобрать, поговорить.", [UI_BIND_DESC_B] = "Бег, отмена, назад.",
+    [UI_BIND_DESC_X] = "Прыжок.", [UI_BIND_DESC_Y] = "Атака.", [UI_BIND_DESC_LCLICK] = "Присесть.",
+    [UI_BIND_DESC_RCLICK] = "Вид от первого лица.", [UI_BIND_DESC_L] = "Способности.",
+    [UI_BIND_DESC_R] = "Бросок оружия.", [UI_BIND_DESC_ZL] = "Щит, захват цели.", [UI_BIND_DESC_ZR] = "Лук.",
+    [UI_BIND_DESC_PLUS] = "Меню, инвентарь.", [UI_BIND_DESC_MINUS] = "Карта.",
+    [UI_BIND_DESC_DPAD] = "Быстрый выбор.",
+    [UI_BIND_DESC_MOVE] = "Двигает Линка, как левый стик. Левый стик контроллера тоже всегда работает.",
     [UI_BIND_DESC_CAMERA] = "Поворачивает камеру, как правый стик. Мышь и правый стик контроллера тоже всегда "
                             "работают.",
     [UI_KEY_SPACE] = "Пробел", [UI_KEY_TAB] = "Tab", [UI_KEY_LSHIFT] = "Левый Shift", [UI_KEY_LCTRL] = "Левый Ctrl",
@@ -1056,56 +941,11 @@ static const char *const text_ru[UI_TEXT_COUNT] = {
 };
 
 static const char *const text_pt_br[UI_TEXT_COUNT] = {
-    SWKBD("Inserir texto", "Insira um nome", "Akira", "OK", "Cancelar", "Controle: A = OK, B = Cancelar"),
+    SWKBD("Inserir texto", "Insira um nome", "Cavalo", "OK", "Cancelar", "Controle: A = OK, B = Cancelar"),
 
     [UI_MENU_TITLE] = "Configurações",
     [UI_MENU_TAB_SCREEN] = "Tela", [UI_MENU_TAB_GAME] = "Jogo", [UI_MENU_TAB_SOUND] = "Som",
     [UI_MENU_TAB_CONTROLS] = "Controles", [UI_MENU_TAB_MENU] = "Menu", [UI_MENU_TAB_ADVANCED] = "Avançado",
-    [UI_MENU_TAB_DEBUG] = "Depuração",
-    [UI_MENU_TAB_PERF] = "Desempenho",
-    [UI_MENU_ASPECT] = "Proporção da tela",
-    [UI_MENU_ASPECT_DESC] = "Como a imagem se ajusta à tela. Ajustar mantém a proporção do jogo com barras; Esticar preenche a tela inteira; Largo faz o jogo renderizar em widescreen.",
-    [UI_MENU_ASPECT_FIT] = "Ajustar",
-    [UI_MENU_ASPECT_STRETCH] = "Esticar",
-    [UI_MENU_ASPECT_WIDE] = "Largo",
-    [UI_MENU_CONSOLE] = "Janela do console",
-    [UI_MENU_CONSOLE_DESC] = "Mostrar a janela do console ao iniciar o jogo. O registro é gravado no arquivo de qualquer forma.",
-    [UI_MENU_CPU_BOOST] = "Impulso de CPU",
-    [UI_MENU_CPU_BOOST_DESC] = "Automático permite que o port eleve prioridades de threads e gire brevemente em vez de dormir; Desligado e Ligado forçam o comportamento.",
-    [UI_MENU_CPU_BOOST_SPIN_US] = "Tempo de giro do impulso",
-    [UI_MENU_CPU_BOOST_SPIN_US_DESC] = "Microssegundos que uma thread impulsionada espera ocupada antes de dormir (0-20000).",
-    [UI_MENU_DEVICE_PROFILE] = "Perfil do dispositivo",
-    [UI_MENU_DEVICE_PROFILE_DESC] = "Quais configurações padrão de dispositivo usar: Automático, um PC de mesa ou o Steam Deck.",
-    [UI_MENU_PROFILE_DESKTOP] = "PC de mesa",
-    [UI_MENU_PROFILE_DECK] = "Steam Deck",
-    [UI_MENU_FREE_CORES] = "Atribuição livre de núcleos",
-    [UI_MENU_FREE_CORES_DESC] = "Permite que as threads do jogo usem qualquer núcleo em vez do plano de núcleos do próprio jogo.",
-    [UI_MENU_LIB_PREBUILD_KEEP] = "Cache de pré-construção mantido",
-    [UI_MENU_LIB_PREBUILD_KEEP_DESC] = "Megabytes de bibliotecas de estágios pré-construídas mantidas no disco (0-4096).",
-    [UI_MENU_MODS_REBUILD] = "Reconstruir mods ao iniciar",
-    [UI_MENU_MODS_REBUILD_DESC] = "Automático reconstrói os mods cujos arquivos mudaram; Desligado nunca reconstrói ao iniciar.",
-    [UI_MENU_SHADOW_RANGE] = "Alcance das sombras",
-    [UI_MENU_SHADOW_RANGE_DESC] = "Até onde os mapas de sombra alcançam, em porcentagem do alcance do próprio jogo (50-400).",
-    [UI_MENU_SHADOW_RES] = "Resolução das sombras",
-    [UI_MENU_SHADOW_RES_DESC] = "O tamanho dos mapas de sombra: o do próprio jogo ou um tamanho fixo.",
-    [UI_MENU_SPLIT_US] = "Orçamento de divisão de draws",
-    [UI_MENU_SPLIT_US_DESC] = "Microssegundos de trabalho de desenho agrupados antes de dividir um envio (0-20000).",
-    [UI_MENU_STICK_DEADZONE] = "Zona morta do analógico",
-    [UI_MENU_TEX_CACHE_MB] = "Tamanho do cache de texturas",
-    [UI_MENU_TEX_CACHE_MB_DESC] = "Megabytes de memória da GPU que o cache de texturas pode usar. Automático usa um oitavo da memória da GPU.",
-    [UI_MENU_TEX_MIP_SKIP] = "Pular mips de texturas pequenas",
-    [UI_MENU_TEX_MIP_SKIP_DESC] = "Não gerar mips para texturas ASTC cujo nível base tenha no máximo este número de bytes.",
-    [UI_MENU_TEX_PREFETCH] = "Pré-carregamento de texturas",
-    [UI_MENU_TEX_PREFETCH_DESC] = "Envia as texturas antes do primeiro uso para estarem prontas ao desenhar.",
-    [UI_MENU_WB_EXACT] = "Write-back exato de texturas",
-    [UI_MENU_WB_EXACT_DESC] = "Decide o conteúdo de texturas a gravar de forma exata em vez de por páginas inteiras: corrige texturas desatualizadas com algum custo de CPU.",
-    [UI_MENU_WB_FENCE_LIMIT] = "Limite de write-back em fence",
-    [UI_MENU_WB_FENCE_LIMIT_DESC] = "Maior textura, em bytes, gravada de volta quando a CPU espera por uma fence.",
-    [UI_MENU_ZSTD_CHECK] = "Verificar zstd dos dois modos",
-    [UI_MENU_ZSTD_CHECK_DESC] = "Decodifica cada fluxo zstd com os dois decodificadores e compara: uma verificação de depuração, lenta.",
-    [UI_MENU_ZSTD_NATIVE] = "Decodificador zstd nativo",
-    [UI_MENU_ZSTD_NATIVE_DESC] = "Usar o decodificador zstd do próprio sistema em vez do do jogo.",
-    [UI_MENU_ASYNC_PREEMPT_NOINTR] = "Ligado, sem interrupção",
     [UI_MENU_TAB_MODS] = "Mods",
     [UI_MENU_MODS_INSTALLED] = "Mods instalados",
     [UI_MENU_MODS_NONE] = "Nenhum mod ainda. Descompacte um mod na pasta mods, uma pasta por mod com a pasta romfs dentro, "
@@ -1172,10 +1012,6 @@ static const char *const text_pt_br[UI_TEXT_COUNT] = {
     [UI_MENU_UPSCALER_FSR] = "AMD FSR 1", [UI_MENU_UPSCALER_BILINEAR] = "Bilinear",
     [UI_MENU_SHARPNESS] = "Nitidez do FSR",
     [UI_MENU_SHARPNESS_DESC] = "Aumento de nitidez após a ampliação do FSR; 0 desliga.",
-    [UI_MENU_SHARPENER] = "Método de nitidez",
-    [UI_MENU_SHARPENER_DESC] = "Qual filtro o controle acima ajusta. RCAS: o da AMD, o que o port sempre usou. "
-                               "Smart Sharp: um filtro bilateral adaptativo ao contraste (do preset ELZELDAPA), "
-                               "mais suave com o ruído.",
 
     [UI_MENU_FPS_LIMIT] = "Taxa de quadros",
     [UI_MENU_FPS_LIMIT_DESC] = "60 FPS usa o patch de 60 fps do jogo; 30 FPS o desliga. Lido na hora.",
@@ -1201,6 +1037,50 @@ static const char *const text_pt_br[UI_TEXT_COUNT] = {
     [UI_MENU_MODE_DOCKED] = "Modo TV", [UI_MENU_MODE_HANDHELD] = "Modo portátil",
 
     [UI_MENU_VOLUME] = "Volume", [UI_MENU_VOLUME_DESC] = "Volume geral do jogo.",
+    [UI_MENU_AUDIO_OUTPUT] = "Saída de áudio",
+    [UI_MENU_AUDIO_OUTPUT_DESC] = "O que o jogo mixa. Em 5.1 o canal central (as vozes) e os surrounds têm canais próprios; requer uma saída 5.1 ou 7.1. Caso contrário, a mixagem 5.1 é convertida para estéreo.",
+    [UI_MENU_AUDIO_OUTPUT_DESC_WIN] = "O que o jogo mixa. Em 5.1 o canal central (as vozes) e os surrounds têm canais próprios; requer uma saída 5.1 ou 7.1, ou um headset com som espacial ativado: Windows Sonic for Headphones, Dolby Atmos for Headphones ou DTS Headphone:X, nas propriedades do dispositivo nas configurações de som do Windows. Caso contrário, a mixagem 5.1 é convertida para estéreo.",
+    [UI_MENU_AUDIO_STEREO] = "Estéreo",
+    [UI_MENU_AUDIO_51] = "5.1",
+    [UI_MENU_AUDIO_TAKES_51_SPATIAL] = "%s: o som espacial do Windows está ativado e transforma o 5.1 em surround nos fones.",
+    [UI_MENU_AUDIO_TAKES_51] = "%s: %d canais, o 5.1 sai como está.",
+    [UI_MENU_AUDIO_FOLDS_51] = "%s: %d canais, sem 5.1: a mixagem 5.1 é convertida para estéreo.",
+    [UI_MENU_AUDIO_SONIC_HINT] = "Com fones, ative o Windows Sonic for Headphones (ou Dolby Atmos, DTS Headphone:X) nas propriedades do dispositivo.",
+    [UI_MENU_AUDIO_SENDING] = "O jogo envia %d canais.",
+    [UI_MENU_AUDIO_NO_DEVICE] = "Nenhuma saída de áudio encontrada.",
+    [UI_MENU_AUDIO_MIX_HINT] = "Escolha 5.1 acima e reinicie o jogo para ajustar cada caixa.",
+    [UI_MENU_AUDIO_GROUP_OUTPUT] = "Caixas de som e fones",
+    [UI_MENU_AUDIO_GROUP_MIX] = "Mixagem das caixas",
+    [UI_MENU_AUDIO_RESTART_DESC] = "Fecha o jogo e o abre de novo com a nova saída de áudio. O progresso desde o último salvamento é perdido.",
+    [UI_MENU_AUDIO_TEST] = "Testar caixas",
+    [UI_MENU_AUDIO_TEST_DESC] = "Toca um ruído em cada caixa por vez, como um receiver A/V: confira se cada caixa funciona e está onde o diagrama mostra. O som do jogo fica mudo enquanto isso. Pressione de novo para parar.",
+    [UI_MENU_AUDIO_TEST_START] = "Iniciar",
+    [UI_MENU_AUDIO_TEST_STOP] = "pressione para parar",
+    [UI_MENU_AUDIO_PRESET] = "Mixagem",
+    [UI_MENU_AUDIO_PRESET_DESC] = "Mixagens prontas. Equilibrada: a recomendada. Vozes claras: diálogos à frente, surrounds mais suaves. Imersiva: surrounds mais fortes e graves no subwoofer. Mexer em qualquer caixa abaixo a torna Personalizada.",
+    [UI_MENU_AUDIO_PRESET_BALANCED] = "Equilibrada",
+    [UI_MENU_AUDIO_PRESET_VOICES] = "Vozes claras",
+    [UI_MENU_AUDIO_PRESET_IMMERSIVE] = "Imersiva",
+    [UI_MENU_AUDIO_PRESET_CUSTOM] = "Personalizada",
+    [UI_MENU_AUDIO_FRONT_LEFT] = "Frontal esquerda",
+    [UI_MENU_AUDIO_FRONT_RIGHT] = "Frontal direita",
+    [UI_MENU_AUDIO_CENTER] = "Central (vozes)",
+    [UI_MENU_AUDIO_SURROUND_LEFT] = "Surround esquerda",
+    [UI_MENU_AUDIO_SURROUND_RIGHT] = "Surround direita",
+    [UI_MENU_AUDIO_SUBWOOFER] = "Subwoofer",
+    [UI_MENU_AUDIO_FRONT_DESC] = "Nível desta caixa frontal. As frontais levam principalmente a música, que o jogo mixa em estéreo, e os sons à sua frente; diminuí-las diminui sobretudo a música. Para a música sozinha, use o volume de música do próprio jogo.",
+    [UI_MENU_AUDIO_SURROUND_DESC] = "Nível desta caixa surround. As surrounds levam o ambiente, a reverberação e os sons ao seu lado e atrás de você.",
+    [UI_MENU_AUDIO_CENTER_DESC] = "Nível da caixa central, onde ficam as vozes e os sons da interface. Diminua se as vozes ou os bipes estiverem altos demais; -2 dB os mantém perto do nível em estéreo.",
+    [UI_MENU_AUDIO_SUBWOOFER_DESC] = "Nível do subwoofer. O jogo não envia nada próprio para ele: ative Graves no subwoofer para mandar os graves das outras caixas.",
+    [UI_MENU_AUDIO_BASS] = "Graves no subwoofer",
+    [UI_MENU_AUDIO_BASS_DESC] = "Envia os graves (abaixo de 120 Hz) das outras cinco caixas para o subwoofer. Deixe desligado com fones, ou quando o seu receiver já gerencia os graves.",
+    [UI_MENU_SPK_LEFT] = "Esquerda",
+    [UI_MENU_SPK_RIGHT] = "Direita",
+    [UI_MENU_SPK_CENTER] = "Central",
+    [UI_MENU_SPK_SURROUND_LEFT] = "Surround E",
+    [UI_MENU_SPK_SURROUND_RIGHT] = "Surround D",
+    [UI_MENU_SPK_SUB] = "Sub",
+    [UI_MENU_SPK_YOU] = "Você",
 
     [UI_MENU_MOTION] = "Controles de movimento", [UI_MENU_MOTION_DESC] = "Mirar com o giroscópio do controle.",
     [UI_MENU_RUMBLE_STRENGTH] = "Intensidade da vibração",
@@ -1250,7 +1130,7 @@ static const char *const text_pt_br[UI_TEXT_COUNT] = {
     [UI_BINDS_GROUP_BUTTONS] = "Botões", [UI_BINDS_GROUP_MOVE] = "Movimento", [UI_BINDS_GROUP_CAMERA] = "Câmera",
     [UI_BINDS_PRESS_KEY] = "Aperte uma tecla ou um botão do mouse para %s",
     [UI_BINDS_PRESS_PAD] = "Aperte um botão do controle para %s",
-    [UI_BINDS_CANCEL_HINT] = "Aguarde %d s para cancelar",
+    [UI_BINDS_CANCEL_HINT] = "Esc cancela, ou aguarde %d s",
     [UI_BINDS_TAKEN] = "%s saiu de %s", [UI_BINDS_SWAPPED] = "%s trocou de lugar com %s",
     [UI_BINDS_RESET] = "Restaurar todos os botões",
     [UI_BINDS_RESET_DESC] = "Volta às teclas e aos botões do controle padrão. O layout dos botões acima volta a valer: "
@@ -1265,13 +1145,13 @@ static const char *const text_pt_br[UI_TEXT_COUNT] = {
     [UI_BIND_LSTICK_RIGHT] = "Mover para a direita", [UI_BIND_LSTICK_DOWN] = "Mover para trás",
     [UI_BIND_RSTICK_LEFT] = "Câmera para a esquerda", [UI_BIND_RSTICK_UP] = "Câmera para cima",
     [UI_BIND_RSTICK_RIGHT] = "Câmera para a direita", [UI_BIND_RSTICK_DOWN] = "Câmera para baixo",
-    [UI_BIND_DESC_A] = "Interagir, pegar, conversar.", [UI_BIND_DESC_B] = "Esquiva, cancelar, voltar.",
-    [UI_BIND_DESC_X] = "Usar o item equipado.", [UI_BIND_DESC_Y] = "Trocar de Legião.", [UI_BIND_DESC_LCLICK] = "Sprint.",
-    [UI_BIND_DESC_RCLICK] = "Centralizar a câmera.", [UI_BIND_DESC_L] = "Ação da Legião.",
-    [UI_BIND_DESC_R] = "Recolher a Legião.", [UI_BIND_DESC_ZL] = "Legião e ações de corrente.", [UI_BIND_DESC_ZR] = "Ataque.",
-    [UI_BIND_DESC_PLUS] = "Abrir o IRIS.", [UI_BIND_DESC_MINUS] = "Pausa.",
-    [UI_BIND_DESC_DPAD] = "Trocar de arma (cima e baixo).",
-    [UI_BIND_DESC_MOVE] = "Move o personagem como o analógico esquerdo. O analógico esquerdo do controle também sempre funciona."
+    [UI_BIND_DESC_A] = "Interagir, pegar, conversar.", [UI_BIND_DESC_B] = "Correr, cancelar, voltar.",
+    [UI_BIND_DESC_X] = "Pular.", [UI_BIND_DESC_Y] = "Atacar.", [UI_BIND_DESC_LCLICK] = "Agachar.",
+    [UI_BIND_DESC_RCLICK] = "Visão em primeira pessoa.", [UI_BIND_DESC_L] = "Habilidades.",
+    [UI_BIND_DESC_R] = "Arremessar a arma.", [UI_BIND_DESC_ZL] = "Escudo, travar a mira.", [UI_BIND_DESC_ZR] = "Arco.",
+    [UI_BIND_DESC_PLUS] = "Menu, inventário.", [UI_BIND_DESC_MINUS] = "Mapa.",
+    [UI_BIND_DESC_DPAD] = "Seleção rápida.",
+    [UI_BIND_DESC_MOVE] = "Move o Link como o analógico esquerdo. O analógico esquerdo do controle também sempre "
                           "funciona.",
     [UI_BIND_DESC_CAMERA] = "Gira a câmera como o analógico direito. O mouse e o analógico direito do controle também "
                             "sempre funcionam.",
@@ -1430,11 +1310,6 @@ static const char *const text_pt_br[UI_TEXT_COUNT] = {
     [UI_MENU_COLOR_GAMMA] = "Gama",
     [UI_MENU_COLOR_GAMMA_DESC] = "Abaixo de 1 clareia os tons escuros e médios, acima de 1 os escurece; 1 não muda "
                                  "nada.",
-    [UI_MENU_POST_PRESET] = "Predefinição de imagem",
-    [UI_MENU_POST_PRESET_DESC] = "ELZELDAPA: o preset de ReShade de mesmo nome, integrado: Colourfulness em "
-                                 "-0,30 e o mapeamento tonal local Exposure Fusion, do Marty, nessa ordem, "
-                                 "depois do ajuste de cor acima. Vale para a imagem inteira, HUD incluído.",
-    [UI_MENU_POST_PRESET_OFF] = "Desligado", [UI_MENU_POST_PRESET_ELZELDAPA] = "ELZELDAPA",
     [UI_MENU_HDR_GROUP] = "HDR",
     [UI_MENU_HDR] = "Saída HDR",
     [UI_MENU_HDR_DESC] = "Realces brilhantes em uma tela HDR. Precisa do HDR ligado no Windows (\"Usar HDR\") ou num "
@@ -1483,73 +1358,23 @@ static const char *const text_pt_br[UI_TEXT_COUNT] = {
     [UI_MENU_AO_LOW] = "Baixa",
     [UI_MENU_AO_HIGH] = "Alta",
     [UI_MENU_AO_GI] = "Alta + luz indireta (pesada)",
-    [UI_MENU_CONTACT_SHADOWS] = "Sombras de contato",
-    [UI_MENU_CONTACT_SHADOWS_DESC] = "Sombras de contato em espaço de tela: as sombras pequenas nos pés, sob "
-                                     "pedras e na grama que os mapas de sombra não alcançam. Vale no próximo início.",
-    [UI_MENU_PCSS] = "Sombras do sol suaves (PCSS)",
-    [UI_MENU_PCSS_DESC] = "A sombra do sol é nítida onde o objeto toca o chão e mais suave quanto mais longe ela "
-                          "cai. Vale no próximo início.",
-    [UI_MENU_TEX_COMPRESSION] = "Compressão de texturas",
-    [UI_MENU_TEX_COMPRESSION_DESC] = "Como as texturas ASTC do jogo ficam na memória de vídeo. BC1 é a mais leve, "
-                                     "BC3 mantém o canal alfa, BC7 é a mais nítida e a mais pesada de codificar. "
-                                     "Desligado mantém sem compressão (RGBA8) e usa muito mais memória. Vale a "
-                                     "partir da próxima inicialização.",
-    [UI_MENU_BC7_CACHE] = "Cache BC7 pré-calculado",
-    [UI_MENU_BC7_CACHE_DESC] = "Com a compressão BC7, usa a pasta cache/bc7 ao lado do jogo (gravada pela "
-                               "ferramenta de pré-cálculo) em vez de codificar as texturas de novo a cada início. "
-                               "Vale a partir da próxima inicialização.",
-    [UI_MENU_MOUSE_CAMERA] = "Câmera do mouse",
-    [UI_MENU_MOUSE_CAMERA_DESC] = "Como o mouse gira a câmera. Sparrow: a conversão deste port, direta. Puddz: a "
-                                  "conversão do port AstralChain-PC, com a velocidade suavizada.",
-    [UI_MENU_RESHADE] = "ReShade antes da interface",
-    [UI_MENU_RESHADE_DESC] = "Com o addon do ReShade instalado, os efeitos tocam só a cena e a interface do jogo é "
-                             "desenhada depois, sem alterações. Precisa do ReShade com suporte completo a addons e "
-                             "da técnica AstralChainHudComposite por último no preset.",
-    [UI_MENU_POST_DEBUG] = "Registro do pós-processamento",
-    [UI_MENU_POST_DEBUG_DESC] = "Registra no astralchain.log cada passagem depois do composto de iluminação "
-                                "(tamanho, formatos, programa), para atribuir as passagens aos interruptores de "
-                                "pós-processamento. Vale a partir da próxima inicialização.",
-    [UI_MENU_CONTACT_DEBUG] = "Vista das sombras de contato",
-    [UI_MENU_CONTACT_DEBUG_DESC] = "Mostra o fator das sombras de contato em cinza sobre a imagem em vez do "
-                                   "escurecimento, para conferir até onde a marcha alcança. Vale a partir da "
-                                   "próxima inicialização.",
-    [UI_MENU_AO_DEBUG] = "Vista da oclusão de ambiente",
-    [UI_MENU_AO_DEBUG_DESC] = "Troca a luz por uma vista de depuração da oclusão: 1 só o fator, 2 só a parte "
-                              "das superfícies, 3 o pixel inteiro multiplicado. Vale a partir da próxima "
-                              "inicialização.",
-    [UI_MENU_BC7_CACHE_LOG] = "Registro de chaves BC7",
-    [UI_MENU_BC7_CACHE_LOG_DESC] = "Registra uma linha [bc7key] para cada textura enviada pelo caminho BC7, "
-                                   "para conferir as chaves do cache pré-calculado com as do jogo. Vale a partir "
-                                   "da próxima inicialização.",
-    [UI_MENU_RENDER_SCALE] = "Escala de renderização",
-    [UI_MENU_RENDER_SCALE_DESC] = "Escala a cena renderizada em relação à resolução do jogo. Acima de 100% é "
-                                  "supersampling: 125% renderiza um jogo 1080p em 1440p e deixa tudo mais "
-                                  "nítido, texturas incluídas, ao custo de GPU. Vale a partir da próxima "
-                                  "inicialização.",
-    [UI_MENU_TEX_LOD_BIAS] = "Nitidez das texturas (viés de LOD)",
-    [UI_MENU_TEX_LOD_BIAS_DESC] = "Desloca cada textura para os níveis de mip mais finos: valores negativos "
-                                  "deixam as superfícies mais nítidas à distância, ao custo de um pouco de "
-                                  "cintilação. Combine com anisotropia 16x. Vale a partir da próxima "
-                                  "inicialização.",
-    [UI_MENU_MOTION_BLUR] = "Desfoque de movimento",
-    [UI_MENU_MOTION_BLUR_DESC] = "O desfoque de movimento do próprio jogo. Desligado, a imagem fica nítida em movimento.",
-    [UI_MENU_DEPTH_OF_FIELD] = "Profundidade de campo",
-    [UI_MENU_DEPTH_OF_FIELD_DESC] = "A profundidade de campo do jogo: o que está fora do foco desfoca.",
-    [UI_MENU_CHROMATIC_ABERRATION] = "Aberração cromática",
-    [UI_MENU_CHROMATIC_ABERRATION_DESC] = "A franja de cor nas bordas da imagem que o jogo adiciona.",
     [UI_MENU_UPSCALING] = "Upscaler",
     [UI_MENU_UPSCALING_DESC] = "Um upscaler temporal no lugar do antisserrilhado do jogo: bordas mais suaves e menos "
                                "cintilação e, com um modo abaixo de Nativo, mais quadros por segundo. NVIDIA DLSS precisa "
                                "de uma placa NVIDIA RTX e do nvngx_dlss.dll ao lado do astralchain.exe, Intel XeSS de uma "
                                "placa recente e do libxess.dll ao lado do astralchain.exe; AMD FSR 3 roda em qualquer "
-                               "placa. Automático usa o DLSS onde ele pode rodar e o FSR 3 nos outros casos. DLSS e XeSS "
-                               "escolhidos aqui valem após reiniciar. O HUD não é afetado.",
+                               "placa, AMD FSR 4 em uma Radeon RX 6000 ou mais recente. Automático usa o DLSS onde ele "
+                               "pode rodar e o FSR 3 nos outros casos. DLSS, XeSS e FSR 4 escolhidos aqui valem após "
+                               "reiniciar. O HUD não é afetado.",
     [UI_MENU_UPSCALING_DESC_OTHER] = "Um upscaler temporal no lugar do antisserrilhado do jogo: bordas mais suaves e menos "
                                      "cintilação e, com um modo abaixo de Nativo, mais quadros por segundo. AMD FSR 3 roda "
-                                     "em qualquer placa; Automático é o FSR 3 aqui (NVIDIA DLSS e Intel XeSS são somente "
-                                     "no Windows). O HUD não é afetado.",
+                                     "em qualquer placa, AMD FSR 4 em uma Radeon RX 6000 ou mais recente; Automático é "
+                                     "o FSR 3 aqui (NVIDIA DLSS e Intel XeSS são somente no Windows). FSR 4 escolhido "
+                                     "aqui vale após reiniciar. O HUD não é afetado.",
     [UI_MENU_UPSCALING_OFF] = "Desligado", [UI_MENU_UPSCALING_AUTO] = "Automático",
     [UI_MENU_UPSCALING_UNAVAILABLE] = "indisponível aqui",
+    [UI_MENU_UPSCALING_INSTEAD] = "indisponível aqui: %s em uso",
+    [UI_MENU_UPSCALING_MISSING] = "%s não encontrado: %s em uso",
     [UI_MENU_UPSCALING_UNTIL] = "%s até reiniciar",
     [UI_MENU_UPSCALING_QUALITY] = "Modo do upscaler",
     [UI_MENU_UPSCALING_QUALITY_DESC] = "O tamanho em que a cena 3D é desenhada antes que o upscaler a leve à resolução do "
@@ -1563,10 +1388,9 @@ static const char *const text_pt_br[UI_TEXT_COUNT] = {
     [UI_MENU_DLSS_PERFORMANCE] = "Desempenho",
     [UI_MENU_UPSCALING_ULTRA] = "Ultradesempenho",
     [UI_MENU_UPSCALING_MODE_OFF] = "sem upscaler",
-    [UI_MENU_AA] = "Antisserrilhado",
-    [UI_MENU_AA_DESC] = "Antisserrilhado para quando nenhum upscaler roda. SMAA: o do próprio jogo. CMAA 2: o "
-                        "antisserrilhado morfológico da Intel, aplicado pelo port sobre a imagem pronta, HUD "
-                        "incluído. Desligado deixa as bordas serrilhadas.",
+    [UI_MENU_AA] = "Antisserrilhado do jogo",
+    [UI_MENU_AA_DESC] = "O antisserrilhado do próprio jogo, SMAA, para quando nenhum upscaler roda. Desligado deixa as "
+                        "bordas serrilhadas.",
     [UI_MENU_AA_OFF] = "Desligado",
     [UI_MENU_AA_BY_UPSCALER] = "o upscaler suaviza as bordas",
     [UI_MENU_OUTPUT_RES_AUTO] = "Automático",
@@ -1607,7 +1431,7 @@ static const char *const text_pt_br[UI_TEXT_COUNT] = {
 // when the menu language is zh-Hans (ui_text.h menu_text). The rows are fixed width, so the strings stay close to the
 // English length; an id without a Chinese entry falls back to English.
 static const char *const text_zh_hans[UI_TEXT_COUNT] = {
-    SWKBD("文字输入", "请输入名字", "阿基拉", "确定", "取消", "手柄：A 确定，B 取消"),
+    SWKBD("文字输入", "请输入名字", "马儿", "确定", "取消", "手柄：A 确定，B 取消"),
 
     [UI_MENU_TITLE] = "设置",
     [UI_MENU_TAB_SCREEN] = "显示",
@@ -1616,51 +1440,6 @@ static const char *const text_zh_hans[UI_TEXT_COUNT] = {
     [UI_MENU_TAB_CONTROLS] = "操作",
     [UI_MENU_TAB_MENU] = "菜单",
     [UI_MENU_TAB_ADVANCED] = "高级",
-    [UI_MENU_TAB_DEBUG] = "调试",
-    [UI_MENU_TAB_PERF] = "性能",
-    [UI_MENU_ASPECT] = "画面比例",
-    [UI_MENU_ASPECT_DESC] = "图像如何适应屏幕。“适应”保持游戏比例并带黑边；“拉伸”填满整个屏幕；“宽屏”由游戏自身以宽屏渲染。",
-    [UI_MENU_ASPECT_FIT] = "适应",
-    [UI_MENU_ASPECT_STRETCH] = "拉伸",
-    [UI_MENU_ASPECT_WIDE] = "宽屏",
-    [UI_MENU_CONSOLE] = "控制台窗口",
-    [UI_MENU_CONSOLE_DESC] = "游戏启动时显示控制台窗口。无论如何日志都会写入文件。",
-    [UI_MENU_CPU_BOOST] = "CPU 加速",
-    [UI_MENU_CPU_BOOST_DESC] = "“自动”允许移植层提升线程优先级并短暂忙等而非休眠；“关”和“开”可强制指定。",
-    [UI_MENU_CPU_BOOST_SPIN_US] = "加速忙等时间",
-    [UI_MENU_CPU_BOOST_SPIN_US_DESC] = "加速线程在休眠前忙等的微秒数（0–20000）。",
-    [UI_MENU_DEVICE_PROFILE] = "设备配置",
-    [UI_MENU_DEVICE_PROFILE_DESC] = "使用哪种设备的默认设置：自动、台式电脑或 Steam Deck。",
-    [UI_MENU_PROFILE_DESKTOP] = "台式电脑",
-    [UI_MENU_PROFILE_DECK] = "Steam Deck",
-    [UI_MENU_FREE_CORES] = "自由核心分配",
-    [UI_MENU_FREE_CORES_DESC] = "让游戏线程可在任意核心运行，而非遵循游戏自身的核心安排。",
-    [UI_MENU_LIB_PREBUILD_KEEP] = "保留的预构建缓存",
-    [UI_MENU_LIB_PREBUILD_KEEP_DESC] = "磁盘上保留的预构建阶段库大小（MB，0–4096）。",
-    [UI_MENU_MODS_REBUILD] = "启动时重建 Mod",
-    [UI_MENU_MODS_REBUILD_DESC] = "“自动”会重建文件有变化的 Mod；“关”则从不在启动时重建。",
-    [UI_MENU_SHADOW_RANGE] = "阴影范围",
-    [UI_MENU_SHADOW_RANGE_DESC] = "阴影贴图覆盖的距离，为游戏自身范围的百分比（50–400）。",
-    [UI_MENU_SHADOW_RES] = "阴影分辨率",
-    [UI_MENU_SHADOW_RES_DESC] = "阴影贴图的大小：游戏自身的，或固定大小。",
-    [UI_MENU_SPLIT_US] = "绘制拆分预算",
-    [UI_MENU_SPLIT_US_DESC] = "拆分一次提交前累积的绘制工作微秒数（0–20000）。",
-    [UI_MENU_STICK_DEADZONE] = "摇杆死区",
-    [UI_MENU_TEX_CACHE_MB] = "纹理缓存大小",
-    [UI_MENU_TEX_CACHE_MB_DESC] = "纹理缓存可占用的显存（MB）。“自动”取显存的八分之一。",
-    [UI_MENU_TEX_MIP_SKIP] = "跳过小纹理的 mip",
-    [UI_MENU_TEX_MIP_SKIP_DESC] = "对于基础级别不超过此字节数的 ASTC 纹理，不生成 mip。",
-    [UI_MENU_TEX_PREFETCH] = "纹理预取",
-    [UI_MENU_TEX_PREFETCH_DESC] = "在首次使用前上传纹理，使其在绘制时已就绪。",
-    [UI_MENU_WB_EXACT] = "精确纹理回写",
-    [UI_MENU_WB_EXACT_DESC] = "以精确内容而非整页决定纹理回写：修复过期纹理，但有一定 CPU 开销。",
-    [UI_MENU_WB_FENCE_LIMIT] = "回写栅栏上限",
-    [UI_MENU_WB_FENCE_LIMIT_DESC] = "CPU 等待栅栏时回写的最大纹理（字节）。",
-    [UI_MENU_ZSTD_CHECK] = "双路校验 zstd",
-    [UI_MENU_ZSTD_CHECK_DESC] = "用两种解码器解码每个 zstd 流并比较：调试用校验，速度较慢。",
-    [UI_MENU_ZSTD_NATIVE] = "原生 zstd 解码器",
-    [UI_MENU_ZSTD_NATIVE_DESC] = "使用主机自身的 zstd 解码器，而非游戏的。",
-    [UI_MENU_ASYNC_PREEMPT_NOINTR] = "开，不中断",
     [UI_MENU_TAB_MODS] = "模组",
     [UI_MENU_MODS_INSTALLED] = "已安装的模组",
     [UI_MENU_MODS_NONE] = "还没有模组。把模组解压到 mods 文件夹，每个模组一个文件夹，里面放 romfs 文件夹，然后重启游戏。"
@@ -1737,9 +1516,6 @@ static const char *const text_zh_hans[UI_TEXT_COUNT] = {
     [UI_MENU_DRAW_DISTANCE_DESC] = "物体在多远处仍保持精细模型、小物体在多远处仍然可见，以游戏自身数值的百分比表示。数值越高，物体突然出现的情况越少，绘制量也越大。对更改之后游戏加载的内容生效，即从下一次加载画面开始。",
     [UI_MENU_SHARPNESS] = "FSR 锐度",
     [UI_MENU_SHARPNESS_DESC] = "FSR 缩放后的锐化强度；0 为关闭。",
-    [UI_MENU_SHARPENER] = "锐化方式",
-    [UI_MENU_SHARPENER_DESC] = "上方滑块驱动哪种锐化滤镜。RCAS：AMD 的滤镜，本移植一直使用。Smart Sharp：双边"
-                               "对比度自适应锐化（ELZELDAPA 预设所用），对噪点更温和。",
     [UI_MENU_COLOR] = "色彩",
     [UI_MENU_COLOR_PRESET] = "色彩配置",
     [UI_MENU_COLOR_PRESET_DESC] = "同时设置下面四项。鲜艳：对比度和饱和度更高，暗部略微提亮（为 OLED 屏幕调校）。"
@@ -1756,10 +1532,6 @@ static const char *const text_zh_hans[UI_TEXT_COUNT] = {
     [UI_MENU_COLOR_SATURATION_DESC] = "颜色相对灰色的强度；100% 表示不调整。",
     [UI_MENU_COLOR_GAMMA] = "伽马",
     [UI_MENU_COLOR_GAMMA_DESC] = "小于 1 提亮暗部与中间调，大于 1 压暗；1 表示不调整。",
-    [UI_MENU_POST_PRESET] = "图像预设",
-    [UI_MENU_POST_PRESET_DESC] = "ELZELDAPA：将同名 ReShade 预设内置：Colourfulness −0.30 与 Marty 的 Exposure "
-                                 "Fusion 局部色调映射，按此顺序，在上方颜色调整之后应用。作用于整个画面，包括 HUD。",
-    [UI_MENU_POST_PRESET_OFF] = "关闭", [UI_MENU_POST_PRESET_ELZELDAPA] = "ELZELDAPA",
     [UI_MENU_FPS_LIMIT] = "帧率",
     [UI_MENU_FPS_LIMIT_DESC] = "60 FPS 启用游戏的 60 帧补丁；30 FPS 关闭它。即时生效。",
     [UI_MENU_FPS_30] = "30 FPS",
@@ -1787,6 +1559,50 @@ static const char *const text_zh_hans[UI_TEXT_COUNT] = {
                                   "这样被打断的读取可能会永久卡住。",
     [UI_MENU_VOLUME] = "音量",
     [UI_MENU_VOLUME_DESC] = "游戏的主音量。",
+    [UI_MENU_AUDIO_OUTPUT] = "音频输出",
+    [UI_MENU_AUDIO_OUTPUT_DESC] = "游戏混音的声道。5.1 会把中置（人声）和环绕声输出到各自的声道，需要 5.1 或 7.1 输出。否则 5.1 混音会缩混为立体声。",
+    [UI_MENU_AUDIO_OUTPUT_DESC_WIN] = "游戏混音的声道。5.1 会把中置（人声）和环绕声输出到各自的声道，需要 5.1 或 7.1 输出，或开启了空间音效的耳机：Windows Sonic for Headphones、Dolby Atmos for Headphones 或 DTS Headphone:X，在 Windows 声音设置的设备属性中开启。否则 5.1 混音会缩混为立体声。",
+    [UI_MENU_AUDIO_STEREO] = "立体声",
+    [UI_MENU_AUDIO_51] = "5.1",
+    [UI_MENU_AUDIO_TAKES_51_SPATIAL] = "%s：已开启 Windows 空间音效，会把 5.1 转为耳机环绕声。",
+    [UI_MENU_AUDIO_TAKES_51] = "%s：%d 个声道，5.1 原样输出。",
+    [UI_MENU_AUDIO_FOLDS_51] = "%s：%d 个声道，不支持 5.1：5.1 混音会缩混为立体声。",
+    [UI_MENU_AUDIO_SONIC_HINT] = "使用耳机时，请在设备属性中开启 Windows Sonic for Headphones（或 Dolby Atmos、DTS Headphone:X）。",
+    [UI_MENU_AUDIO_SENDING] = "游戏正在输出 %d 个声道。",
+    [UI_MENU_AUDIO_NO_DEVICE] = "未找到音频输出。",
+    [UI_MENU_AUDIO_MIX_HINT] = "在上方选择 5.1 并重启游戏后，即可调整每个扬声器。",
+    [UI_MENU_AUDIO_GROUP_OUTPUT] = "扬声器与耳机",
+    [UI_MENU_AUDIO_GROUP_MIX] = "扬声器混音",
+    [UI_MENU_AUDIO_RESTART_DESC] = "关闭游戏并以新的音频输出重新启动。上次存档之后的进度将会丢失。",
+    [UI_MENU_AUDIO_TEST] = "测试扬声器",
+    [UI_MENU_AUDIO_TEST_DESC] = "像功放一样依次在每个扬声器播放噪声：确认每个扬声器都能发声，且位置与示意图一致。测试期间游戏声音会静音。再按一次停止。",
+    [UI_MENU_AUDIO_TEST_START] = "开始",
+    [UI_MENU_AUDIO_TEST_STOP] = "按下停止",
+    [UI_MENU_AUDIO_PRESET] = "混音",
+    [UI_MENU_AUDIO_PRESET_DESC] = "预设混音。均衡：推荐的混音。清晰人声：对白在前，环绕声更柔和。沉浸：环绕声更强，低音送往低音炮。调整下方任意扬声器会变为自定义。",
+    [UI_MENU_AUDIO_PRESET_BALANCED] = "均衡",
+    [UI_MENU_AUDIO_PRESET_VOICES] = "清晰人声",
+    [UI_MENU_AUDIO_PRESET_IMMERSIVE] = "沉浸",
+    [UI_MENU_AUDIO_PRESET_CUSTOM] = "自定义",
+    [UI_MENU_AUDIO_FRONT_LEFT] = "左前",
+    [UI_MENU_AUDIO_FRONT_RIGHT] = "右前",
+    [UI_MENU_AUDIO_CENTER] = "中置（人声）",
+    [UI_MENU_AUDIO_SURROUND_LEFT] = "左环绕",
+    [UI_MENU_AUDIO_SURROUND_RIGHT] = "右环绕",
+    [UI_MENU_AUDIO_SUBWOOFER] = "低音炮",
+    [UI_MENU_AUDIO_FRONT_DESC] = "此前置扬声器的音量。前置主要承载游戏以立体声混音的音乐，以及你前方的声音；调低它们主要会降低音乐。若只想调整音乐，请使用游戏自身的音乐音量。",
+    [UI_MENU_AUDIO_SURROUND_DESC] = "此环绕扬声器的音量。环绕承载环境声、混响以及你身旁和身后的声音。",
+    [UI_MENU_AUDIO_CENTER_DESC] = "中置扬声器的音量，人声和界面音效都在这里。人声或提示音太响时可调低；-2 dB 可使其接近立体声下的音量。",
+    [UI_MENU_AUDIO_SUBWOOFER_DESC] = "低音炮的音量。游戏本身不向它发送声音：开启“低音送往低音炮”即可把其他扬声器的低频送给它。",
+    [UI_MENU_AUDIO_BASS] = "低音送往低音炮",
+    [UI_MENU_AUDIO_BASS_DESC] = "把其他五个扬声器的低音（120 Hz 以下）送往低音炮。使用耳机，或功放已自行管理低音时请保持关闭。",
+    [UI_MENU_SPK_LEFT] = "左",
+    [UI_MENU_SPK_RIGHT] = "右",
+    [UI_MENU_SPK_CENTER] = "中置",
+    [UI_MENU_SPK_SURROUND_LEFT] = "左环绕",
+    [UI_MENU_SPK_SURROUND_RIGHT] = "右环绕",
+    [UI_MENU_SPK_SUB] = "低音炮",
+    [UI_MENU_SPK_YOU] = "你",
     [UI_MENU_MOTION] = "体感操作",
     [UI_MENU_MOTION_DESC] = "用手柄的陀螺仪瞄准。",
     [UI_MENU_RUMBLE_STRENGTH] = "振动强度",
@@ -1839,7 +1655,7 @@ static const char *const text_zh_hans[UI_TEXT_COUNT] = {
     [UI_BINDS_GROUP_CAMERA] = "视角",
     [UI_BINDS_PRESS_KEY] = "请为“%s”按下一个键或鼠标键",
     [UI_BINDS_PRESS_PAD] = "请为“%s”按下一个手柄按键",
-    [UI_BINDS_CANCEL_HINT] = "等待 %d 秒取消",
+    [UI_BINDS_CANCEL_HINT] = "Esc 取消，或等待 %d 秒",
     [UI_BINDS_TAKEN] = "%s 已从 %s 移走",
     [UI_BINDS_SWAPPED] = "%s 已与 %s 对调",
     [UI_BINDS_RESET] = "重置所有按键",
@@ -1870,19 +1686,19 @@ static const char *const text_zh_hans[UI_TEXT_COUNT] = {
     [UI_BIND_RSTICK_RIGHT] = "视角右转",
     [UI_BIND_RSTICK_DOWN] = "视角下压",
     [UI_BIND_DESC_A] = "互动、拾取、对话。",
-    [UI_BIND_DESC_B] = "闪避、取消、返回。",
-    [UI_BIND_DESC_X] = "使用所装备的道具。",
-    [UI_BIND_DESC_Y] = "切换雷吉恩。",
-    [UI_BIND_DESC_LCLICK] = "冲刺。",
-    [UI_BIND_DESC_RCLICK] = "将视角回正。",
-    [UI_BIND_DESC_L] = "雷吉恩动作。",
-    [UI_BIND_DESC_R] = "召回雷吉恩。",
-    [UI_BIND_DESC_ZL] = "雷吉恩与锁链动作。",
-    [UI_BIND_DESC_ZR] = "攻击。",
-    [UI_BIND_DESC_PLUS] = "打开IRIS。",
-    [UI_BIND_DESC_MINUS] = "暂停。",
-    [UI_BIND_DESC_DPAD] = "切换武器（上/下）。",
-    [UI_BIND_DESC_MOVE] = "像左摇杆一样移动角色。手柄的左摇杆也始终可用。",
+    [UI_BIND_DESC_B] = "奔跑、取消、返回。",
+    [UI_BIND_DESC_X] = "跳跃。",
+    [UI_BIND_DESC_Y] = "攻击。",
+    [UI_BIND_DESC_LCLICK] = "蹲下。",
+    [UI_BIND_DESC_RCLICK] = "第一人称视角。",
+    [UI_BIND_DESC_L] = "能力。",
+    [UI_BIND_DESC_R] = "投掷武器。",
+    [UI_BIND_DESC_ZL] = "举盾、锁定。",
+    [UI_BIND_DESC_ZR] = "弓箭。",
+    [UI_BIND_DESC_PLUS] = "菜单、背包。",
+    [UI_BIND_DESC_MINUS] = "地图。",
+    [UI_BIND_DESC_DPAD] = "快捷选择。",
+    [UI_BIND_DESC_MOVE] = "像左摇杆一样移动林克。手柄的左摇杆始终可用。",
     [UI_BIND_DESC_CAMERA] = "像右摇杆一样转动视角。鼠标和手柄的右摇杆始终可用。",
     [UI_KEY_SPACE] = "空格",
     [UI_KEY_TAB] = "Tab",
@@ -2131,56 +1947,20 @@ static const char *const text_zh_hans[UI_TEXT_COUNT] = {
     [UI_MENU_AO_LOW] = "低",
     [UI_MENU_AO_HIGH] = "高",
     [UI_MENU_AO_GI] = "高 + 间接光照（高负载）",
-    [UI_MENU_CONTACT_SHADOWS] = "接触阴影",
-    [UI_MENU_CONTACT_SHADOWS_DESC] = "屏幕空间接触阴影：补上阴影贴图遗漏的小阴影——脚边、石头下与草丛中。下次启动时生效。",
-    [UI_MENU_PCSS] = "柔和太阳阴影（PCSS）",
-    [UI_MENU_PCSS_DESC] = "阳光的阴影在物体接触地面处清晰，落得越远越柔和。下次启动时生效。",
-    [UI_MENU_TEX_COMPRESSION] = "纹理压缩",
-    [UI_MENU_TEX_COMPRESSION_DESC] = "游戏的 ASTC 纹理在显存中的存放方式。BC1 最轻，BC3 保留 alpha 通道，BC7 "
-                                     "最清晰、编码最重。关闭则不压缩（RGBA8），占用显存多得多。下次启动生效。",
-    [UI_MENU_BC7_CACHE] = "预计算 BC7 缓存",
-    [UI_MENU_BC7_CACHE_DESC] = "使用 BC7 压缩时，直接读取游戏旁的 cache/bc7 文件夹（由预计算工具生成），"
-                               "不必每次启动重新编码纹理。下次启动生效。",
-    [UI_MENU_MOUSE_CAMERA] = "鼠标视角",
-    [UI_MENU_MOUSE_CAMERA_DESC] = "鼠标转动视角的方式。Sparrow：本移植自己的转换，直接线性。Puddz："
-                                  "AstralChain-PC 移植的转换，速度带平滑。",
-    [UI_MENU_RESHADE] = "ReShade 在 HUD 之前",
-    [UI_MENU_RESHADE_DESC] = "安装 ReShade 插件后，特效只作用于场景，游戏界面随后绘制、不受影响。需要支持完整"
-                             "插件的 ReShade，并把 AstralChainHudComposite 技术放在预设最后。",
-    [UI_MENU_POST_DEBUG] = "后处理日志",
-    [UI_MENU_POST_DEBUG_DESC] = "把光照合成之后的每个通道（尺寸、格式、程序）写入 astralchain.log，"
-                                "用于给后处理开关分配通道。下次启动生效。",
-    [UI_MENU_CONTACT_DEBUG] = "接触阴影视图",
-    [UI_MENU_CONTACT_DEBUG_DESC] = "把接触阴影因子以灰色显示在画面上，而不是变暗，用来检查行进的覆盖范围。"
-                                   "下次启动生效。",
-    [UI_MENU_AO_DEBUG] = "环境光遮蔽视图",
-    [UI_MENU_AO_DEBUG_DESC] = "用遮蔽调试视图代替光照：1 只看因子，2 只看表面份额，3 整个像素相乘。"
-                              "下次启动生效。",
-    [UI_MENU_BC7_CACHE_LOG] = "BC7 缓存键日志",
-    [UI_MENU_BC7_CACHE_LOG_DESC] = "为 BC7 路径上传的每张纹理写一行 [bc7key]，用来核对预计算缓存的键与游戏"
-                                   "是否一致。下次启动生效。",
-    [UI_MENU_RENDER_SCALE] = "渲染比例",
-    [UI_MENU_RENDER_SCALE_DESC] = "按游戏分辨率缩放渲染画面。超过 100% 即超级采样：125% 会把 1080p 游戏按 "
-                                  "1440p 渲染，全面变锐利，包括纹理，代价是 GPU 负载。下次启动生效。",
-    [UI_MENU_TEX_LOD_BIAS] = "纹理锐度（LOD 偏移）",
-    [UI_MENU_TEX_LOD_BIAS_DESC] = "把每张纹理推向更细的 mip 层级：负值让远处表面更锐利，代价是些许闪烁。"
-                                  "建议配合 16x 各向异性。下次启动生效。",
-    [UI_MENU_MOTION_BLUR] = "运动模糊",
-    [UI_MENU_MOTION_BLUR_DESC] = "游戏自带的运动模糊。关闭后，运动中的画面保持清晰。",
-    [UI_MENU_DEPTH_OF_FIELD] = "景深",
-    [UI_MENU_DEPTH_OF_FIELD_DESC] = "游戏自带的景深：焦点之外会模糊。",
-    [UI_MENU_CHROMATIC_ABERRATION] = "色差",
-    [UI_MENU_CHROMATIC_ABERRATION_DESC] = "游戏在画面边缘添加的色边。",
     [UI_MENU_UPSCALING] = "超分辨率",
     [UI_MENU_UPSCALING_DESC] = "以时间性超分辨率取代游戏的抗锯齿：边缘更平滑、闪烁更少；选择低于“原生”的模式还能提高帧率。"
                                "NVIDIA DLSS 需要 NVIDIA RTX 显卡，并将 nvngx_dlss.dll 放在 astralchain.exe 旁；Intel XeSS "
-                               "需要较新的显卡，并将 libxess.dll 放在 astralchain.exe 旁；AMD FSR 3 可在任何显卡上运行。"
-                               "“自动”在可运行时使用 DLSS，否则使用 FSR 3。在此选择的 DLSS 和 XeSS 重启后生效。HUD 不受影响。",
+                               "需要较新的显卡，并将 libxess.dll 放在 astralchain.exe 旁；AMD FSR 3 可在任何显卡上运行，"
+                               "AMD FSR 4 需要 Radeon RX 6000 或更新的显卡。“自动”在可运行时使用 DLSS，否则使用 FSR 3。"
+                               "在此选择的 DLSS、XeSS 和 FSR 4 重启后生效。HUD 不受影响。",
     [UI_MENU_UPSCALING_DESC_OTHER] = "以时间性超分辨率取代游戏的抗锯齿：边缘更平滑、闪烁更少；选择低于“原生”的模式还能提高"
-                                     "帧率。AMD FSR 3 可在任何显卡上运行；此处“自动”即 FSR 3（NVIDIA DLSS 和 Intel XeSS "
-                                     "仅限 Windows）。HUD 不受影响。",
+                                     "帧率。AMD FSR 3 可在任何显卡上运行，AMD FSR 4 需要 Radeon RX 6000 或更新的显卡；此处“自动”即 "
+                                     "FSR 3（NVIDIA DLSS 和 Intel XeSS 仅限 Windows）。在此选择的 FSR 4 重启后生效。"
+                                     "HUD 不受影响。",
     [UI_MENU_UPSCALING_OFF] = "关闭", [UI_MENU_UPSCALING_AUTO] = "自动",
     [UI_MENU_UPSCALING_UNAVAILABLE] = "此处不可用",
+    [UI_MENU_UPSCALING_INSTEAD] = "此处不可用：使用 %s",
+    [UI_MENU_UPSCALING_MISSING] = "缺少 %s：使用 %s",
     [UI_MENU_UPSCALING_UNTIL] = "重启前使用 %s",
     [UI_MENU_UPSCALING_QUALITY] = "超分辨率模式",
     [UI_MENU_UPSCALING_QUALITY_DESC] = "3D 场景在超分辨率放大到游戏分辨率之前的绘制尺寸（显示在数值下方）。“原生”以全尺寸"
@@ -2192,9 +1972,8 @@ static const char *const text_zh_hans[UI_TEXT_COUNT] = {
     [UI_MENU_DLSS_PERFORMANCE] = "性能",
     [UI_MENU_UPSCALING_ULTRA] = "超级性能",
     [UI_MENU_UPSCALING_MODE_OFF] = "未使用超分辨率",
-    [UI_MENU_AA] = "抗锯齿",
-    [UI_MENU_AA_DESC] = "未运行超分辨率时使用的抗锯齿。SMAA：游戏自带。CMAA 2：Intel 的形态学抗锯齿，由本移植"
-                        "作用于最终画面，包括 HUD。关闭会使边缘出现锯齿。",
+    [UI_MENU_AA] = "游戏抗锯齿",
+    [UI_MENU_AA_DESC] = "游戏自带的抗锯齿 SMAA，用于未运行超分辨率时。关闭会使边缘出现锯齿。",
     [UI_MENU_AA_OFF] = "关闭",
     [UI_MENU_AA_BY_UPSCALER] = "边缘由超分辨率平滑",
     [UI_MENU_OUTPUT_RES_AUTO] = "自动",
@@ -2231,7 +2010,7 @@ SWKBD_ONLY(text_it, "Inserimento testo", "Inserisci un nome", "Cavallo", "OK", "
 SWKBD_ONLY(text_es, "Introducir texto", "Introduce un nombre", "Caballo", "Aceptar", "Cancelar",
            "Mando: A = Aceptar, B = Cancelar");
 SWKBD_ONLY(text_nl, "Tekstinvoer", "Voer een naam in", "Paard", "OK", "Annuleren", "Controller: A = OK, B = Annuleren");
-SWKBD_ONLY(text_pt, "Inserir texto", "Introduz um nome", "Akira", "OK", "Cancelar", "Comando: A = OK, B = Cancelar");
+SWKBD_ONLY(text_pt, "Inserir texto", "Introduz um nome", "Cavalo", "OK", "Cancelar", "Comando: A = OK, B = Cancelar");
 SWKBD_ONLY(text_zh_hant, "文字輸入", "請輸入名字", "馬兒", "確定", "取消", "手把：A 確定，B 取消");
 SWKBD_ONLY(text_ko, "문자 입력", "이름을 입력하세요", "말", "확인", "취소", "컨트롤러: A 확인, B 취소");
 

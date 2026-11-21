@@ -33,6 +33,7 @@
 #include "vk_exec.h"
 #include "vk_rec.h"
 #include "vk_fsr3.h"
+#include "vk_fsr4.h"
 #include "vk_xess.h"
 #include "nvn_api.h"
 #include "platform/platform.h"
@@ -211,6 +212,7 @@ static int vtable_ok(void) {
 }
 
 void vk_dlaa_init(void) {
+    vk_fsr4_init();   // its library, when the setting is fsr4 at start
     if (!vk_dlaa_wanted() || !core_load()) return;
 #ifdef _WIN32   // core_load loads nothing elsewhere
     wchar_t wdir[MAX_PATH];
@@ -335,24 +337,32 @@ VkImageView vk_dlaa_swap_view;
 uint32_t vk_dlaa_swap_w;
 VkImage vk_dlaa_swap_pic;   // the image behind vk_dlaa_swap_view (vk_hdr.c records it as the frame's scene)
 
-enum { BK_NONE, BK_DLSS, BK_XESS, BK_FSR3 };
+enum { BK_NONE, BK_DLSS, BK_XESS, BK_FSR3, BK_FSR4 };
 
 static int dl_active(void) {
     return D.backend == BK_DLSS   ? N.available && !D.failed
            : D.backend == BK_XESS ? vk_xess_available()
            : D.backend == BK_FSR3 ? vk_fsr3_available()
+           : D.backend == BK_FSR4 ? vk_fsr4_available()
                                   : 0;
 }
 
 // The backend for the setting (cfg.c cfg_upscaling, read at each present: the menu switches it live), among those that
 // can run in this run: DLSS where NGX came up (loaded at start for dlss and auto), XeSS where libxess.dll came up
 // (loaded at start for xess), FSR 3 wherever its pipelines can be made (it is built in). auto is DLSS where it can run,
-// else FSR 3. While the scene is reduced (resolution.c) something must scale it: a choice that cannot run (off, a
-// library not loaded at start, a backend that failed in this run) leaves the first that can of DLSS, XeSS and FSR 3, so
-// the game's plain scaling never shows a scene at 33..67 % of the output; the menu says that the choice waits for a
-// restart. can() makes nothing: FSR 3's pipelines are made when it is picked (dl_active).
+// else FSR 3. FSR 4 that cannot run (its files are not there, AMD's library does not take the GPU, it was chosen after
+// the start, it failed) has FSR 3 in its place, at the scene's own size too: the player asked for an AMD temporal
+// upscaler, and vk_fsr4.c's log and the menu say why it is FSR 3. While the scene is reduced (resolution.c) something
+// must scale it: a choice that cannot run (off, a library not loaded at start, a backend that failed in this run)
+// leaves the first that can of DLSS, XeSS and FSR 3, so the game's plain scaling never shows a scene at 33..67 % of
+// the output; the menu says that the choice waits for a restart. can() makes nothing: FSR 3's pipelines are made when
+// it is picked (dl_active).
 static int can(int bk) {
-    return bk == BK_DLSS ? N.available && !D.failed : bk == BK_XESS ? vk_xess_available() : bk == BK_FSR3 ? !vk_fsr3_failed() : 0;
+    return bk == BK_DLSS   ? N.available && !D.failed
+           : bk == BK_XESS ? vk_xess_available()
+           : bk == BK_FSR3 ? !vk_fsr3_failed()
+           : bk == BK_FSR4 ? vk_fsr4_available()
+                           : 0;
 }
 
 static int chosen(void) {
@@ -360,6 +370,7 @@ static int chosen(void) {
     return !strcmp(up, "dlss") ? BK_DLSS
            : !strcmp(up, "xess") ? BK_XESS
            : !strcmp(up, "fsr3") ? BK_FSR3
+           : !strcmp(up, "fsr4") ? BK_FSR4
            : !strcmp(up, "auto") ? (can(BK_DLSS) ? BK_DLSS : BK_FSR3)
                                  : BK_NONE;
 }
@@ -367,6 +378,7 @@ static int chosen(void) {
 static int pick(void) {
     int bk = chosen();
     if (bk != BK_NONE && can(bk)) return bk;
+    if (bk == BK_FSR4 && can(BK_FSR3)) return BK_FSR3;
     if (!res_scene_reduced()) return BK_NONE;
     for (int b = BK_DLSS; b <= BK_FSR3; b++)
         if (can(b)) return b;
@@ -374,11 +386,24 @@ static int pick(void) {
 }
 
 // resolution.c res_settle, after the device exists and before the game runs: the upscaler the setting asks for can run
-// here (NGX answered, libxess.dll came up on this GPU, FSR 3's pipelines can be made).
+// here (NGX answered, libxess.dll came up on this GPU, FSR 3's pipelines can be made; FSR 3 for FSR 4 that cannot run).
 int vk_dlaa_upscaler_ok(void) {
     int bk = chosen();
+    if (bk == BK_FSR4 && !can(bk)) bk = BK_FSR3;
     if (bk == BK_FSR3) return vk_pipeline_push_fn() ? vk_fsr3_available() : !vk_fsr3_failed();
     return bk != BK_NONE && can(bk);
+}
+
+// boot.c, the sizes settled (res_settle) and before the game runs: what the chosen upscaler would otherwise set up at
+// the first frame with a 3D scene. FSR 4's context for the game's sizes (vk_fsr4_warm): the scene at its own size is
+// the linear light target, a reduced one is upscaled from the composite (resolve).
+void vk_dlaa_warm(void) {
+    if (chosen() != BK_FSR4 || !can(BK_FSR4)) return;
+    unsigned out[2], scene[2];
+    res_game_size(out);
+    res_scene_size(scene);
+    int up = scene[0] != out[0] || scene[1] != out[1];
+    vk_fsr4_warm(scene[0], scene[1], out[0], out[1], !up || vk_hdr_wanted());
 }
 
 static void dl_fail(const char *what, NgxResult r) {
@@ -789,6 +814,7 @@ static const char *backend_name(int b, int up) {
     return b == BK_DLSS   ? (up ? "DLSS" : "DLAA")
            : b == BK_XESS ? (up ? "XeSS" : "XeSS Native AA")
            : b == BK_FSR3 ? (up ? "FSR 3" : "FSR 3 Native AA")
+           : b == BK_FSR4 ? (up ? "FSR 4" : "FSR 4 Native AA")
                           : "off";
 }
 
@@ -921,6 +947,17 @@ static int resolve(VkExec *ex, const VkExecTarget *src) {
                       .jx = jx, .jy = jy, .phases = jitter_phases(w, ow), .dt_ms = dt_ms, .reset = D.reset, .hdr = hdr};
         camera_planes(&f.near_z, &f.far_z, &f.fov_y);
         if (!vk_fsr3_evaluate(cb, &f)) return 0;   // off for the rest of the run (vk_fsr3.c)
+    } else if (D.backend == BK_FSR4) {
+        Fsr4Eval f = {.color = {t->image, t->format, t->width, t->height, t->level, t->base_layer},
+                      .depth = {z->image, z->format, z->width, z->height, z->level, z->base_layer},
+                      .mv = {e->mv, VK_FORMAT_R16G16_SFLOAT, w, h, 0, 0},
+                      .out = {e->out, VK_FORMAT_R16G16B16A16_SFLOAT, ow, oh, 0, 0},
+                      .w = w, .h = h, .ow = ow, .oh = oh, .jx = jx, .jy = jy, .dt_ms = dt_ms, .reset = D.reset,
+                      .hdr = hdr};
+        camera_planes(&f.near_z, &f.far_z, &f.fov_y);
+        int ok = vk_fsr4_evaluate(cb, &f);
+        vk_exec_draw_new_cb();   // FSR 4 bound pipelines and sets of its own
+        if (!ok) return 0;        // off for the rest of the run (vk_fsr4.c)
     } else if (D.backend == BK_DLSS) {
         if (!D.params && !NGX_OK(N.alloc_params(&D.params))) return dl_fail("parameter allocation", 0), 0;
         NgxParam *p = D.params;
@@ -1139,13 +1176,16 @@ int vk_dlaa_frame(void) {
                      __ATOMIC_RELAXED);
     // What no longer runs gives its video memory back after OFF_PRESENTS presents (not at once: a click through the
     // menu's choices would make and free the work images per click). Without DLSS (XeSS, nothing, or DLSS failed) the
-    // sizes' DLSS features go, without FSR 3 its internal images; with no temporal AA at all the sizes' work images too.
-    // XeSS keeps its context until exit: making it again needs the device idle.
-    static uint32_t no_dlss, no_fsr3, no_taa;
+    // sizes' DLSS features go, without FSR 3 its internal images, without FSR 4 its contexts; with no temporal AA at all
+    // the sizes' work images too. XeSS keeps its context until exit: making it again needs the device idle.
+    static uint32_t no_dlss, no_fsr3, no_fsr4, no_taa;
     no_dlss = D.backend == BK_DLSS && dl_active() ? 0 : no_dlss + 1;
     no_fsr3 = D.backend == BK_FSR3 && dl_active() ? 0 : no_fsr3 + 1;
+    no_fsr4 = D.backend == BK_FSR4 && dl_active() ? 0 : no_fsr4 + 1;
     no_taa = dl_active() ? 0 : no_taa + 1;
     if (no_fsr3 == OFF_PRESENTS) vk_fsr3_release();
+    if (no_fsr4 == OFF_PRESENTS) vk_fsr4_trim();
+    vk_fsr4_sweep();
     if (no_dlss == OFF_PRESENTS)
         for (int i = 0; i < 3; i++)
             if (D.sizes[i].feat) retire_feature(D.sizes[i].feat), D.sizes[i].feat = NULL;
@@ -1155,7 +1195,9 @@ int vk_dlaa_frame(void) {
     if (N.loaded) features_sweep(0);
     if (bk != D.backend) {
         int reduced = res_scene_reduced(), want = chosen();
-        if (bk != BK_NONE && bk != want)
+        if (bk != BK_NONE && want == BK_FSR4 && bk != want)
+            rt_log("dlaa: FSR 4 cannot run here: %s in its place", backend_name(bk, reduced));
+        else if (bk != BK_NONE && bk != want)
             rt_log("dlaa: %s cannot run, and the scene is reduced: %s upscales it until a restart",
                    want == BK_NONE ? "no upscaler is chosen" : backend_name(want, 1), backend_name(bk, 1));
         else
@@ -1193,12 +1235,13 @@ const char *vk_dlaa_running(void) { return __atomic_load_n(&running, __ATOMIC_RE
 // For the menu's upscaler row (any thread; it only reads flags): 0 the choice runs or can at once, 1 it waits for a
 // restart (DLSS or XeSS chosen after the start, so its library was not loaded; or off while the scene is reduced, which
 // only a restart gives back), 2 it cannot run here (its library or the GPU could not bring it up, or it failed), so the
-// game's SMAA runs, or while the scene is reduced the first upscaler that can.
+// game's SMAA runs, or while the scene is reduced the first upscaler that can; for FSR 4, FSR 3 runs either way.
 int vk_dlaa_choice_state(const char *up) {
     if (!strcmp(up, "off")) return res_scene_reduced() ? 1 : 0;
     if (!strcmp(up, "dlss")) return !N.tried ? 1 : N.available && !D.failed ? 0 : 2;
     if (!strcmp(up, "xess")) return !vk_xess_tried() ? 1 : vk_xess_available() ? 0 : 2;
     if (!strcmp(up, "fsr3") || !strcmp(up, "auto")) return vk_fsr3_failed() && !can(BK_DLSS) ? 2 : 0;
+    if (!strcmp(up, "fsr4")) return !vk_fsr4_tried() ? 1 : vk_fsr4_available() ? 0 : 2;
     return 0;
 }
 
@@ -1295,6 +1338,7 @@ void vk_dlaa_release(void) {
         N.inited = N.available = 0;
     }
     vk_xess_release();
+    vk_fsr4_release();
     vk_fsr3_shutdown();
 }
 

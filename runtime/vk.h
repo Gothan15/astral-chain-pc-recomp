@@ -64,9 +64,11 @@ typedef struct {
     int gpl;                           // VK_EXT_graphics_pipeline_library enabled with fast linking (AC_GPL=0: off)
     int amd;                           // an AMD GPU (vendor 0x1002), any driver
     int amd_sc;                        // AMD's Windows driver branch for RDNA 1 and 2 ("AMD proprietary shader compiler")
+    int radv_rdna2;                    // RADV on an RDNA 2 GPU (GFX10.3): colour targets get a format list (vk_texture.c
+                                       // target_compression)
 } VkCaps;
 extern VkCaps vk_caps;
-void vk_caps_driver(VkPhysicalDevice p);             // first, before vkCreateDevice: vk_caps.amd, amd_sc
+void vk_caps_driver(VkPhysicalDevice p);             // first, before vkCreateDevice: vk_caps.amd, amd_sc, radv_rdna2
 void vk_caps_features(VkPhysicalDeviceFeatures *f);   // before vkCreateDevice (AC_VK_NO_FLOAT64 clears shaderFloat64)
 // Before vkCreateDevice, with the driver's graphics pipeline library feature and properties: sets vk_caps.gpl,
 // 1 = enable the extensions (VK_KHR_pipeline_library, VK_EXT_graphics_pipeline_library) and the feature.
@@ -128,12 +130,6 @@ void vk_fsr_release(void);   // before the device goes away
 // scales that one instead, crop {0, 0, w, h}); VK_NULL_HANDLE = nothing recorded. src is in GENERAL, fmt its format.
 VkImage vk_color_record(VkCommandBuffer cb, unsigned slot, VkImage src, VkFormat fmt, const int crop[4]);
 void vk_color_release(void);   // before the device goes away
-// The ELZELDAPA image preset (AC_POST_PRESET, vk_preset.c) and CMAA 2 (AC_ANTI_ALIASING=cmaa2): like
-// vk_color_record, each writes src's crop rectangle, processed, into an RGBA16F image of that size in GENERAL
-// and returns it; VK_NULL_HANDLE = nothing recorded (the setting is off, an upscaler owns the AA, or it failed).
-VkImage vk_preset_record(VkCommandBuffer cb, unsigned slot, VkImage src, VkFormat fmt, const int crop[4]);
-VkImage vk_cmaa_record(VkCommandBuffer cb, unsigned slot, VkImage src, VkFormat fmt, const int crop[4]);
-void vk_preset_release(void);   // before the device goes away
 // HDR output (vk_hdr.c). vk_hdr_wanted: AC_HDR, read once. vk_hdr_surface_format: the HDR10 surface format when wanted
 // and offered (1). vk_hdr_set_active: gfx_present.c says whether the swapchain is HDR10 (vk_hdr_active). vk_hdr_encode:
 // like vk_color_record, src's crop as PQ code values (RGBA16F, crop {0, 0, w, h}), the scene set by vk_hdr_set_scene
@@ -370,25 +366,10 @@ int vk_astc_gpu(void);                  // 1: ASTC images decoded to RGBA8 by th
 int vk_astc_bc(void);                   // the recompression of those images: 0 none (RGBA8), 1 BC3 (AC_ASTC_BC=1),
                                         // 2 BC1 for the textures the alpha scan proves opaque (AC_ASTC_BC=bc1,
                                         // the default), BC3 for the rest; the per-texture choice is vk_texture.c's.
-                                        // 3 BC7 for every texture (AC_ASTC_BC=bc7), sin escaneo alfa.
                                         // 0 turns into 1 when video memory is short (vk_astc_low_memory).
 int vk_astc_low_memory(void);           // vk_texture.c, video memory over its budget or full: new ASTC images are BC3
                                         // for the rest of the run (when they were RGBA8); 1 when the switch happened
                                         // in this call
-// La caché BC7 precómputada (vk_bc7_cache.c, formato en bc7_cache.h): consulta de solo
-// lectura que vk_texture.c hace antes de codificar en vivo cuando AC_ASTC_BC=bc7.
-int vk_bc7_cache_enabled(void);         // 1: clave BC7_CACHE puesta y el modo es bc7
-int vk_bc7_cache_log_on(void);          // 1: AC_BC7_CACHE_LOG puesta (líneas [bc7key])
-void vk_bc7_cache_log_key(const void *guest, uint64_t total, uint32_t format, uint32_t w,
-                          uint32_t h, uint32_t layout_levels, uint32_t layers,
-                          uint32_t pkg_block_h);
-int vk_bc7_cache_fetch(const void *guest, uint64_t total, uint32_t format, uint32_t w,
-                       uint32_t h, uint32_t layout_levels, uint32_t layers,
-                       uint32_t pkg_block_h,
-                       uint8_t **blocks, uint64_t *size);   // 1 = acierto: *blocks es malloc del llamador
-void vk_bc7_cache_record(VkCommandBuffer cb, VkImage image, VkImageAspectFlags aspect,
-                         const uint8_t *blocks, uint32_t w, uint32_t h,
-                         uint32_t layout_levels, uint32_t layers, uint32_t levels);
 // One image region decoded from raw blocks: tight rows of 16-byte blocks at byte src of the source buffer (slices one
 // after the other), w x h texels and slices deep, written at offset of level / layer.
 typedef struct { VkDeviceSize src; uint32_t w, h, slices, level, layer; VkOffset3D offset; } VkAstcRegion;
@@ -455,6 +436,9 @@ typedef struct {
     uint8_t skip;                  // AC_TEX_MIP_SKIP: the game's levels below this one are not in the image (vk_texture.c
                                    // mip_skip_of). Image level i holds the game's level i + skip; width, height and
                                    // levels above are the image's.
+    uint8_t format_list;           // made with a format list (AC_TARGET_COMPRESSION): views take `format` or view_twin;
+                                   // a view in another format makes it again without one (vk_texture_unlist)
+    VkFormat view_twin;            // format_list: the listed sRGB or UNORM twin of `format`, or VK_FORMAT_UNDEFINED
     uint64_t mem_size;             // bound: the bytes of pool memory from addr the image is bound over (its memory
                                    // requirements); images over overlapping bytes alias each other
     uint32_t sync_w, sync_r;       // the pass chain (vk_exec.c, replay thread only): VkExec.sync_epoch when a pass last
@@ -473,6 +457,13 @@ void vk_hdr_present_source(const VkTexImage *win, VkImage *scene, VkFormat *form
 void vk_hdr_set_scene(VkImage scene, VkFormat fmt);
 void vk_hdr_image_gone(VkImage image);
 const VkTexImage *vk_texture_get(const tex_t *t);   // created and made current; NULL for BUFFER or unmapped formats
+// A target made with a format list (VkTexImage.format_list) that a view asks in a format outside it is made again
+// without one, with its content. vk_texture_unlist: now, before a pass renders into it (replay thread; the image
+// pointers of t held before are gone); returns the new image, NULL when it could not be made. vk_texture_unlist_later
+// (texture lock held): when the next submission's replay starts, where vk_exec_record calls vk_texture_unlist_pending.
+const VkTexImage *vk_texture_unlist(const tex_t *t);
+void vk_texture_unlist_later(const VkTexImage *img);
+void vk_texture_unlist_pending(void);
 // A texture slot; a slot whose texture was finalized follows the live texture at the same storage (hle_nvn.c).
 const VkTexImage *vk_texture_by_id(int id, view_t *view, int *has_view);
 // The replay looks up many slots per draw: it takes the texture lock once around them (vk_texture_lock) and uses the

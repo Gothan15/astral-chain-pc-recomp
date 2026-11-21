@@ -14,7 +14,7 @@ cached in toolchain/release-dl/ and checked against the sha256 in PINS; a mismat
                runtime headers, romfs.c, patches.c and ov_zstd.c (compiled per install), deps/ (headers and import
                libraries of SDL3, Opus, libvpx, Vulkan and VMA)
     bin/       ac_xlate.exe (+ .id), hactool.exe, SDL3.dll (upstream), libopus-0.dll, libxess.dll (Intel XeSS SDK),
-               ninja.exe
+               amd_fidelityfx_loader_vk.dll and amd_fidelityfx_upscaler_vk.dll (AMD FSR SDK, FSR 4), ninja.exe
     recomp/, tools/, data/, installer/, licenses/, THIRD_PARTY_NOTICES.md, astralchain.ini.example
     recomplauncher.json   what RecompLauncher does with the release (installer/progress.py), prepare.version = VERSION
     VERSION    the repository's VERSION plus the commit, 0.1.0+973c626; the installer's release string
@@ -56,6 +56,7 @@ sys.path.insert(0, str(Path(__file__).resolve().parent))
 import build_xlate  # noqa: E402
 import check_content  # noqa: E402
 import ffx_sdk  # noqa: E402
+import fsr4_sdk  # noqa: E402
 import xess_sdk  # noqa: E402
 
 ROOT = Path(__file__).resolve().parent.parent
@@ -112,11 +113,21 @@ LLVM_SKIP_DIRS = {'aarch64-w64-mingw32', 'armv7-w64-mingw32', 'i686-w64-mingw32'
 LLVM_SKIP_SUFFIXES = {'.idl', '.tlb'}
 
 # tools/ files the installer steps run (and what they import), copied from the repo.
-TOOLS_FILES = ['bc7_precompute.py', 'build_game.py', 'build_shaders.py', 'check_content.py', 'exefs_patches.py',
-               'extract.py', 'hostmem.py', 'make_prompts_folders.py', 'pack_shader_cache.py', 'prepare_shaders.py',
-               'romfs_index.py', 'shader_census.py']
+TOOLS_FILES = ['build_game.py', 'build_shaders.py', 'check_content.py', 'exefs_patches.py', 'extract.py',
+               'hostmem.py', 'make_prompts_folders.py', 'pack_shader_cache.py', 'prepare_shaders.py', 'romfs_index.py',
+               'shader_census.py']
 TOOLS_DIRS = ['data']   # data/: the expected hashes of the base game and the update, pgo/ the profiles
 RUNTIME_SUFFIXES = {'.h', '.inc', '.ico'}   # .ico: the installer window icon
+# runtime/ folders whose headers no install-side compile reads: ffx-vk-linux is built into libffx_vk_linux.so here, and
+# the Linux release ships that library (bin/), not its sources
+RUNTIME_SKIP = ('third_party/ffx-vk-linux',)
+
+
+def runtime_files():
+    """The runtime/ files a release carries for the installer's compile (RUNTIME_SUFFIXES, RUNTIME_SKIP aside)."""
+    base = ROOT / 'runtime'
+    return [p for p in sorted(base.rglob('*')) if p.suffix in RUNTIME_SUFFIXES and p.is_file()
+            and not any(p.relative_to(base).as_posix().startswith(skip + '/') for skip in RUNTIME_SKIP)]
 
 PROBES = ['--probe-kernel', '--probe-vkexec', '--probe-nvn-tex', '--probe-shader', '--probe-xess', '--probe-latency']
 
@@ -337,6 +348,8 @@ def build_bin(out):
     shutil.copy2(dll, b / 'SDL3.dll')
     shutil.copy2(unpack('opus') / 'ucrt64' / 'bin' / 'libopus-0.dll', b / 'libopus-0.dll')
     shutil.copy2(xess_dir() / 'libxess.dll', b / 'libxess.dll')
+    for dll in fsr4_sdk.DLLS:   # AMD FSR 4 (runtime/vk_fsr4.c), signed by AMD
+        shutil.copy2(fsr4_dir() / dll, b / dll)
     shutil.copy2(unpack('ninja') / 'ninja.exe', b / 'ninja.exe')
 
 
@@ -347,6 +360,16 @@ def xess_dir():
     if not (dest / '.unpacked').is_file():
         shutil.rmtree(dest, ignore_errors=True)
         xess_sdk.extract(fetch('xess'), dest)
+        (dest / '.unpacked').write_text('')
+    return dest
+
+
+def fsr4_dir():
+    """amd_fidelityfx_loader_vk.dll, amd_fidelityfx_upscaler_vk.dll and the licence of the pinned FSR SDK."""
+    dest = WORK / 'fsr4'
+    if not (dest / '.unpacked').is_file():
+        shutil.rmtree(dest, ignore_errors=True)
+        fsr4_sdk.extract(fsr4_sdk.fetch(), dest)
         (dest / '.unpacked').write_text('')
     return dest
 
@@ -389,6 +412,7 @@ def collect_licenses(out):
         (MAIN_ROOT / 'refs' / 'MacNativeGames' / 'LICENSE', 'MacNativeGames-LICENSE.txt'),
         (xess_dir() / 'LICENSE.txt', 'XeSS-LICENSE.txt'),
         (xess_dir() / 'third-party-programs.txt', 'XeSS-third-party-programs.txt'),
+        (fsr4_dir() / 'LICENSE.txt', 'FidelityFX-SDK-2-LICENSE.txt'),   # FSR 4's signed DLLs (runtime/vk_fsr4.c)
     ]
     for src, name in pairs:
         shutil.copy2(src, lic / name)
@@ -423,10 +447,9 @@ def runtime_lib(out, llvm):
              '--gen', gen, '--out', build],
             env=clean_env(llvm / 'bin', out / 'bin'))
         shutil.copy2(build / 'libacrt.a', rt / name)
-    for p in sorted((ROOT / 'runtime').rglob('*')):
-        if p.suffix in RUNTIME_SUFFIXES and p.is_file():
-            (rt / p.relative_to(ROOT / 'runtime')).parent.mkdir(parents=True, exist_ok=True)
-            shutil.copy2(p, rt / p.relative_to(ROOT / 'runtime'))
+    for p in runtime_files():
+        (rt / p.relative_to(ROOT / 'runtime')).parent.mkdir(parents=True, exist_ok=True)
+        shutil.copy2(p, rt / p.relative_to(ROOT / 'runtime'))
     for name in ('romfs.c', 'patches.c', 'ov_zstd.c'):   # build_game.py INSTALL_SIDE
         shutil.copy2(ROOT / 'runtime' / name, rt / name)
 
@@ -525,10 +548,6 @@ def build_launcher(out, llvm):
          ROOT / 'installer' / 'launcher' / 'launcher.rc', '-o', res], env=env)
     run([llvm / 'bin' / 'clang.exe', '-O2', '-mwindows', '-Wall', '-Wl,-s', '-I', work,
          ROOT / 'installer' / 'launcher' / 'launcher.c', res, '-o', out / 'Astral Chain-Setup.exe'], env=env)
-    # El segundo lanzador: la ventana de preparación (installer/prepare_gui.py), el mismo launcher.c
-    # con -DPREPARE_LAUNCHER, que cambia el módulo que arranca.
-    run([llvm / 'bin' / 'clang.exe', '-O2', '-mwindows', '-Wall', '-Wl,-s', '-I', work, '-DPREPARE_LAUNCHER',
-         ROOT / 'installer' / 'launcher' / 'launcher.c', res, '-o', out / 'Astral Chain-Preparar.exe'], env=env)
 
 
 # ---- checks ----------------------------------------------------------------------------------------------------------
@@ -619,18 +638,14 @@ def sizes(out):
 
 
 def write_zip(out, path):
-    # LZMA (preset 9) en vez de DEFLATE: medido sobre la release real el 2026-11-20, el zip baja de
-    # 223.957.259 B a 148.304.030 B (−33,8 %). El Explorador de Windows no abre ZIP-LZMA; Gothan usa
-    # Bandizip, que sí, y aceptó el trueque. Si algún día se quiere volver, es ZIP_DEFLATED aquí y en
-    # el compress_type de cada entrada.
     path.parent.mkdir(parents=True, exist_ok=True)
-    with zipfile.ZipFile(path, 'w', zipfile.ZIP_LZMA, compresslevel=9) as z:
+    with zipfile.ZipFile(path, 'w', zipfile.ZIP_DEFLATED, compresslevel=6) as z:
         for p in sorted(out.rglob('*')):
             if p.is_file() and 'temp' not in p.relative_to(out).parts[:1]:
                 info = zipfile.ZipInfo((Path(out.name) / p.relative_to(out)).as_posix(), (1980, 1, 1, 0, 0, 0))
-                info.compress_type = zipfile.ZIP_LZMA
+                info.compress_type = zipfile.ZIP_DEFLATED
                 info.external_attr = 0o644 << 16
-                z.writestr(info, p.read_bytes(), compresslevel=9)
+                z.writestr(info, p.read_bytes(), compresslevel=6)
     print(f'{path}: {mib(path.stat().st_size)}')
 
 
@@ -649,7 +664,7 @@ def prove(out, cpu='v3'):
          '--ninja', out / 'bin' / 'ninja.exe', '--version', version, '--gen', gen, '--out', chk, '--exefs', ext / 'exefs',
          '--romfs', ext / 'romfs', '--profile', chk / 'profile', '--release-opt'], env=env)
     print(f'prove: build {time.time() - t0:.0f} s')
-    for dll in ('SDL3.dll', 'libopus-0.dll', 'libxess.dll'):
+    for dll in ('SDL3.dll', 'libopus-0.dll', 'libxess.dll', *fsr4_sdk.DLLS):
         shutil.copy2(out / 'bin' / dll, chk / dll)
     failed = []
     for probe in PROBES:

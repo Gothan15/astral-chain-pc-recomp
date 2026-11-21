@@ -30,7 +30,6 @@
 #include "vk.h"
 #include "vk_exec.h"
 #include "vk_dlaa.h"
-#include "vk_reshade.h"
 
 #define WEAK __attribute__((weak))
 #define CALL_DEPTH 8
@@ -348,9 +347,17 @@ static void resolve_target(const tex_t *t, const view_t *v, int has_v, int depth
             layers = 1;
         }
     } else if (!depth_slot && has_v && v->set_format && v->format != t->d.format) {
-        if (view_format(t, v, 0, &fmt)) nvn_fmt = v->format;
-        else warn_once(W_VIEW_FORMAT, "render target view format %#x of a format %#x texture: texture format used",
-                       v->format, t->d.format);
+        int ok = view_format(t, v, 0, &fmt);
+        // an image made with a format list (vk_texture.c target_compression) takes views of the listed formats only:
+        // for another one it is made again without a list, before the pass draws into it
+        if (ok && img->format_list && fmt != img->format && fmt != img->view_twin) {
+            const VkTexImage *made = vk_texture_unlist(t);
+            if (made) img = made;
+            else ok = 0;
+        }
+        if (ok) nvn_fmt = v->format;
+        else fmt = img->format, warn_once(W_VIEW_FORMAT, "render target view format %#x of a format %#x texture: "
+                                          "texture format used", v->format, t->d.format);
     }
     o->image = img->image;
     o->img = img;
@@ -939,8 +946,6 @@ void vk_exec_pass_begin(VkExec *ex) {
     if (ex->in_pass) return;
     resolve_rt(ex);
     vk_contact_pass_begin(ex);
-    vk_post_pass_begin(ex);   // interruptores del post del juego (vk_post.c): marca el pase si es de un efecto apagado
-    vk_fsr_depth_pass(ex);   // la profundidad de escena del frame, para la máscara por distancia de Smart Sharp
     vk_ao_pass(ex);     // after the opaque lighting, before the transparents (vk_ao.c)
     vk_dlaa_pass(ex);   // DLAA runs before the bloom chain's first pass (vk_dlaa.c)
     // Learned targets (VkTexImage.fb_learned) are attached in the feedback layout
@@ -979,7 +984,6 @@ void vk_exec_pass_begin(VkExec *ex) {
     ex->fbl_mask = fbl;
     ex->fb_dirty = (cl & 0xff) | (cl & 0x300 ? 0x100u : 0);   // a load-op clear writes its attachment in this pass
     ex->pass_serial++;
-    vk_reshade_pass_begin(ex);   // la opción reshade: la fase HUD se redirige a su capa (vk_reshade.c)
     VkRenderingAttachmentInfo ca[8], da = {0}, sa = {0};
     for (uint32_t i = 0; i < ex->pass_ncolor; i++) {
         const VkExecTarget *t = &ex->color[i];
@@ -990,11 +994,6 @@ void vk_exec_pass_begin(VkExec *ex) {
         ca[i].loadOp = cl >> i & 1 ? VK_ATTACHMENT_LOAD_OP_CLEAR : VK_ATTACHMENT_LOAD_OP_LOAD;
         ca[i].storeOp = VK_ATTACHMENT_STORE_OP_STORE;
         if (cl >> i & 1) ca[i].clearValue = clv[i];
-    }
-    if (vk_reshade_redirected()) {   // el pase es de la fase HUD: escribe en la capa, ya limpia, no en la ventana
-        ca[0].imageView = vk_reshade_overlay_view();
-        ca[0].imageLayout = VK_IMAGE_LAYOUT_GENERAL;
-        ca[0].loadOp = VK_ATTACHMENT_LOAD_OP_LOAD;
     }
     const VkExecTarget *d = &ex->depth;
     if (d->image) {
@@ -1024,7 +1023,6 @@ void vk_exec_pass_end_why(VkExec *ex, int why) {
     vk_exec_oq_pass_end(ex);
     vkCmdEndRendering(ex->cb);
     ex->recorded++;
-    vk_reshade_pass_end(ex);   // la barrera de salida de la capa del HUD, si el pase iba redirigido
     ex->in_pass = 0;
     ex->chain_at = ex->recorded;   // the pass chain: whatever is recorded from here on that is not a pass breaks it
     if (vk_exec_chain_on() & 2) {
@@ -1369,6 +1367,7 @@ int vk_exec_record(VkCommandBuffer cb, const uint64_t *handles, int n, uint64_t 
     split_draws = part_start = 0;
     part_t0 = kern_now_ns();
     x_here = 1;
+    vk_texture_unlist_pending();   // images made again without a format list in the last replay, and those to make
     if (n) vk_mem_mirror_begin(), vk_usnap_begin(handles, n, fence);
     if (n && vk_gpuprof_on()) vk_gpuprof_mark(ex, 0, 0);
     for (int i = 0; i < n; i++) {

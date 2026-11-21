@@ -69,6 +69,8 @@ typedef struct Tex {
                                        // drawn yet while last_use still equals it (cache_before)
     uint32_t nomem_epoch;              // submit_epoch of an ASTC upload that found video memory full (upload): the
                                        // next submit tries again, not every binding of this one
+    uint32_t unlist_epoch;             // submit_epoch of an unlist that found no memory for the new image or the copy:
+                                       // the next submit tries again, not every pass of this one
 } Tex;
 
 // A slot keeps what vk_texture_by_id resolved for it, so a draw binding skips the key lookup and the address chain: the
@@ -246,10 +248,66 @@ static int format_compressed(VkFormat f) {   // vkCmdClearColorImage takes no bl
            (f >= VK_FORMAT_ASTC_4x4_SFLOAT_BLOCK && f <= VK_FORMAT_ASTC_12x12_SFLOAT_BLOCK);
 }
 
+// AC_TARGET_COMPRESSION (default: 1 under RADV on an RDNA 2 GPU, vk_caps.radv_rdna2; 0 elsewhere): a colour render
+// target is made MUTABLE_FORMAT with a format list (VkImageFormatListCreateInfo) of its own format and its sRGB or
+// UNORM twin. Without a list, RADV keeps delta colour compression off for a MUTABLE_FORMAT image below GFX11 (Mesa
+// radv_image.c radv_are_formats_dcc_compatible): the Steam Deck's GFX10.3 and every RDNA1/2 card on Linux rendered
+// without it. ANV does the same for 8- to 32-bit formats below gfx12.5 (Mesa anv_image.c formats_ccs_e_compatible:
+// Tiger Lake to Raptor Lake integrated GPUs). Both accept a listed format with the same bits per channel (Mesa
+// radv_formats.c radv_dcc_formats_compatible, isl_format.c isl_formats_are_ccs_e_compatible), so a twin keeps the
+// compression and the image keeps the same flags and usage.
+// Measured on a Z1 Extreme at 14 W on 4 cores with a Mesa 26.2.6 whose GFX11 follows the GFX10.3 rule (tools/
+// deck_power.sh), Steam Deck profile, camera turn in Harmony Square, two series of three alternating runs each
+// (2026-11-20): the GPU time per frame went from 11.28 to 10.91 ms (-3.3%), then with this rule from 11.23 to 10.75 ms
+// (-4.3%), the groups apart both times; the frame interval moved by -0.6% and -0.4%, on a scene the CPU bounds there
+// (104 targets listed). Only that rule and that profile were measured, so the default covers RDNA 2
+// under RADV alone, and the scene colour the contact shadows write from a compute shader (vk_contact.c, off in the
+// Steam Deck profile) stays without a list: the measurement had no such target.
+// A view in a format outside the list makes the target again without one (unlist): Astral Chain draws its 8-bit picture
+// into an R11G11B10F scene target through an RGBA8 view for the case results' backdrop, and RADV takes no compression
+// for formats of three and four channels together anyway.
+// The compression metadata the driver adds after the pixels must not land on the game's next texture, so such an image
+// is not bound into pool memory when it needs more bytes than its storage (bind_pool_memory), as for depth.
+static int target_compression(void) {
+    static int on = -1;
+    if (on < 0) {
+        on = rt_knob("TARGET_COMPRESSION", vk_caps.radv_rdna2 ? "1" : "0") == 1;
+        if (on) rt_log("vk: colour render targets made with a format list, for the driver's colour compression "
+                       "(AC_TARGET_COMPRESSION)");
+    }
+    return on;
+}
+
+// The format with the same bits read as sRGB for a UNORM one and the reverse, VK_FORMAT_UNDEFINED for the others
+static VkFormat srgb_twin(VkFormat f) {
+    switch (f) {
+    case VK_FORMAT_R8G8B8A8_UNORM: return VK_FORMAT_R8G8B8A8_SRGB;
+    case VK_FORMAT_R8G8B8A8_SRGB: return VK_FORMAT_R8G8B8A8_UNORM;
+    case VK_FORMAT_B8G8R8A8_UNORM: return VK_FORMAT_B8G8R8A8_SRGB;
+    case VK_FORMAT_B8G8R8A8_SRGB: return VK_FORMAT_B8G8R8A8_UNORM;
+    case VK_FORMAT_A8B8G8R8_UNORM_PACK32: return VK_FORMAT_A8B8G8R8_SRGB_PACK32;
+    case VK_FORMAT_A8B8G8R8_SRGB_PACK32: return VK_FORMAT_A8B8G8R8_UNORM_PACK32;
+    default: return VK_FORMAT_UNDEFINED;
+    }
+}
+
+// AC_TARGET_COMPRESSION: targets made with a list, those kept out of pool memory, those made again without one
+static uint64_t n_listed, n_listed_unbound, n_unlisted;
+// Keys of the targets a view asked in a format outside their list: made without a list from then on (unlist)
+static nvn_hmap no_list = {.klen = sizeof(TexKey)};
+static TexKey *unlist_keys;                   // those a draw sampled so: made again at the next submission
+static int n_unlist_keys, c_unlist_keys;      // (vk_texture_unlist_pending)
+static volatile int32_t unlist_waiting;       // n_unlist_keys or parked, read without the lock
+// The listed images unlist replaced, out of every table: the command buffer being recorded still names them (earlier
+// passes, the copy), and the deferred release waits only for submissions already made, so they are freed when the next
+// replay starts (vk_texture_unlist_pending). Linked through next_at.
+static Tex *parked;
+
 static int bind_pool_memory(VkCtx *c, Tex *e, VkImage img, uint64_t guest_size) {
     VkMemoryRequirements req;
     vkGetImageMemoryRequirements(c->device, img, &req);
     if ((e->f.depth || e->f.stencil) && req.size > guest_size) return 0;
+    if (e->pub.format_list && req.size > guest_size) return n_listed_unbound++, 0;   // metadata past its storage
     VkMemSpan sp;
     if (!req.size) return 0;   // an image the device could not lay out (image_size)
     if (!vk_mem_resolve(e->pub.addr, req.size, &sp) || !sp.alloc || sp.alloc_offset % req.alignment) return 0;
@@ -315,6 +373,12 @@ static void init_image(Tex *e, VkCommandBuffer cb) {
         vkCmdClearColorImage(cb, e->pub.image, VK_IMAGE_LAYOUT_GENERAL, &zero, 1, &rg);
         barrier(cb, VK_PIPELINE_STAGE_2_CLEAR_BIT, VK_ACCESS_2_TRANSFER_WRITE_BIT, ALL_RW);
     }
+}
+
+// A new image that takes no other image's content: init_image in an upload batch
+static void start_empty(Tex *e) {
+    init_image(e, vk_upload_begin());
+    vk_upload_end();
 }
 
 // AC_SHADOW_SCALE (1 to 4; 1 by default): the game's shadow maps are made this many times
@@ -663,7 +727,7 @@ static Tex *create_tex(const tex_t *t, const TexKey *k, int defer_init) {
             // Stamped before the scan reads the bytes: a write after this point carries a newer generation, so the
             // first upload can tell whether this verdict still describes the storage (upload, bc_verdict_current).
             if (vk_mem_changed(k->addr, L.size, 0, &bc_gen) < 0) bc_gen = 0;
-            bc_verdict = astc_storage_alpha_possible(t->mem, L.size, f.astc_bw, f.astc_bh);
+            bc_verdict = astc_storage_alpha_possible_mt(t->mem, L.size, f.astc_bw, f.astc_bh);
         }
         bc_scan_ns = plat_now_ns() - s0;
         if (!bc_verdict) {
@@ -703,18 +767,9 @@ static Tex *create_tex(const tex_t *t, const TexKey *k, int defer_init) {
     if ((d->flags & NVN_TEXTURE_FLAGS_IMAGE) && (ff & VK_FORMAT_FEATURE_STORAGE_IMAGE_BIT) && samples == 1)
         usage |= VK_IMAGE_USAGE_STORAGE_BIT;
     // contact shadows (vk_contact.c) darken the game's B10G11R11 scene colour in place from a compute shader
-    if (f.vk == VK_FORMAT_B10G11R11_UFLOAT_PACK32 && (usage & VK_IMAGE_USAGE_COLOR_ATTACHMENT_BIT) && samples == 1 &&
-        (ff & VK_FORMAT_FEATURE_STORAGE_IMAGE_BIT) && w >= 640 && vk_contact_strength())
-        usage |= VK_IMAGE_USAGE_STORAGE_BIT;
-    // Diagnóstico de una sola vez: con todo lo demás cumplido, lo único que puede dejar la escena sin
-    // STORAGE es que el dispositivo no ofrezca la característica de almacenamiento para este formato.
-    if (f.vk == VK_FORMAT_B10G11R11_UFLOAT_PACK32 && (usage & VK_IMAGE_USAGE_COLOR_ATTACHMENT_BIT) && samples == 1 &&
-        w >= 640 && vk_contact_strength() && !(usage & VK_IMAGE_USAGE_STORAGE_BIT)) {
-        static int logged;
-        if (!logged)
-            logged = 1, rt_log("vk: contact diag: the device gives B10G11R11 no STORAGE image feature; contact "
-                               "shadows cannot write the scene colour");
-    }
+    int contact = f.vk == VK_FORMAT_B10G11R11_UFLOAT_PACK32 && (usage & VK_IMAGE_USAGE_COLOR_ATTACHMENT_BIT) &&
+                  samples == 1 && (ff & VK_FORMAT_FEATURE_STORAGE_IMAGE_BIT) && w >= 640 && vk_contact_strength();
+    if (contact) usage |= VK_IMAGE_USAGE_STORAGE_BIT;
     VkImageCreateFlags flags = ds ? 0 : VK_IMAGE_CREATE_MUTABLE_FORMAT_BIT;   // format-reinterpreting views
     // Cube compatible only for cube targets: the replay makes cube views of nothing else (vk_exec_draw.c get_view checks
     // the image's own view type). The flag on every square array of 6+ layers changed how AMD's Windows driver lays such
@@ -765,6 +820,15 @@ static Tex *create_tex(const tex_t *t, const TexKey *k, int defer_init) {
     int fb_usage = c->feedback == VK_FEEDBACK_LAYOUT && !block_views &&
                    (usage & (VK_IMAGE_USAGE_COLOR_ATTACHMENT_BIT | VK_IMAGE_USAGE_DEPTH_STENCIL_ATTACHMENT_BIT));
     if (fb_usage) ci.usage = usage |= VK_IMAGE_USAGE_ATTACHMENT_FEEDBACK_LOOP_BIT_EXT;
+    // AC_TARGET_COMPRESSION: the formats a colour target's views may take (target_compression), for the targets of
+    // the kind that was measured. A stand-in format gets no twin: resolve_target reinterprets only a texture whose
+    // format maps directly.
+    VkFormat listed_fmts[2] = {f.vk, f.vk == f.ideal ? srgb_twin(f.vk) : VK_FORMAT_UNDEFINED};
+    VkImageFormatListCreateInfo fl = {.sType = VK_STRUCTURE_TYPE_IMAGE_FORMAT_LIST_CREATE_INFO,
+                                      .viewFormatCount = listed_fmts[1] ? 2 : 1, .pViewFormats = listed_fmts};
+    int listed = !ds && !block_views && !contact && (usage & VK_IMAGE_USAGE_COLOR_ATTACHMENT_BIT) &&
+                 target_compression() && !nvn_hm_get(&no_list, k);
+    if (listed) fl.pNext = ci.pNext, ci.pNext = &fl;
     Tex *e = calloc(1, sizeof *e);
     if (!e) rt_fatal("vk: out of memory for a texture");
     e->key = *k;
@@ -772,6 +836,9 @@ static Tex *create_tex(const tex_t *t, const TexKey *k, int defer_init) {
     e->f = f;
     e->last_use = submit_epoch;
     e->pub.addr = k->addr;
+    e->pub.format_list = (uint8_t)listed;
+    e->pub.view_twin = listed ? listed_fmts[1] : VK_FORMAT_UNDEFINED;
+    n_listed += listed;
     e->bc_gen = bc_verdict >= 0 ? bc_gen : 0;
     VkImage img = VK_NULL_HANDLE;
     if (scale <= 1.0f && nvn_gpu_only(k->addr)) {   // storage in a physical or virtual pool: alias the pool memory (section 3.2)
@@ -842,10 +909,7 @@ static Tex *create_tex(const tex_t *t, const TexKey *k, int defer_init) {
     p->fb_usage = (uint8_t)fb_usage;
     p->scale = scale;
 
-    if (!defer_init) {
-        init_image(e, vk_upload_begin());
-        vk_upload_end();
-    }
+    if (!defer_init) start_empty(e);
     return e;
 }
 
@@ -910,9 +974,27 @@ static void bc_flip_remove(Tex *e);   // destroy_tex calls it; defined with the 
 // so their memory comes back without waiting for the submission being recorded; 0 otherwise.
 static uint64_t purge_tl;
 
-static void destroy_tex(Tex *e) {
-    own_remove(e);
+// The entry create_tex made answers lookups from here on: by its key, and in the chain of its storage address
+static void enter_tex(Tex *e) {
+    e->next_at = nvn_hm_get(&by_addr, &e->key.addr);
+    nvn_hm_put(&by_addr, &e->key.addr, e);
+    nvn_hm_put(&by_key, &e->key, e);
+    tex_gen_bump(e->key.addr);
+}
+
+// An entry no table holds, or none any more: its image, its views and its own memory go once the GPU is done with them
+static void free_tex(Tex *e) {
     if (e->bytes) own_bytes -= e->bytes;
+    vk_exec_image_gone(e->pub.image);
+    if (purge_tl) vk_defer_image_after(e->pub.image, e->alloc, purge_tl);
+    else vk_defer_image(e->pub.image, e->alloc);
+    free(e->snap);
+    free(e);
+}
+
+// The entry leaves every table: lookups no longer find it. Its image stays until free_tex.
+static void detach_tex(Tex *e) {
+    own_remove(e);
     tex_gen_bump(e->key.addr);
     nvn_hm_del(&by_key, &e->key);
     Tex *head = nvn_hm_get(&by_addr, &e->key.addr);
@@ -925,11 +1007,11 @@ static void destroy_tex(Tex *e) {
     }
     if (e->released) nreleased--, rel_unlink(e);
     if (e->bc_flip) bc_flip_remove(e);
-    vk_exec_image_gone(e->pub.image);
-    if (purge_tl) vk_defer_image_after(e->pub.image, e->alloc, purge_tl);
-    else vk_defer_image(e->pub.image, e->alloc);
-    free(e->snap);
-    free(e);
+}
+
+static void destroy_tex(Tex *e) {
+    detach_tex(e);
+    free_tex(e);
 }
 
 // A recompressed entry whose storage's alpha verdict turned against its image's format (upload): destroyed at
@@ -1306,7 +1388,7 @@ static void upload(Tex *e) {
     // page of the storage was written since create_tex scanned it (bc_verdict_current): the bytes are the ones
     // that verdict was taken from, and the scan is the costly part of a new texture.
     if (e->f.astc_bc && vk_astc_bc() == 2 && !is3d && !bc_verdict_current(e)) {
-        int alpha = astc_storage_alpha_possible(t->mem, e->t.L.size, e->f.astc_bw, e->f.astc_bh);
+        int alpha = astc_storage_alpha_possible_mt(t->mem, e->t.L.size, e->f.astc_bw, e->f.astc_bh);
         if ((alpha != 0) != (e->f.astc_bc != 2)) {
             bc_trade(e);
             perf_end(PERF_TEX, p0);
@@ -1317,63 +1399,6 @@ static void upload(Tex *e) {
     uint32_t skip = e->pub.skip;   // AC_TEX_MIP_SKIP: image level lv holds the game's level lv + skip
     int astc = e->f.astc_bw != 0, rgb = e->f.expand_rgb;
     int agpu = astc && vk_astc_gpu(), acheck = agpu && vk_astc_mode() == VK_ASTC_CHECK;   // raw blocks to the GPU
-    // Caché BC7 precómputada (vk_bc7_cache.c): si esta textura va a BC7 y sus bloques ya
-    // están codificados en disco, se suben tal cual y se salta entero el bucle de
-    // deswizzle + decodificación + codificación. La clave es el contenido huésped actual
-    // (t->mem sobre t->L.size): si el juego reescribió el almacenamiento, el hash no
-    // casa y se sigue por el camino normal. Fuera quedan: el modo check (debe comparar
-    // decodificadores), las lineales (sin layout Tegra empaquetado que enumerar), las 3D
-    // (el enumerador las excluye) y mip-skip (la ventana de niveles no empieza en el 0).
-    // El atlas de prompts no corre peligro: va por el camino !astc (más abajo, en el
-    // bucle por regiones) y esta rama exige astc con astc_bc == 3.
-    if (astc && agpu && !acheck && e->f.astc_bc == 3 && !linear && !is3d && !skip) {
-        // Con AC_BC7_CACHE_LOG, la clave de TODA subida BC7 candidata va al log, haya
-        // caché o no: es la mitad en caliente de la validación de claves (doc 04 §5).
-        if (vk_bc7_cache_log_on())
-            vk_bc7_cache_log_key(t->mem, t->L.size, d->format, d->width, d->height,
-                                 d->levels, layers, (uint32_t)d->pkg_block_h);
-        uint8_t *blocks = NULL;
-        uint64_t blocks_size = 0;
-        if (vk_bc7_cache_enabled() &&
-            vk_bc7_cache_fetch(t->mem, t->L.size, d->format, d->width, d->height,
-                               d->levels, layers, (uint32_t)d->pkg_block_h,
-                               &blocks, &blocks_size)) {
-            VkCommandBuffer cb = vk_upload_begin();
-            barrier(cb, ALL_RW, VK_PIPELINE_STAGE_2_COPY_BIT, VK_ACCESS_2_TRANSFER_WRITE_BIT);
-            vk_bc7_cache_record(cb, e->pub.image, e->pub.aspect, blocks, d->width, d->height,
-                                d->levels, layers, levels);
-            barrier(cb, VK_PIPELINE_STAGE_2_COPY_BIT, VK_ACCESS_2_TRANSFER_WRITE_BIT, ALL_RW);
-            vk_upload_end();
-            free(blocks);
-            // Epílogo: el mismo cierre que el final de upload() cuando la subida vale,
-            // con `decoded` calculado aquí (el bucle de regiones no ha corrido).
-            uint64_t decoded = 0;
-            for (uint32_t lv = 0; lv < levels; lv++)
-                decoded += (uint64_t)mip(d->width, lv) * (one_d ? 1 : mip(d->height, lv)) * 4;
-            decoded *= layers;
-            uint64_t dt = kern_now_ns() - u0;
-            if (e->uploaded) {
-                n_reuploads++, perf_count(PERF_CNT_TEX_REUP);
-                ru_n++, ru_bytes += t->L.size, ru_ns += dt;
-                if (e->wt_n) {
-                    ru_wt_n++, ru_wt_bytes += t->L.size, ru_wt_ns += dt;
-                    if (rt_trace & RT_TRACE_PERF)
-                        rt_log("perf: frame %llu: re-upload after %u WriteTexels: texture %#llx fmt %#x %ux%u, %.1f KiB, %.3f ms",
-                               (unsigned long long)__atomic_load_n(&gfx_counters.frames, __ATOMIC_RELAXED), e->wt_n,
-                               (unsigned long long)e->pub.addr, d->format, d->width, d->height, t->L.size / 1024.0, dt / 1e6);
-                }
-            } else {
-                n_uploads++, perf_count(PERF_CNT_TEX_UP);
-                if (!pre_in_step) pre_n_draw++, pre_tx_draw += decoded / 4;
-            }
-            e->wt_n = 0;
-            e->uploaded = 1;
-            e->nomem_epoch = 0;
-            e->n_up++;
-            perf_end(PERF_TEX, p0);
-            return;
-        }
-    }
     uint32_t n = levels * layers, k = 0;
     VkBufferImageCopy *rg = calloc(n, sizeof *rg);
     VkAstcRegion *ar = agpu ? calloc(n, sizeof *ar) : NULL;
@@ -1558,7 +1583,6 @@ static void make_fresh(Tex *e) {
     int ch = vk_mem_changed(e->pub.addr, size, e->wgen, &now);
     e->wgen = now;
     e->last_ch = ch;
-    if (!ch && vk_prompts_stale(e->pub.addr)) ch = 1;   // binds o estilo nuevos: el atlas se repinta
     if (ch) upload(e);   // 1 written, -1 not tracked: both upload again
 }
 
@@ -1573,7 +1597,6 @@ static void make_fresh_snap(Tex *e) {
     e->wgen = now;
     if (!e->uploaded) { upload(e); return; }
     e->last_ch = ch;
-    if (!ch && vk_prompts_stale(e->pub.addr)) ch = 1;   // binds o estilo nuevos: el atlas se repinta
     if (ch) upload(e);
 }
 
@@ -1656,6 +1679,19 @@ static int alias_copy(Tex *e, const Tex *src) {
     return 1;
 }
 
+// The new entry e, not started yet, takes the content of src (alias_compatible, alias_has_gpu_content). 0 when the copy
+// could not be recorded (no replay on this thread, or no memory for its buffer): e is untouched, still to be started.
+static int alias_take(Tex *e, const Tex *src) {
+    if (!alias_copy(e, src)) return 0;
+    n_alias_copied++;
+    if (e->pub.mirrored) {   // the content is src's GPU render, newer than the storage bytes
+        vk_mem_changed(e->pub.addr, e->t.L.size, 0, &e->wgen);
+        e->uploaded = 1;
+        e->pub.gpu_owned = 1;
+    }
+    return 1;
+}
+
 static Tex *entry_of(const tex_t *t) {
     TexKey k;
     make_key(t, &k);
@@ -1680,31 +1716,109 @@ static Tex *entry_of(const tex_t *t) {
                 src = p;
         }
         if (alias) perf_count(PERF_CNT_TEX_ALIAS);
-        if (tex_alias) {
-            if (src && alias_copy(e, src)) {
-                n_alias_copied++;
-                if (e->pub.mirrored) {   // the content is src's GPU render, newer than the storage bytes
-                    vk_mem_changed(e->pub.addr, e->t.L.size, 0, &e->wgen);
-                    e->uploaded = 1;
-                    e->pub.gpu_owned = 1;
-                }
-            } else {
-                init_image(e, vk_upload_begin());
-                vk_upload_end();
-                if (alias) {
-                    if (e->pub.mirrored) n_alias_upload++;
-                    else n_alias_uninit++;
-                }
+        if (tex_alias && !(src && alias_take(e, src))) {
+            start_empty(e);
+            if (alias) {
+                if (e->pub.mirrored) n_alias_upload++;
+                else n_alias_uninit++;
             }
         }
-        e->next_at = nvn_hm_get(&by_addr, &k.addr);
-        nvn_hm_put(&by_addr, &k.addr, e);
-        nvn_hm_put(&by_key, &k, e);
-        tex_gen_bump(k.addr);
+        enter_tex(e);
     }
     if (e->released) e->released = 0, nreleased--, rel_unlink(e), tex_gen_bump(k.addr);
     e->t = *t;
     return e;
+}
+
+// A view asks a listed target (target_compression) in a format outside its list. The target is made again without a
+// list, as every colour image is without AC_TARGET_COMPRESSION, and takes the listed image's place under its key with
+// its content (alias_copy at the replay's position, behind the clears that waited) and its write-back state. Its key
+// stays out of the lists, so a later image of it is made without one too. The listed image is parked until the next
+// replay starts, so the two images and the copy's buffer live together until then. tex_lock held.
+// NULL when video memory is short for the new image (create_tex logs it) or for the copy's buffer, or no replay is
+// recording to copy in: the listed image stays with its content and the view keeps the texture's format, as a texture
+// that cannot be made is left out of its draws; the next submission tries again (unlist_epoch).
+static Tex *unlist(Tex *old) {
+    nvn_hm_put(&no_list, &old->key, &no_list);
+    if (old->unlist_epoch == submit_epoch) return NULL;
+    Tex *e = create_tex(&old->t, &old->key, 1);
+    if (!e) return old->unlist_epoch = submit_epoch, NULL;
+    if (!alias_has_gpu_content(old)) {
+        start_empty(e);   // nothing the storage lacks: a mirrored one is uploaded at its next use
+    } else if (alias_compatible(e, old) && alias_take(e, old)) {
+        // the old image's place as the storage's GPU-written content: what a write-back needs, and the copy as its
+        // newest write
+        uint64_t f = vk_exec_recording_fence();
+        e->pub.gpu_owned = 1;
+        e->gpu_dirty = old->gpu_dirty, e->gpu_gen = old->gpu_gen, e->gpu_seq = old->gpu_seq, e->wt_n = old->wt_n;
+        e->gpu_fence = f > old->gpu_fence ? f : old->gpu_fence;
+        e->wr_fence = f > old->wr_fence ? f : old->wr_fence;
+        e->snap = old->snap, old->snap = NULL;
+    } else {   // e is in no table and no command names its image
+        static volatile int32_t n_nocopy;
+        log_limited(&n_nocopy, "render target %#llx (%ux%u fmt %#x) keeps its format list: its content could not be "
+                    "copied into an image without one", (unsigned long long)old->pub.addr, old->pub.width,
+                    old->pub.height, old->t.d.format);
+        free_tex(e);
+        return old->unlist_epoch = submit_epoch, NULL;
+    }
+    e->pub.fb_learned = old->pub.fb_learned;
+    e->last_use = submit_epoch;
+    int was_owned = old->listed && e->gpu_dirty;   // in owned[]: a mirrored target whose render is not written back
+    rt_log("vk: render target %#llx (%ux%u fmt %#x) made again without a format list: a view asks another format",
+           (unsigned long long)old->pub.addr, old->pub.width, old->pub.height, old->t.d.format);
+    detach_tex(old);
+    old->next_at = parked, parked = old;
+    __atomic_store_n(&unlist_waiting, 1, __ATOMIC_RELEASE);
+    enter_tex(e);
+    if (was_owned) own_add(e);
+    n_unlisted++;
+    return e;
+}
+
+// vk_exec.c resolve_target, before a pass renders t through a view in a format outside its list: the image to render
+// into, made without a list (unlist); the pointer the caller held is gone. NULL: the listed image stays.
+const VkTexImage *vk_texture_unlist(const tex_t *t) {
+    lock();
+    Tex *e = entry_of(t);
+    if (e && e->pub.format_list) e = unlist(e);
+    if (e) make_fresh(e), e->last_use = submit_epoch;   // as vk_texture_get hands an image out
+    unlock();
+    return e ? &e->pub : NULL;
+}
+
+// vk_exec_draw.c, a draw samples img through such a view (texture lock held): the draw keeps the texture's format, as
+// the image may be attached to the open pass and its pointer is in use, and the target is made again when the next
+// submission starts (vk_texture_unlist_pending).
+void vk_texture_unlist_later(const VkTexImage *img) {
+    const Tex *e = (const Tex *)img;   // pub is the first member
+    nvn_hm_put(&no_list, &e->key, &no_list);
+    for (int i = 0; i < n_unlist_keys; i++)
+        if (!memcmp(&unlist_keys[i], &e->key, sizeof e->key)) return;
+    if (n_unlist_keys == c_unlist_keys) {
+        c_unlist_keys = c_unlist_keys ? 2 * c_unlist_keys : 8;
+        if (!(unlist_keys = realloc(unlist_keys, sizeof *unlist_keys * (size_t)c_unlist_keys)))
+            rt_fatal("vk: out of memory for the targets to make again");
+    }
+    unlist_keys[n_unlist_keys++] = e->key;
+    __atomic_store_n(&unlist_waiting, n_unlist_keys, __ATOMIC_RELEASE);
+}
+
+// vk_exec.c vk_exec_record, as a submission's replay starts (no pass open, no image pointer held, every earlier
+// replay submitted): the parked images go to the deferred release, the targets sampled outside their list are made again
+void vk_texture_unlist_pending(void) {
+    if (!__atomic_load_n(&unlist_waiting, __ATOMIC_ACQUIRE)) return;
+    lock();
+    for (Tex *e = parked, *nx; e; e = nx) nx = e->next_at, free_tex(e);
+    parked = NULL;
+    for (int i = 0; i < n_unlist_keys; i++) {
+        Tex *e = nvn_hm_get(&by_key, &unlist_keys[i]);
+        // a released entry stays as it is: taken back into use, the draw that samples it so asks again
+        if (e && e->pub.format_list && !e->released) unlist(e);
+    }
+    n_unlist_keys = 0;
+    __atomic_store_n(&unlist_waiting, parked != NULL, __ATOMIC_RELEASE);   // those just made park their old image
+    unlock();
 }
 
 // vk_dump: upload bookkeeping of an image vk_texture_get / vk_texture_by_id returned. pages_written: whether its
@@ -2082,6 +2196,11 @@ void vk_texture_new_submit(void) {
         rt_log("perf: frame %llu: released textures kept %d, dropped under VRAM pressure %llu", (unsigned long long)f * 60,
                nreleased, (unsigned long long)n_pressure_drops);
         n_pressure_drops = 0;
+        if (n_listed)
+            rt_log("perf: frame %llu: render targets made with a format list %llu, %llu of them in own memory (their "
+                   "driver size past their storage), %llu made again without one (a view in another format)",
+                   (unsigned long long)f * 60, (unsigned long long)n_listed, (unsigned long long)n_listed_unbound,
+                   (unsigned long long)n_unlisted);
     }
     unlock();
 }
@@ -2569,9 +2688,8 @@ static VkCompareOp compare_op(uint32_t f) {
     }
 }
 
-// aniso: AC_ANISO as a level, 0 = the game's; aniso_add: AC_ANISO=auto, the levels added to the game's (doublings);
-// lod_bias: AC_TEX_LOD_BIAS, el desplazamiento global hacia los mips finos (0 = el del juego)
-static struct { int init, mirror_clamp_edge, minmax, border_no_format, aniso_add; float aniso, lod_bias; } sf;
+// aniso: AC_ANISO as a level, 0 = the game's; aniso_add: AC_ANISO=auto, the levels added to the game's (doublings)
+static struct { int init, mirror_clamp_edge, minmax, border_no_format, aniso_add; float aniso; } sf;
 
 static void sampler_features(VkCtx *c) {
     if (sf.init) return;
@@ -2602,12 +2720,6 @@ static void sampler_features(VkCtx *c) {
     if (sf.aniso > 1) rt_log("vk: anisotropic filtering: %s", an);
     else if (sf.aniso_add) rt_log("vk: anisotropic filtering: the game's level times %d (AC_ANISO=auto, output_res)", 1 << sf.aniso_add);
     else rt_log("vk: anisotropic filtering: the game's");
-    // AC_TEX_LOD_BIAS: un desplazamiento negativo empuja el muestreo hacia los mips finos (más nitidez a
-    // costa de algo de shimmer); se acota a [-4, 0] para no poder empeorar el detalle desde el ini.
-    sf.lod_bias = (float)atof(cfg_value("AC_TEX_LOD_BIAS"));
-    if (sf.lod_bias > 0) sf.lod_bias = 0;
-    if (sf.lod_bias < -4) sf.lod_bias = -4;
-    if (sf.lod_bias) rt_log("vk: texture LOD bias: %.2f (AC_TEX_LOD_BIAS)", (double)sf.lod_bias);
     sf.init = 1;
 }
 
@@ -2641,9 +2753,6 @@ static VkSampler make_sampler(VkCtx *c, const samp_par *d) {
     if (mf <= NVN_MIN_FILTER_LINEAR) si.maxLod = si.minLod + 0.25f;   // not mipmapped: stay on the base level
     if (si.maxLod < si.minLod) si.maxLod = si.minLod;
     float lim = c->props.limits.maxSamplerLodBias, bias = d->lod_bias;   // with the upscaling bias (sampler_for)
-    // AC_TEX_LOD_BIAS solo en samplers con mipmaps (mf >= 2) y sin comparación de profundidad: las
-    // superficies. Los mapas de datos sin mipmaps y los samplers de sombras quedan con el sesgo del juego.
-    if (sf.lod_bias && !d->cmp_mode && mf >= 2) bias += sf.lod_bias;
     si.mipLodBias = fmaxf(-lim, fminf(lim, bias));
     // AC_ANISO raises the level for filtered, mipmapped colour samplers that repeat on U and V: the surface textures,
     // which tile, so ground and walls seen at a shallow angle stay sharp into the distance. Depth-compare (shadow)
@@ -2828,6 +2937,8 @@ void vk_texture_shutdown(void) {
         if (by_key.vals[i]) list[n++] = by_key.vals[i];
     for (int i = 0; i < n; i++) destroy_tex(list[i]);
     free(list);
+    for (Tex *e = parked, *nx; e; e = nx) nx = e->next_at, free_tex(e);
+    parked = NULL, n_unlist_keys = 0, unlist_waiting = 0;
     for (uint32_t i = 0; i < samplers.cap; i++)
         if (samplers.vals[i] && c) vkDestroySampler(c->device, (VkSampler)samplers.vals[i], NULL);
     free(by_key.keys), free(by_key.vals), free(by_addr.keys), free(by_addr.vals), free(samplers.keys), free(samplers.vals);

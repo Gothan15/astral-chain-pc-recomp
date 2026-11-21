@@ -11,7 +11,6 @@
 #include <string.h>
 #include <wchar.h>
 
-#include "bc7_cache.h"   // ac_bc7_hash: el hash con el que Puddz calculó ATLAS_HASH (ver hash_full)
 #include "cfg.h"
 #include "host.h"      // rt_log
 #include "input_map.h"
@@ -347,14 +346,31 @@ static void draw_slot(Canvas *cv, const Slot *sl, const InputMap *m) {
 
 /* ------------------------------------------------------------------ identificación y pintado */
 // El hash completo de la candidata: ATLAS_HASH lo calculó Puddz con su bc7_hash_full (cuatro
-// carriles FNV-1a con semillas doradas y mezcla final), que en este repo vive como ac_bc7_hash
-// en bc7_cache.h. La primera versión de este módulo hasheaba con un FNV-1a simple de un carril —
-// y encima con la semilla mal transcrita (1469598103934665603, sin el 7 final de la base FNV
-// 14695981039346656037) —, así que el hash del atlas real no podía coincidir jamás y los iconos
-// de teclado nunca se identificaban (revisión de ChatGPT del 2026-11-20, verificada contra el
-// código de Puddz). Se usa ac_bc7_hash tal cual, bit a bit el mismo cálculo que produjo la
-// constante. Si aun así no casa, el log imprime el hash real para corregir ATLAS_HASH con un arranque.
-static uint64_t hash_full(const uint8_t *mem, uint64_t n) { return ac_bc7_hash(mem, n); }
+// carriles FNV-1a con semillas doradas y mezcla final). La primera versión de este módulo
+// hasheaba con un FNV-1a simple de un carril — y encima con la semilla mal transcrita
+// (1469598103934665603, sin el 7 final de la base FNV 14695981039346656037) —, así que el hash
+// del atlas real no podía coincidir jamás y los iconos de teclado nunca se identificaban
+// (revisión de ChatGPT del 2026-11-20, verificada contra el código de Puddz). Aquí el cálculo va
+// copiado tal cual, bit a bit el mismo que produjo la constante, sin arrastrar la caché BC7 del
+// fork a esta build de comparación. Si aun así no casa, el log imprime el hash real para
+// corregir ATLAS_HASH con un arranque.
+static uint64_t hash_full(const uint8_t *p, uint64_t n) {
+    uint64_t h0 = 0x9E3779B97F4A7C15ull ^ n, h1 = 0xC2B2AE3D27D4EB4Full,
+             h2 = 0x165667B19E3779F9ull, h3 = 0x27D4EB2F165667C5ull;
+    uint64_t i = 0;
+    for (; i + 32 <= n; i += 32) {
+        uint64_t v[4];
+        memcpy(v, p + i, 32);
+        h0 = (h0 ^ v[0]) * 0x100000001B3ull; h0 ^= h0 >> 29;
+        h1 = (h1 ^ v[1]) * 0x100000001B3ull; h1 ^= h1 >> 29;
+        h2 = (h2 ^ v[2]) * 0x100000001B3ull; h2 ^= h2 >> 29;
+        h3 = (h3 ^ v[3]) * 0x100000001B3ull; h3 ^= h3 >> 29;
+    }
+    uint64_t h = h0 ^ (h1 * 0x9E3779B97F4A7C15ull) ^ (h2 * 0xC2B2AE3D27D4EB4Full) ^
+                 (h3 * 0x165667B19E3779F9ull);
+    for (; i < n; i++) h = (h ^ p[i]) * 0x100000001B3ull;
+    return h ^ (h >> 31);
+}
 
 int vk_prompts_identify(const void *mem, uint64_t size, uint32_t format, uint32_t w, uint32_t h) {
     if (!mem || w != ATLAS_W || h != ATLAS_H || size != (uint64_t)ATLAS_W * ATLAS_H * 4) return 0;
