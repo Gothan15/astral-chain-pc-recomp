@@ -3342,7 +3342,8 @@ static void lb_warm_prepared(const char *dir) {
     SK.journal = plat_fs_create(jp, NULL);   // skip_init removed a leftover one
     if (!SK.journal) rt_log("vk_pipeline: cannot create %s: a driver crash in this run will not be recorded", jp);
     LB.n = n, LB.idle = 0, LB.t0 = now_ms();
-    if (cfg_bool("AC_PREPARE_RESUME")) {   // an earlier run's checkpoint, and this run's (resume section above)
+    const char *resume_v = cfg_get("AC_PREPARE_RESUME");   // cfg_get, not cfg_bool: the key has no settings-table
+    if (!resume_v || strcmp(resume_v, "0")) {              // row (as AC_PREWARM_XLATE), and cfg_bool would be fatal
         uint64_t resumed = resume_load(dir, n);
         if (resumed) {
             rt_log("vk_pipeline: preparation resuming: %llu of %zu variants were built by an earlier run (%s)",
