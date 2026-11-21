@@ -940,6 +940,7 @@ void vk_exec_pass_begin(VkExec *ex) {
     resolve_rt(ex);
     vk_contact_pass_begin(ex);
     vk_post_pass_begin(ex);   // interruptores del post del juego (vk_post.c): marca el pase si es de un efecto apagado
+    vk_fsr_depth_pass(ex);   // la profundidad de escena del frame, para la máscara por distancia de Smart Sharp
     vk_ao_pass(ex);     // after the opaque lighting, before the transparents (vk_ao.c)
     vk_dlaa_pass(ex);   // DLAA runs before the bloom chain's first pass (vk_dlaa.c)
     // Learned targets (VkTexImage.fb_learned) are attached in the feedback layout

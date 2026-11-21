@@ -275,6 +275,7 @@ void vk_contact_flush(VkExec *ex);
 // vk_ao.c, ambient occlusion: a pass about to begin (its targets resolved, no pass open), a dispatch or copy about to be
 // recorded, and a draw about to be recorded (the camera block)
 void vk_ao_pass(VkExec *ex);
+void vk_fsr_depth_pass(VkExec *ex);   // recuerda la profundidad de escena para Smart Sharp (vk_fsr.c)
 void vk_ao_flush(VkExec *ex);
 void vk_ao_draw(VkExec *ex);
 // vk_exec_xfer.c, samples-passed counting: a draw about to be recorded in the open pass (begins an occlusion query
