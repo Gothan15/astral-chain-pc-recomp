@@ -44,10 +44,10 @@ jobs:
           if ($main.base -ne "0x7000000000") { throw "layout.json inesperado: main no esta en 0x7000000000" }
           Write-Host "Modulos:" ($lj.name -join ", ")
 
-      - name: Take shader-answers.bin from the official 1.19.3 release
+      - name: Take shader-answers.bin from the official 1.21.0 release
         shell: pwsh
         run: |
-          curl.exe -L -o oficial.zip "https://github.com/captainj-sparrow/astral-chain-pc-recomp/releases/download/1.19.3/Astral.Chain-Setup-1.19.3-windows.zip"
+          curl.exe -L -o oficial.zip "https://github.com/captainj-sparrow/astral-chain-pc-recomp/releases/download/1.21.0/Astral.Chain-Setup-1.21.0-windows.zip"
           Expand-Archive oficial.zip -DestinationPath oficial -Force
           Copy-Item "oficial/Astral Chain-Setup/data/shader-answers.bin" generated/shader-answers.bin
           Remove-Item oficial.zip
