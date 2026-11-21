@@ -2599,6 +2599,13 @@ static struct {
     int rewarm;                                        // boot: the list covers the warm list for the driver cache
     int nocache;                                       // boot: driver-cache-only builds go past P.cache (lb_library)
     int idle;                                          // build at PLAT_PRIO_IDLE (boot), normal (preparation)
+    // preparation resume (lb_warm_prepared only): one byte per variant of the list, set as its build finishes, and
+    // the checkpoint thread that writes them to shader-prepare-progress.bin while the preparation runs
+    uint8_t *resume_bits;
+    uint64_t resume_stamp;                             // size and hash of the shader-prepared.bin the bits belong to
+    char resume_path[PLAT_PATH_MAX * 2 + 48];
+    volatile int32_t resume_dirty, resume_stop;
+    PlatThread *resume_th;
     PlatMutex stat;
 } LB = {.stat = PLAT_MUTEX_INIT};
 
@@ -3210,6 +3217,13 @@ static void lb_warm_worker(void *arg) {
     for (;;) {
         size_t i = (size_t)plat_inc64(&LB.next) - 1;
         if (i >= LB.n) return;
+        if (LB.resume_bits && LB.resume_bits[i]) {   // an earlier preparation built this one (resume section below)
+            plat_mutex_lock(&LB.stat);
+            uint64_t d = ++LB.done;
+            plat_mutex_unlock(&LB.stat);
+            if (d % 4000 == 0) lb_report("preparation progress");
+            continue;
+        }
         int owned = 0, skip = skip_listed(LB.e[i].iid);
         const GfxShader *sh = skip ? NULL : gfx_shader_load_private(LB.e[i].iid, &owned);
         int st = sh ? gfx_shader_stage(sh) : -1;
@@ -3236,6 +3250,7 @@ static void lb_warm_worker(void *arg) {
         }
         if (sh) journal_mark(slot, NULL);
         if (owned) gfx_shader_release_private(sh);
+        if (LB.resume_bits) LB.resume_bits[i] = 1, LB.resume_dirty = 1;   // the checkpoint thread writes it out
         plat_mutex_lock(&LB.stat);
         uint64_t d = ++LB.done;
         plat_mutex_unlock(&LB.stat);
@@ -3244,6 +3259,71 @@ static void lb_warm_worker(void *arg) {
 }
 
 // Preparation: every variant of <dir>/shader-prepared.bin on every core at normal priority.
+// ---- preparation resume. A preparation stopped before its end (a power cut, a kill, a closed window) starts again
+// from the whole list, and every variant an earlier run built is walked once more: a hit in the driver's cache, but
+// the shader load and the lookup are paid again for each of them, and nothing says how far the earlier run got. So
+// while lb_warm_prepared builds, a checkpoint thread writes the finished variants (LB.resume_bits, one byte each,
+// set by the worker as a variant's build returns) to <dir>/shader-prepare-progress.bin every minute or so, stamped
+// with the size and a hash of the shader-prepared.bin they belong to. A later preparation whose list carries the
+// same stamp takes those variants over (the worker skips them); a list of another size or hash, a file of another
+// shape, and AC_PREPARE_RESUME=0 each leave the run as it was. The file never says a preparation finished: the
+// driver-cache record (dc_record) is still written only by a run that reaches its end, and the file is deleted
+// there. A variant finished in the last minute before a stop may be missing from it: it is built again, as every
+// variant is when the file is not there at all.
+#define RESUME_VERSION 1u
+
+typedef struct { char magic[4]; uint32_t version; uint64_t stamp, n; } ResumeHead;
+
+static uint64_t resume_stamp(const uint8_t *f, uint64_t size) {   // FNV-1a over the prepared list as read
+    uint64_t h = 1469598103934665603ull;
+    for (uint64_t i = 0; i < size; i++) h = (h ^ f[i]) * 1099511628211ull;
+    return h;
+}
+
+// Takes over a checkpoint for this list: LB.resume_bits is set (zeroed when there is none to take), and the variants
+// it names are counted. A file that is not this list's is deleted: the first checkpoint of this run replaces it
+// anyway, and a later run must not read it as its own.
+static uint64_t resume_load(const char *dir, size_t n) {
+    snprintf(LB.resume_path, sizeof LB.resume_path, "%s/shader-prepare-progress.bin", dir);
+    LB.resume_bits = calloc(n ? n : 1, 1);
+    if (!LB.resume_bits) return 0;
+    uint64_t fsize = 0;
+    uint8_t *b = plat_file_read(LB.resume_path, &fsize);
+    if (!b) return 0;
+    ResumeHead h;
+    uint64_t done = 0;
+    int match = 0;
+    if (fsize == sizeof h + n) {
+        memcpy(&h, b, sizeof h);
+        match = !memcmp(h.magic, "ACPR", 4) && h.version == RESUME_VERSION && h.n == n && h.stamp == LB.resume_stamp;
+    }
+    if (match) {
+        memcpy(LB.resume_bits, b + sizeof h, n);
+        for (size_t i = 0; i < n; i++) done += LB.resume_bits[i] != 0;
+    } else plat_file_delete(LB.resume_path);
+    free(b);
+    return done;
+}
+
+static void resume_flush(void) {   // the whole file at once, atomically, as the other state files here are written
+    ResumeHead h = {{'A', 'C', 'P', 'R'}, RESUME_VERSION, 0, 0};
+    h.stamp = LB.resume_stamp, h.n = LB.n;
+    uint8_t *buf = malloc(sizeof h + LB.n);
+    if (!buf) return;
+    memcpy(buf, &h, sizeof h), memcpy(buf + sizeof h, LB.resume_bits, LB.n);
+    plat_file_write_atomic(LB.resume_path, buf, sizeof h + LB.n);
+    free(buf);
+}
+
+static void resume_main(void *arg) {   // the checkpoint: a minute apart, and only when a build finished since
+    (void)arg;
+    plat_thread_priority(PLAT_PRIO_BELOW_NORMAL);
+    while (!LB.resume_stop) {
+        for (int s = 0; s < 12 && !LB.resume_stop; s++) plat_sleep_ms(5000);
+        if (!LB.resume_stop && LB.resume_dirty) LB.resume_dirty = 0, resume_flush();
+    }
+}
+
 static void lb_warm_prepared(const char *dir) {
     char path[PLAT_PATH_MAX * 2 + 32];
     snprintf(path, sizeof path, "%s/shader-prepared.bin", dir);
@@ -3253,6 +3333,7 @@ static void lb_warm_prepared(const char *dir) {
     LB.e = n ? calloc(n, sizeof *LB.e) : NULL;
     for (size_t i = 0; LB.e && i < n; i++)
         memcpy(LB.e[i].iid, f + 16 + 36 * i + 4, 32), LB.e[i].stage = f[16 + 36 * i], LB.e[i].prio = f[16 + 36 * i + 1];
+    if (f) LB.resume_stamp = resume_stamp(f, size);
     free(f);
     if (!LB.e) return;
     skip_init(dir);
@@ -3261,6 +3342,16 @@ static void lb_warm_prepared(const char *dir) {
     SK.journal = plat_fs_create(jp, NULL);   // skip_init removed a leftover one
     if (!SK.journal) rt_log("vk_pipeline: cannot create %s: a driver crash in this run will not be recorded", jp);
     LB.n = n, LB.idle = 0, LB.t0 = now_ms();
+    if (cfg_bool("AC_PREPARE_RESUME")) {   // an earlier run's checkpoint, and this run's (resume section above)
+        uint64_t resumed = resume_load(dir, n);
+        if (resumed) {
+            rt_log("vk_pipeline: preparation resuming: %llu of %zu variants were built by an earlier run (%s)",
+                   (unsigned long long)resumed, n, LB.resume_path);
+            printf("prepare-shaders: resuming: %llu of %zu variants were built by an earlier run\n",
+                   (unsigned long long)resumed, n);
+        }
+        if (LB.resume_bits) LB.resume_th = plat_thread_new(resume_main, NULL, "prepare checkpoint");
+    }
     static const uint32_t no_pr[16], no_fs[4];
     lb_state(no_pr, no_fs);
     int cpus = (int)plat_cpu_usable(), k = 0;
@@ -3270,6 +3361,12 @@ static void lb_warm_prepared(const char *dir) {
     if (!k) lb_warm_worker((void *)(intptr_t)0);
     for (int i = 0; i < k; i++) plat_thread_join(t[i]);
     if (SK.journal) plat_file_close(SK.journal), SK.journal = NULL, plat_file_delete(jp);   // every build returned
+    if (LB.resume_th) {   // the run reached its end, so its checkpoint has served: the record below is the proof
+        LB.resume_stop = 1;
+        plat_thread_join(LB.resume_th), LB.resume_th = NULL;
+        plat_file_delete(LB.resume_path);
+    }
+    free(LB.resume_bits), LB.resume_bits = NULL;
     lb_report("preparation done");
     char id[DC_LINE];   // the driver cache this run filled: a start with the same one does not build them again
     dc_identity(id, sizeof id);
