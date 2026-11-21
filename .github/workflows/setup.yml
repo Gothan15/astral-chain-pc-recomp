@@ -81,12 +81,12 @@ jobs:
 
       - name: Assemble the setup package
         shell: pwsh
-        run: python tools/make_release.py --out "build/release/Astral Chain-Setup" --zip "build/release/Astral.Chain-Setup-1.19.3-reshade-windows.zip"
+        run: python tools/make_release.py --out "build/release/Astral Chain-Setup" --zip "build/release/Astral.Chain-Setup-main-windows.zip"
 
       - name: Publish the release
         uses: softprops/action-gh-release@v2
         with:
           tag_name: main
-          name: Astral Chain 1.19.3 + opcion ReShade (antes del HUD)
-          body: Paquete Setup compilado desde la rama reshade-antes-del-hud. Igual que la release oficial 1.19.3, pero el runtime lleva la opcion reshade = 1 (los efectos de ReShade solo tocan la escena; el HUD va en una capa aparte que compone el addon). Se instala como siempre, con tu propia copia del juego; el ejecutable se compila en tu PC durante la instalacion.
-          files: build/release/Astral.Chain-Setup-1.19.3-reshade-windows.zip
+          name: Astral Chain — rama main
+          body: Paquete Setup compilado desde la rama main: base Sparrow 1.21.0 con prompts de teclado y raton, rueda bindeable, opcion BC7 y sesgo de LOD. Se instala como siempre, con tu propia copia del juego; el ejecutable se compila en tu PC durante la instalacion.
+          files: build/release/Astral.Chain-Setup-main-windows.zip
