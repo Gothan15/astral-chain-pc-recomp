@@ -465,7 +465,7 @@ static int usage(const char *argv0) {
     fprintf(stderr, "usage: %s [--exefs DIR] [--romfs DIR] [--profile DIR] [--selftest | --probe-loader | "
                     "--probe-cfg | --probe-dpi | --probe-mods | --probe-kernel | --probe-ipc | --probe-services | --probe-fs | --probe-gfx-abi | "
                     "--probe-nvn | --probe-nvn-tex | --probe-window | --probe-shader | --probe-vkmem | "
-                    "--probe-vkexec | --probe-astc | --probe-latency | --bc7-keys | --bc7-convert | --prepare-shaders | --warm-shaders | --boot |--seconds S [--shot PNG]]\n", argv0);
+                    "--probe-vkexec | --probe-astc | --probe-latency | --prepare-shaders | --warm-shaders | --boot |--seconds S [--shot PNG]]\n", argv0);
     return 2;
 }
 
@@ -503,12 +503,12 @@ static void portable_paths(RtConfig *c) {
 
 int main(int argc, char **argv) {
     mem_init();   // first: claim the guest address space before anything else can land there; reads astralchain.ini
-    // CONSOLE=0 quita la ventana de consola que acompaña al juego: el registro va también al
-    // archivo de logs, así que no se pierde nada. Se decide nada más leer el ini, cuanto antes.
-    if (!cfg_bool("CONSOLE")) plat_console_hide();
     // A restart from the settings menu (gfx_present.c gfx_window_closed) starts this process while the one it replaces
     // is still exiting: its log, RomFS and saves are free once it is gone.
     if (plat_restart_wait(30000) < 0) rt_log("restart: the previous process still runs after 30 s; starting anyway");
+    // CONSOLE=0 quita la ventana de consola que acompaña al juego: el registro va también al
+    // archivo de logs, así que no se pierde nada. Se decide nada más leer el ini, cuanto antes.
+    if (!cfg_bool("CONSOLE")) plat_console_hide();
     setvbuf(stdout, NULL, _IONBF, 0);
     setvbuf(stderr, NULL, _IONBF, 0);
     plat_crash_hook(crash_handler);
@@ -590,8 +590,6 @@ int main(int argc, char **argv) {
     if (!strcmp(mode, "--probe-vkdevice")) return probe_vkdevice();
     if (!strcmp(mode, "--probe-xess")) return probe_xess();
     if (!strcmp(mode, "--probe-latency")) return probe_latency();
-    if (!strcmp(mode, "--bc7-keys")) return bc7_keys();
-    if (!strcmp(mode, "--bc7-convert")) return bc7_convert();
     if (!strcmp(mode, "--prepare-shaders")) return vk_pipeline_prepare_shaders();
     if (!strcmp(mode, "--warm-shaders")) return vk_pipeline_warm_shaders();
     if (!strcmp(mode, "--boot")) { cfg.boot = 1; rt_boot(); return 0; }

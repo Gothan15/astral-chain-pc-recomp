@@ -7,10 +7,7 @@
 // the BC3 encoder (AC_ASTC_BC) into a BC3 image, whose blocks are decoded here and held to error bounds (bc_check).
 // Every block the alpha scan (astc_block_alpha_possible, the BC1 choice of vk_texture.c) calls opaque is decoded and
 // its alpha bytes checked, and the counts reported; a region of such blocks also goes through the BC1 encoder into a
-// BC1 image and is held to the same colour bounds with alpha exact (bc1_check, test_bc1). Al final el modo se
-// vuelve a decidir con AC_ASTC_BC=bc7 y las mismas regiones pasan por el codificador BC7, sostenidas contra los
-// límites de su modo 6 (bc7_check, test_bc7); si el dispositivo no muestrea BC7 la fase se salta sin fallar.
-// Also times one 2048x2048
+// BC1 image and is held to the same colour bounds with alpha exact (bc1_check, test_bc1). Also times one 2048x2048
 // texture on the CPU (astc_decode_ldr_mt)
 // and on the GPU (wall time of the upload batch).
 #include <math.h>
@@ -40,8 +37,6 @@ static double g_bc_db = 99;   // the lowest BC3 PSNR of all cases
 static uint64_t g_scan_blocks, g_scan_opaque;   // the alpha scan oracle: blocks scanned / called opaque
 static uint64_t g_bc1_cases;
 static double g_bc1_db = 99;   // the lowest BC1 PSNR of all cases
-static uint64_t g_bc7_cases;
-static double g_bc7_db = 99;   // el PSNR de BC7 más bajo de todos los casos
 
 static int dual_bit(uint32_t m) {
     if (!(m & 3) && (m >> 7 & 3) == 2) return 0;   // the 6..10 x 6..10 modes have no dual plane
@@ -169,7 +164,6 @@ static int gpu_decode(VkCtx *c, const uint8_t *blk, size_t n0, size_t n1, uint32
 static int gpu_bc(VkCtx *c, const uint8_t *blk, size_t n0, size_t n1, uint32_t w0, uint32_t h0, uint32_t w1, uint32_t h1,
                   uint32_t bw, uint32_t bh, int srgb, int bc, uint8_t *out) {
     VkFormat fmt = bc == 2 ? (srgb ? VK_FORMAT_BC1_RGB_SRGB_BLOCK : VK_FORMAT_BC1_RGB_UNORM_BLOCK)
-                 : bc == 3 ? (srgb ? VK_FORMAT_BC7_SRGB_BLOCK : VK_FORMAT_BC7_UNORM_BLOCK)
                            : (srgb ? VK_FORMAT_BC3_SRGB_BLOCK : VK_FORMAT_BC3_UNORM_BLOCK);
     size_t bpb = bc == 2 ? 8 : 16;
     Img im;
@@ -415,157 +409,6 @@ static int test_bc1(VkCtx *c, uint32_t bw, uint32_t bh, int srgb) {
     return bad;
 }
 
-// Lector de bits de un bloque BC7: el bit menos significativo primero, sobre sus 128 bits.
-static uint32_t bc7_bits(uint64_t w0, uint64_t w1, int at, int n) {
-    uint32_t v = 0;
-    for (int i = 0; i < n; i++, at++) v |= (uint32_t)(at < 64 ? w0 >> at & 1 : w1 >> (at - 64) & 1) << i;
-    return v;
-}
-
-// Un bloque BC7 en modo 6 a 16 texeles RGBA8, tal como lo muestrea la GPU: extremos de 7 bits con un
-// bit p compartido por extremo (el valor guardado v vale v * 2 + p en 8 bits) e índices de 4 bits con
-// los pesos de interpolación del formato; el primer índice guarda 3 bits porque su bit alto va
-// implícito a 0, que es lo que el codificador garantiza intercambiando los extremos. pos[0] sale a -1
-// si el bloque no es del modo 6 (bc7_encode.comp solo emite ese modo).
-static void bc7_decode(const uint8_t *b, uint8_t t[16][4], uint8_t ep[2][4], int pos[16]) {
-    static const int W4[16] = {0, 4, 9, 13, 17, 21, 26, 30, 34, 38, 43, 47, 51, 55, 60, 64};
-    uint64_t w0, w1;
-    memcpy(&w0, b, 8), memcpy(&w1, b + 8, 8);
-    if (bc7_bits(w0, w1, 0, 7) != 64) {   // el campo de modo del modo 6 es 1000000
-        pos[0] = -1;
-        memset(t, 0, 16 * 4), memset(ep, 0, 2 * 4);
-        return;
-    }
-    int at = 7;
-    uint32_t e[2][4], pb[2];
-    for (int ch = 0; ch < 4; ch++) {
-        e[0][ch] = bc7_bits(w0, w1, at, 7), at += 7;
-        e[1][ch] = bc7_bits(w0, w1, at, 7), at += 7;
-    }
-    pb[0] = bc7_bits(w0, w1, at, 1), at += 1;
-    pb[1] = bc7_bits(w0, w1, at, 1), at += 1;
-    for (int ch = 0; ch < 4; ch++) ep[0][ch] = (uint8_t)(e[0][ch] * 2 + pb[0]), ep[1][ch] = (uint8_t)(e[1][ch] * 2 + pb[1]);
-    pos[0] = (int)bc7_bits(w0, w1, at, 3), at += 3;
-    for (int i = 1; i < 16; i++) pos[i] = (int)bc7_bits(w0, w1, at, 4), at += 4;
-    for (int i = 0; i < 16; i++)
-        for (int ch = 0; ch < 4; ch++)
-            t[i][ch] = (uint8_t)((ep[0][ch] * (64 - W4[pos[i]]) + ep[1][ch] * W4[pos[i]] + 32) >> 6);
-}
-
-// Los límites de BC7: cada texel decodificado sobre el segmento entre los dos extremos del bloque (la
-// paleta del modo 6 es ese segmento en RGBA, alfa incluido), en el sitio de la paleta que su proyección
-// sobre el eje de los extremos dice, un bloque de un solo color dentro del redondeo de sus extremos, y
-// el mismo suelo de PSNR que BC3 y BC1 pero sobre los cuatro canales: el alfa de BC7 es un canal más de
-// la paleta, no un acompañante con cota propia como en bc_check.
-static int bc7_check(const uint8_t *want, const uint8_t *blocks, uint32_t w, uint32_t h, const char *what, double *db) {
-    uint32_t bx = (w + 3) / 4, by = (h + 3) / 4;
-    double se = 0;
-    for (uint32_t y4 = 0; y4 < by; y4++)
-        for (uint32_t x4 = 0; x4 < bx; x4++) {
-            uint8_t t[16][4], ep[2][4], lo[4] = {255, 255, 255, 255}, hi[4] = {0};
-            int pos[16];
-            bc7_decode(blocks + 16 * ((size_t)y4 * bx + x4), t, ep, pos);
-            if (pos[0] < 0) {
-                printf("probe-astc: FAIL BC7 %s: block (%u,%u) is not mode 6\n", what, x4, y4);
-                return 1;
-            }
-            double axis[4], len2 = 0;
-            for (int ch = 0; ch < 4; ch++) axis[ch] = (double)ep[1][ch] - ep[0][ch], len2 += axis[ch] * axis[ch];
-            for (int pass = 0; pass < 2; pass++)
-                for (int i = 0; i < 16; i++) {
-                    uint32_t x = x4 * 4 + (i & 3), y = y4 * 4 + (i >> 2);
-                    if (x >= w || y >= h) continue;
-                    const uint8_t *s = want + 4 * ((size_t)y * w + x);
-                    if (!pass) {
-                        for (int ch = 0; ch < 4; ch++) lo[ch] = s[ch] < lo[ch] ? s[ch] : lo[ch], hi[ch] = s[ch] > hi[ch] ? s[ch] : hi[ch];
-                        continue;
-                    }
-                    int flat = !memcmp(lo, hi, 4);
-                    if (len2 >= 1024) {   // ejes cortos: el redondeo solo puede mover un texel de sitio
-                        double proj = 0;
-                        for (int ch = 0; ch < 4; ch++) proj += ((double)s[ch] - ep[0][ch]) * axis[ch];
-                        proj = proj / len2 * 15;
-                        proj = proj < 0 ? 0 : proj > 15 ? 15 : proj;
-                        if (fabs(pos[i] - proj) > 1.6) {
-                            printf("probe-astc: FAIL BC7 %s: texel (%u,%u) on palette place %d, its projection is %.2f\n",
-                                   what, x, y, pos[i], proj);
-                            return 1;
-                        }
-                    }
-                    for (int ch = 0; ch < 4; ch++) {
-                        int mn = ep[0][ch] < ep[1][ch] ? ep[0][ch] : ep[1][ch];
-                        int mx = ep[0][ch] > ep[1][ch] ? ep[0][ch] : ep[1][ch];
-                        if ((int)t[i][ch] < mn - 1 || (int)t[i][ch] > mx + 1) {
-                            printf("probe-astc: FAIL BC7 %s: texel (%u,%u) channel %d decodes %d, outside the endpoints %d..%d\n",
-                                   what, x, y, ch, t[i][ch], mn, mx);
-                            return 1;
-                        }
-                        int d = abs((int)t[i][ch] - s[ch]);
-                        se += (double)d * d;
-                        if (flat && d > 2) {
-                            printf("probe-astc: FAIL BC7 %s: flat texel (%u,%u) channel %d: astc %02x bc7 %02x\n",
-                                   what, x, y, ch, s[ch], t[i][ch]);
-                            return 1;
-                        }
-                    }
-                }
-        }
-    double mse = se / ((double)w * h * 4);
-    *db = mse > 0 ? 10 * log10(255.0 * 255.0 / mse) : 99;
-    if (*db < BC_MIN_DB) {
-        printf("probe-astc: FAIL BC7 %s: PSNR %.1f dB, below %d\n", what, *db, BC_MIN_DB);
-        return 1;
-    }
-    return 0;
-}
-
-// El caso BC7: una región de bloques cualesquiera — con alfa también, que es para lo que BC7 está —
-// decodificada a la referencia RGBA8, codificada a una imagen BC7 y sostenida contra bc7_check. A
-// diferencia del caso BC1 no hay filtro de opacidad: en el modo bc7 el runtime codifica todas las
-// texturas, lleven alfa o no.
-static int test_bc7(VkCtx *c, uint32_t bw, uint32_t bh, int srgb) {
-    enum { NB = 32 };   // 1024 bloques ASTC
-    uint32_t w = NB * bw, h = NB * bh;
-    size_t n = (size_t)NB * NB;
-    uint8_t *blk = malloc(n * 16), tmp[12 * 12 * 4];
-    size_t k = 0;
-    for (int tries = 0; tries < 4000000 && k < n - n / 4; tries++) {   // bloques válidos primero
-        uint64_t v[2] = {rnd64(), rnd64()};
-        uint8_t *b = (uint8_t *)v;
-        uint32_t m = (uint32_t)(v[0] & 0x7FF);
-        if ((m & 0x1FF) == 0x1FC || !astc_decode_block(b, bw, bh, tries & 1, tmp)) continue;
-        memcpy(blk + 16 * k++, b, 16);
-    }
-    for (int tries = 0; tries < 4000000 && k < n; tries++) {   // luego 16 bytes cualesquiera: bloques de error y extensiones vacías
-        uint64_t v[2] = {rnd64(), rnd64()};
-        memcpy(blk + 16 * k++, (const uint8_t *)v, 16);
-    }
-    int bad = 0;
-    if (k < n) {
-        printf("probe-astc: FAIL BC7 %ux%u %s: only %zu of %zu blocks generated\n", bw, bh,
-               srgb ? "sRGB" : "linear", k, n);
-        bad = 1;
-    }
-    if (!bad) {
-        uint8_t *want = malloc((size_t)w * h * 4), *out = malloc((size_t)((w + 3) / 4) * ((h + 3) / 4) * 16);
-        astc_decode_ldr(blk, w, h, bw, bh, srgb, want);
-        char what[48];
-        double db = 0;
-        snprintf(what, sizeof what, "%ux%u %s", bw, bh, srgb ? "sRGB" : "linear");
-        if (!gpu_bc(c, blk, n, 0, w, h, 0, 0, bw, bh, srgb, 3, out)) {
-            printf("probe-astc: FAIL BC7 %s: the encode was not recorded\n", what);
-            bad = 1;
-        } else {
-            bad = bc7_check(want, out, w, h, what, &db);
-            if (!bad && db < g_bc7_db) g_bc7_db = db;
-            g_bc7_cases += !bad;
-        }
-        free(want), free(out);
-    }
-    free(blk);
-    return bad;
-}
-
 static int first_diff(const uint8_t *a, const uint8_t *b, size_t texels, size_t *at) {
     for (size_t i = 0; i < texels; i++)
         if (memcmp(a + 4 * i, b + 4 * i, 4)) { *at = i; return 1; }
@@ -710,22 +553,6 @@ int probe_astc(void) {
                "decode with alpha 255\n",
                (unsigned long long)g_scan_blocks, (unsigned long long)g_scan_opaque,
                100.0 * (double)g_scan_opaque / (double)g_scan_blocks);
-    // La fase BC7 corre aparte: el modo se decide una vez por dispositivo y la sonda lo decidió a bc1
-    // al arrancar, así que se suelta el codificador (vk_astc_release) y se vuelve a decidir con
-    // AC_ASTC_BC=bc7. Si el dispositivo no muestrea BC7 la decisión cae a otro modo y la fase se salta
-    // sin fallar: no hay nada que medir.
-    if (!bad) {
-        vk_astc_release();
-        plat_setenv("AC_ASTC_BC", "bc7");
-        if (vk_astc_bc() == 3) {
-            for (int i = 0; i < 14 && !bad; i++)
-                for (int s = 0; s < 2 && !bad; s++) bad = test_bc7(c, dims[i][0], dims[i][1], s);
-            if (!bad)
-                printf("probe-astc: BC7 encode: %llu cases within the bounds, lowest PSNR %.1f dB (floor %d)\n",
-                       (unsigned long long)g_bc7_cases, g_bc7_db, BC_MIN_DB);
-        } else
-            printf("probe-astc: BC7 not available on this device (AC_ASTC_BC=bc7 fell back): not checked\n");
-    }
     vk_mem_shutdown();
     vk_shutdown();
     long errors = vk_validation_errors_total();

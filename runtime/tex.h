@@ -48,6 +48,8 @@ void astc_decode_ldr_mt(const uint8_t *blocks, uint32_t width, uint32_t height, 
 // only answer yes. The --probe-astc oracle decodes every block the scan calls opaque and checks its alpha.
 bool astc_block_alpha_possible(const uint8_t block[16], uint32_t bw, uint32_t bh);
 bool astc_storage_alpha_possible(const uint8_t *mem, uint64_t bytes, uint32_t bw, uint32_t bh);
+// tex_astc_mt.c: the same answer, a large storage scanned over the ASTC worker pool (for a thread that waits on it).
+bool astc_storage_alpha_possible_mt(const uint8_t *mem, uint64_t bytes, uint32_t bw, uint32_t bh);
 
 // ---- vk_formats.c (LAS Recomp runtime/nvn/vulkan/textures.c format table, MIT) ----
 typedef struct TexVkFormat {
@@ -62,8 +64,7 @@ typedef struct TexVkFormat {
                                   // zero for native ASTC (vk == ideal, raw blocks as for BC)
     uint8_t astc_srgb;
     uint8_t astc_bc;              // 1: ASTC decoded then encoded to BC3 (AC_ASTC_BC); 2: to BC1, chosen per
-                                  // texture by the alpha scan when AC_ASTC_BC=bc1 (vk_astc.c, vk_texture.c);
-                                  // 3: to BC7 for every texture when AC_ASTC_BC=bc7 (vk_astc.c, vk_formats.c)
+                                  // texture by the alpha scan when AC_ASTC_BC=bc1 (vk_astc.c, vk_texture.c)
     uint8_t depth, stencil;       // aspect flags of depth / stencil formats
     const char *note;             // why a fallback or an expansion was chosen; NULL when the mapping is direct
     const char *reason;           // unmapped formats only: why there is no Vulkan format

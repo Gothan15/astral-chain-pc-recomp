@@ -290,8 +290,9 @@ change passes these, all run with `.venv`:
 | `tests\diff\atomic.py` | exclusive load/store sequences and ARMv8.1 atomics | no |
 | `tests\diff\func.py` | whole functions as the generator emits them, loops, jump tables and calls included (calls go to a stub that checks the registers at the call); `--abi-trust --ipa generated\v101\ipa.json` for the default lift's register syncs, without them for `gen.py --no-abi-trust` | yes |
 | `tests\flags_check.py` | the function-local flag helpers of `runtime\cpu.h` against its packed ones | no |
-| `tests\excl_mt.py` | the exclusive monitor helpers under contention and ABA, on several threads | no |
-| `tests\jumptables_check.py` | `recomp/jumptables.py` against a Unicorn oracle; must report 0 disagreements, on 1.4.3 too | yes |
+| `tests\excl_mt.py` | the exclusive monitor helpers under contention, a changed value and a restored one (ABA, which the compare-and-swap does not see: reported, not failed), on several threads | no |
+| `tests\excl_windows.py` | every exclusive window of the game's modules computes from registers alone (no memory access or call between the load and the store exclusive), the condition under which the compare-and-swap of `cpu.h` behaves as hardware; must report 0 windows | yes |
+| `tests\jumptables_check.py` | `recomp/jumptables.py` against a Unicorn oracle; must report 0 disagreements and 0 unverified bases | yes |
 | `tests\vlocals_check.py` | the V-locals syncs (`recomp/vlocals.py`) on the lifted chunks of `generated\v101`, the patch helper calls included, which `tests\diff\func.py` never emits; must report 0 violations | yes |
 
 A `--cpu v2` build passes the same differential tests with `--cflags=-march=x86-64-v2`; they compile `runtime/fma.c`
@@ -315,6 +316,25 @@ with draws drawn again; `AC_DLAA_MVDEBUG=1` with `--shot` shows the vectors (x r
 `runtime/`, `build_game.py` calls `tools/ffx_sdk.py`, which fetches the pinned FidelityFX SDK files once into
 `toolchain\ffx-sdk\` and compiles the passes with `glslc` into `fsr3_spv.h` in the build directory, again only when
 the pins or the options change. A change to `runtime/vk_fsr3.c` wants the same scripted run with `AC_UPSCALING=fsr3`, native and upscaled.
+AMD FSR 4 (`AC_UPSCALING=fsr4`) is not built from source: AMD ships it only as signed DLLs. `tools/fsr4_sdk.py`
+downloads the pinned `amd_fidelityfx_loader_vk.dll` and `amd_fidelityfx_upscaler_vk.dll` (FSR SDK 2.4.0) and their
+licence into `toolchain/fsr4/`, and `tools/build_game.py` copies the DLLs next to `astralchain.exe`. Linux runs the
+same two DLLs: AMD publishes no Linux library, so they are loaded by ffx-vk-linux, whose sources are in
+`runtime/third_party/ffx-vk-linux/` (MIT, unmodified). On Linux `tools/build_game.py` builds it into
+`libffx_vk_linux.so` next to `astralchain` (`tools/ffx_vk_linux.py`) and then fetches the DLLs itself. The library
+needs the development files of OpenSSL 3 or later, libdrm, SPIRV-Tools and the SPIR-V headers, and the Vulkan
+registry (Fedora: `openssl-devel libdrm-devel spirv-tools-devel spirv-headers-devel vulkan-headers`); without them
+the build says which header is missing and goes on without FSR 4. `AC_FSR4_LIB` names another file to load. A change
+to `runtime/vk_fsr4.c` wants a run with `AC_UPSCALING=fsr4`, native and upscaled, on an AMD RDNA 2 or newer GPU: its
+log names the library, the upscaler the library made (`fsr4: context ... provider ...`), at start, and the first
+dispatch. Which model AMD's library runs is its own choice from the GPU family; on Linux an AMD integrated GPU it
+gives FSR 3.1 is asked again for FSR 4 Lite (a Ryzen Z1 Extreme; `AC_FSR4_MODEL=lite` asks for Lite on any GPU,
+`=own` never). A refusal is logged with the library's reason, and so are a missing file (`fsr4: ... is missing`) and
+a library that made another upscaler than FSR 4 (on a GPU it does not take AMD's loader makes FSR 3.1 without an
+error): FSR 4 is then off for the run and FSR 3 runs in its place, at the scene's own size too. Take one of the DLLs
+away to see the first; on another GPU `AC_FSR4_ANY_VERSION=1` (test) keeps that FSR 3.1 context, which exercises
+`vk_fsr4.c`'s calls and layouts; run it with `AC_VK_VALIDATION=1`, since the recorder thread, which is off on AMD
+GPUs, records beside the library there.
 
 A change to the cutscene or movie timing (`runtime/frame_rate.c`), the present pacer (`runtime/nvn_api_obj.c`) or the
 audio output (`runtime/ov_audout.c`) wants `.venv\Scripts\python tools\av_sync_test.py build\v101 movie` and the same

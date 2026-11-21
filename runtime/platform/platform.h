@@ -110,6 +110,7 @@ uint64_t plat_now_ns(void);               // monotonic, high resolution, arbitra
 uint64_t plat_counter(void);              // the OS's raw monotonic counter (QPC on Windows), plat_counter_hz per second
 uint64_t plat_counter_hz(void);
 void plat_timer_1ms(void);                // asks the OS for timed waits accurate to 1 ms or better (call before threads)
+void plat_console_hide(void);              // Windows: detach the console window (the log file keeps everything); elsewhere nothing
 int plat_power_full(void);                // opts the process out of OS power throttling: 1 done, 0 refused, -1 none here
 // t * num / den for a fixed num / den without a 128-bit division per call (__udivti3 took 5% of the game's running
 // samples through plat_now_ns and rt_ticks): t * q + (t * f >> 64) with q = num / den and f = (num % den) * 2^64 / den.
@@ -280,7 +281,6 @@ uint64_t plat_process_cpu_ns(void);
 uint64_t plat_process_uptime_ns(void);
 uint64_t plat_unix_time_ns(void);         // wall clock, ns since 1970
 void plat_local_time(struct tm *out);      // the wall clock now in the local time zone
-void plat_console_hide(void);              // Windows: detach the console window (the log file keeps everything); elsewhere nothing
 int plat_localtime(int64_t unix_s, struct tm *out);   // a POSIX time in the local time zone; 0 out of range
 int plat_gmtime(int64_t unix_s, struct tm *out);      // the same in UTC
 long plat_tz_west(void);                  // the local zone's standard offset, seconds west of UTC (UTC-5: 18000)
@@ -413,6 +413,7 @@ int plat_open_folder(const char *path);                   // shows the folder in
 // in the system directories only. NULL when missing.
 void *plat_lib_open(const char *name);
 void *plat_lib_sym(void *lib, const char *name);
+const char *plat_lib_error(void);   // why the last plat_lib_open on this thread gave NULL ("" when unknown)
 
 // ---- machine load for the performance overlay (perfmon.c's sampling thread; each call can take milliseconds). A number
 // the system does not give is -1.

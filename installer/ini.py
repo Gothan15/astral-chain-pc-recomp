@@ -60,48 +60,6 @@ def get_language(text):
     return None
 
 
-# astc_bc (runtime/cfg.c lo lee de [performance]): la ventana de preparación lo pone a bc7 cuando
-# construye la caché de texturas, con las mismas reglas que set_language para lang.
-BC_ACTIVE = re.compile(r'^(\s*)astc_bc(\s*=\s*)(.*?)(\s*)$', re.IGNORECASE)
-BC_COMMENTED = re.compile(r'^\s*[#;]\s*astc_bc\s*=.*$', re.IGNORECASE)
-
-
-def set_astc_bc(text):
-    """text con `astc_bc = bc7` activo; el resto del archivo queda como estaba."""
-    lines = text.splitlines()
-    for i, line in enumerate(lines):
-        m = BC_ACTIVE.match(line)
-        if m:
-            lines[i] = f'{m.group(1)}astc_bc{m.group(2)}bc7'
-            return '\n'.join(lines) + '\n'
-    for i, line in enumerate(lines):
-        if BC_COMMENTED.match(line):
-            lines[i] = 'astc_bc = bc7'
-            return '\n'.join(lines) + '\n'
-    for i, line in enumerate(lines):
-        m = SECTION.match(line)
-        if m and m.group(1).strip().lower() == 'performance':
-            lines.insert(i + 1, 'astc_bc = bc7')
-            return '\n'.join(lines) + '\n'
-    if lines and lines[-1].strip():
-        lines.append('')
-    lines += ['[performance]', 'astc_bc = bc7']
-    return '\n'.join(lines) + '\n'
-
-
-def write_astc_bc(dest):
-    """Pone astc_bc = bc7 en dest/astralchain.ini conservando lo demás. Devuelve el path."""
-    path = Path(dest) / 'astralchain.ini'
-    text = path.read_text(encoding='utf-8-sig') if path.is_file() else ''
-    new = set_astc_bc(text)
-    if path.is_file() and new == text:
-        return path
-    tmp = path.with_name('astralchain.ini.tmp')
-    tmp.write_text(new, encoding='utf-8', newline='\n')
-    os.replace(tmp, path)
-    return path
-
-
 def write(dest, lang, example=None):
     """Write dest/astralchain.ini with lang; an existing file keeps its other lines. Returns the path."""
     path = Path(dest) / 'astralchain.ini'

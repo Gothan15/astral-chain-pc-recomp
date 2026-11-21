@@ -17,7 +17,7 @@
 
 [performance]
 # The keys of this section and of [diagnostics] are for testing and troubleshooting, and take effect at the next start.
-# Most are set here only; the settings menu's Screen tab (F1) does show the texture compression and the BC7 cache.
+# The Advanced tab of the settings menu (F1) shows all of them except zstd_native and zstd_check.
 
 # Scheduling.
 # A thread waiting for a virtual core interrupts the owner when it runs game code: 1 = on, 2 = priority inheritance
@@ -66,15 +66,8 @@
 # With the GPU decoder: 0 keeps the decoded ASTC textures as RGBA8, the textures' full quality. bc1 re-encodes them
 # to BC1 when the alpha scan proves them opaque and to BC3 otherwise — together an eighth to a quarter of the video
 # memory, at the cost of blockier gradients and normal maps that lose precision. 1 forces BC3 for every texture.
-# bc7 encodes every texture to BC7 instead: the same quarter of the video memory as BC3, with more colour precision
-# and real alpha. Worth it on 6-8 GB cards; its encoder is the slowest of the three at upload time.
 # auto: 0 on a discrete GPU with 6 GB of video memory or more, bc1 below it and on integrated GPUs.
 # astc_bc = auto
-# bc7_cache: with astc_bc = bc7, serve textures from the precomputed BC7 cache
-# (cache/bc7 next to the executable, written by the optional precompute step) instead of
-# encoding them on the GPU at upload. Textures the cache does not hold are encoded live
-# as usual. 0 ignores the cache. Only textures uploaded after a restart see the change.
-# bc7_cache = 1
 # ASTC textures whose larger side is at least this many texels are made without their largest level (level 0):
 # three quarters less memory each, and at 1280x800 the level is seldom drawn. 0 (the default) keeps every level;
 # the Steam Deck profile sets 1024 (about 200 MiB less in play on a save, the picture alike). 0, 1024 or 2048.
@@ -165,11 +158,6 @@
 # 1, the default: the game draws its HUD. 0: the HUD of play (the gauges, the map, the prompts, the markers) is not
 # drawn; the menus stay. F12 switches it in game and saves it here, as does the menu's Game tab.
 # hud = 1
-# 1: ReShade's effects are applied to the scene only. The game's HUD and menus are drawn into a separate
-# layer and put back over the picture after ReShade has run, untouched by its effects. Needs the companion
-# add-on (addon/reshade_hud.addon64) loaded by a ReShade build with full add-on support; without it this
-# setting does nothing. 0, the default: off.
-# reshade = 0
 # Performance overlay in the top right corner: off, fps, or full (frame rate, mean and longest frame time). F10
 # cycles the modes in game, as does holding L + R and then pressing Minus + Plus on a controller (both stick clicks are
 # left to the game: they trigger Fusion).
@@ -245,8 +233,6 @@
 # Screen-space contact shadows, strength in percent (0 = off): after the game lights its scene, each pixel traces a
 # short way toward the sun through the depth buffer and darkens where something close blocks it, adding the small
 # shadows at feet, under stones and in grass that the shadow maps miss. Read at start.
-# motion_blur / depth_of_field / chromatic_aberration: los efectos de post del propio juego,
-# 1 = como el juego los trae (por defecto), 0 = su pase no se dibuja. En vivo.
 # contact_shadows = 0
 # Soft sun shadows (PCSS), percent of the default penumbra width (0 to 200; 0 = the game's own four-tap filter): sharp
 # where an object meets the ground and softer the further its shadow falls. Done in the translated shaders (translator
@@ -266,13 +252,20 @@
 # The 3D scene's temporal upscaler, in place of the game's anti-aliasing: off (the default), auto (DLSS where it can
 # run, FSR 3 elsewhere), dlss (NVIDIA DLSS: NVIDIA RTX GPUs, with nvngx_dlss.dll from NVIDIA's DLSS SDK next to
 # astralchain.exe), xess (Intel XeSS: most GPUs of the last years, with libxess.dll next to astralchain.exe, which the
-# installer puts there, and the Microsoft Visual C++ runtime) or fsr3 (AMD FSR 3: any GPU, built in). dlss and xess are
-# Windows only. They give smoother edges and less shimmer, for some GPU time at the native mode (XeSS and FSR 3 about
-# 5 to 6 ms a frame at 2560x1440 on an Arc 140T); the HUD is not touched. Changes take effect at once between the
-# upscalers that came up at start: dlss and auto load NGX at start, xess libxess.dll, so choosing one later waits for a
-# restart.
+# installer puts there, and the Microsoft Visual C++ runtime), fsr3 (AMD FSR 3: any GPU, built in) or fsr4 (AMD FSR 4,
+# the machine-learning upscaler: AMD Radeon RX 6000 series or newer, and Ryzen processors with RDNA 2 or newer
+# graphics; the installer puts AMD's amd_fidelityfx_loader_vk.dll and amd_fidelityfx_upscaler_vk.dll next to
+# astralchain.exe, on Linux with libffx_vk_linux.so, which runs them there, and the menu offers it on those GPUs only;
+# AMD's library picks the model for the GPU, the full network on a Radeon RX 7000 or 9000, FSR 4 Lite on integrated
+# graphics; where FSR 4 cannot run, a file of it missing or a GPU AMD's library does not take, the log and the menu
+# say why and FSR 3 runs in its place). dlss and xess are Windows only. They give smoother edges and less shimmer, for
+# some GPU time at the native mode (XeSS and FSR 3 about 5 to 6 ms a frame at 2560x1440 on an Arc 140T); FSR 4's time
+# follows the size it writes (a Ryzen Z1 Extreme's Radeon 780M: a whole frame takes about 10 ms of GPU time with FSR 4
+# Lite writing 1920x1080 and 31 ms writing 3840x2160, each from a scene a third to a half that size); the HUD is not
+# touched. Changes take effect at once between the upscalers that came up at start: dlss and auto load NGX at start,
+# xess libxess.dll, fsr4 AMD's library, so choosing one later waits for a restart.
 # upscaling = off
-# The upscaler's mode: native (the 3D scene at the game resolution: DLAA under DLSS, Native AA under XeSS and FSR 3),
+# The upscaler's mode: native (the 3D scene at the game resolution: DLAA under DLSS, Native AA under XeSS and FSR),
 # quality, balanced, performance or ultra_performance (the scene at about 67, 58, 50 or 33 % of the game resolution, on
 # the sizes the game takes, at least 640x360 and in handheld at most 1280x720; the upscaler brings it to the game
 # resolution and texture filtering is sharpened to match: more frames per second). Read at start. When the chosen
@@ -315,6 +308,25 @@
 # audio_prefill_ms = 20
 # Volume in percent (0 to 100), on top of the game's own. Changes while the game runs take effect at once.
 # volume = 100
+# What the game mixes: stereo, or 5.1 (front left and right, centre, LFE, two surrounds). 5.1 needs an output that takes
+# it: a 5.1 or 7.1 output, or on Windows a headset with spatial sound on (Windows Sonic for Headphones, Dolby Atmos for
+# Headphones, DTS Headphone:X: the device's properties in the Windows sound settings). Elsewhere the 5.1 mix is folded
+# down to stereo. The settings menu shows what the output takes. Read at start.
+# audio_output = stereo
+# The 5.1 mix. Changes while the game runs take effect at once. The menu's preset writes the gains below: balanced,
+# voices (clearer dialogue), immersive (stronger surrounds, bass to the subwoofer), or custom once a gain is moved.
+# audio_mix_preset = balanced
+# Gain of each speaker in dB (-12 to 6). The centre carries the voices and interface sounds; -2 keeps them near their
+# level in stereo.
+# audio_front_left = 0
+# audio_front_right = 0
+# audio_center = -2
+# audio_surround_left = 0
+# audio_surround_right = 0
+# audio_subwoofer = 0
+# The game sends nothing to the subwoofer (LFE). 1 sends it the bass (below 120 Hz) of the five other speakers, 10 dB
+# down as a receiver expects of the LFE channel.
+# audio_bass = 0
 
 [input]
 # Gamepad motion controls (0 = off) and vibration (0 = off).
@@ -353,9 +365,6 @@
 # rstick_deadzone = 8
 # Mouse camera sensitivity (0 to 10; 0 = no mouse camera and no cursor capture).
 # mouse_sens = 1
-# How the mouse turns the camera: sparrow, this port's own plain conversion, or puddz, the AstralChain-PC port's
-# conversion with smoothed speed. Changes while the game runs take effect at once; the Controls tab has the row.
-# mouse_camera = sparrow
 # The keyboard's sticks are all or nothing, so the game only sees a full tilt from them; while this key is held the
 # keyboard-driven stick values shrink and the keyboard can walk instead of run. Key names as in the bind_ lines below,
 # none turns it off. 0.2 to 0.9, the default holds for anything else. Only the keyboard is scaled: the mouse camera and
@@ -376,20 +385,13 @@
 #   key names: a-z 0-9 f2-f7 f9 f12 num0-num9 space tab enter backspace lshift rshift lctrl rctrl lalt capslock insert
 #   delete home end pageup pagedown up down left right num_add num_sub num_mul num_div num_decimal minus equals
 #   lbracket rbracket semicolon apostrophe comma period slash backslash grave mouse_l mouse_r mouse_m mouse_x1 mouse_x2
-#   wheel_up wheel_down esc
-# Defaults (pad_layout = nintendo): A = pad:east, key:J. B = pad:south, key:K, key:space.
-# X = pad:north, key:I. Y = pad:west, key:U. L = key:Q, key:mouse_x1. R = key:E, key:mouse_x2.
-# ZL = key:mouse_r, key:Z. ZR = key:mouse_l, key:C. Plus = key:enter, key:tab.
-# Minus = key:backspace, key:esc (Esc es una tecla normal: el overlay del port se abre con F1).
-# LCLICK = key:lshift, key:1. RCLICK = key:mouse_m, key:2.
-# D-pad = flechas, y rueda arriba/abajo en arriba/abajo (cambio de arma).
-# Stick izquierdo = WASD. Stick derecho (cámara) = F/T/G/H.
-# A pad that reports A/B and X/Y swapped (some GuliKit models): set pad_layout = xbox, or
+# Defaults (pad_layout = nintendo): A = pad:east, key:E. B = pad:south, key:lshift. X = pad:north, key:space.
+# Y = pad:west, key:mouse_l. A pad that reports A/B and X/Y swapped (some GuliKit models): set pad_layout = xbox, or
 # swap them back here (keyboard keys stay):
-# bind_A = pad:south, key:J
-# bind_B = pad:east, key:K
-# bind_X = pad:west, key:I
-# bind_Y = pad:north, key:U
+# bind_A = pad:south, key:E
+# bind_B = pad:east, key:lshift
+# bind_X = pad:west, key:space
+# bind_Y = pad:north, key:mouse_l
 
 [mods]
 # Folder with the player's mods, one subfolder per mod (<name>/romfs, <name>/exefs, <name>/cheats). Default: mods next

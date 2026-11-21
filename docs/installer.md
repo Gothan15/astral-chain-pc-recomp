@@ -74,7 +74,7 @@ again: it is rebuilt from the 1.0.1 update.
    `v2` one), a Vulkan 1.3 GPU exists. Each failure is one clear message.
    `main.npdm` is not compared: it is the process's metadata, dumps of the same build carry different ones (repacked
    NSPs, different dumpers), and the game checks the fields it uses at start (`runtime/boot.c` `check_npdm`); a
-   differing one is a warning.
+   differing one is only noted in the install log, as the window would alarm the player over nothing.
    A version mismatch is not a dead end: the window offers **Continue anyway**, which runs the same setup with the
    check reported as a warning (`--accept-unknown-version` on the command line). The game may then not run or crash;
    the player decides.
@@ -89,6 +89,9 @@ again: it is rebuilt from the 1.0.1 update.
    (`libacrt.a` or `libacrt-v2.a`) into `astralchain.exe` (`build_game.py --runtime-lib`; about 3 min on 24 cores).
    The generated C is compiled to bitcode with the profile of play `tools/data/pgo/<version>.profdata` and linked with
    ThinLTO (`--release-opt`), on Windows and Linux alike: the link takes about 2 min on 16 threads and 1 to 1.4 GiB.
+   The profile's hash is one of the compile flags: the release zip dates every file 1980-01-01, so Ninja cannot see a
+   new profile by its date, and an update that recompiled only the chunks the lift changed would link objects of two
+   profiles, which ThinLTO refuses (issue #136).
 5. **Prepare** the shaders: `tools/prepare_shaders.py` reads the variants players met (`data/shader-answers.bin`) and
    the shaders themselves from the RomFS (`tools/shader_census.py`), adds each shader's default variant, and writes the
    seed files; `astralchain.exe --prepare-shaders` then translates every variant and builds each stage library or compute
@@ -175,7 +178,9 @@ recomp/, tools/       the lifter and the extraction, build and patch scripts the
 llvm/                 llvm-mingw, x86_64-only subset (Apache-2.0 with LLVM exception; mingw-w64 parts permissive)
 runtime/              libacrt.a, libacrt-v2.a, the headers the generated code and modules.c/romfs.c/patches.c include,
                       and deps/ (Vulkan, SDL3, Opus, libvpx headers and import libraries)
-bin/                  ac_xlate.exe (+ .id), hactool.exe, SDL3.dll, libopus-0.dll, libxess.dll, ninja.exe
+bin/                  ac_xlate.exe (+ .id), hactool.exe, SDL3.dll, libopus-0.dll, libxess.dll, ninja.exe, and AMD FSR 4:
+                      amd_fidelityfx_loader_vk.dll and amd_fidelityfx_upscaler_vk.dll (the Linux release has the same
+                      two DLLs with libffx_vk_linux.so, which runs them)
 licenses/             the licence files of everything bundled
 THIRD_PARTY_NOTICES.md
 astralchain.ini.example, VERSION  the default ini; the release string (the repository's VERSION plus the commit)

@@ -34,7 +34,14 @@ MacNativeGames cannot run on x86-64 as is: its CPU path executes ARM64 code nati
 - Rewritten for Astral Chain scale:
   - generator runs in parallel processes, with bounded memory per worker;
   - jump tables resolved by our own symbolic pass instead of Unicorn, which keeps GPL code out of the shipped generator;
-  - `LDXP`/`STXP` (128-bit exclusive pairs) supported;
+  - `LDXP`/`STXP` (128-bit exclusive pairs) supported. The exclusive monitor is a compare-and-swap against the value
+    the load exclusive read (`runtime/cpu.h`): it does not see a write that puts the same value back (X -> Y -> X),
+    which fails the store on hardware. That only matters to a window that reads memory or calls between the load and
+    the store, as a hand-written lock-free pop does; one that computes from registers alone gets from a successful
+    compare-and-swap what hardware gives when the thread runs after the other writers. `tests/excl_windows.py`
+    checks every window of 1.0.1: main 2290 and sdk 841, none reads memory or calls, 7 instructions at most
+    (2026-11-20). dynarmic also clears the other cores' reservations on a store exclusive, under a global lock; it is
+    not needed here, and would cost a lock on every store exclusive;
   - no 64 MB limit on `main`; `subsdk*` loaded;
   - NZCV and the general registers of each function kept in C locals instead of the `Cpu` (`recomp/flags.py`,
     `recomp/regs.py`), X18 excepted. A register analysis of every lifted function at once (`recomp/ipa.py`) tells what
@@ -56,14 +63,28 @@ MacNativeGames cannot run on x86-64 as is: its CPU path executes ARM64 code nati
     on the generated chunks.
 - Coverage oracle: MacNativeGames' NSO rewriter lists every site where game code touches the OS (SVCs, TLS reads, counter reads, `x18`, exclusive windows, jump tables): 68,968 sites in 1.4.3 `main`. The lifter must handle every one.
 - Memory: guest address equals host address, all below 2^39 (IPC encodes 39-bit addresses). The heap, stacks and the alias region are reserved with `MEM_WRITE_WATCH`, so the graphics back end can ask which pages the CPU wrote since the last upload (`runtime/memory.c`).
-- Indirect branches go through `rt_dispatch` (`runtime/dispatch.c`), which looks the target up and tail-calls it: first in the calling thread's own cache of 1024 targets, then in the address table (`AC_DISPATCH_CACHE=0` leaves the cache empty).
+- Indirect branches go through `rt_dispatch` (`runtime/dispatch.c`), which looks the target up and tail-calls it: first in the calling thread's own cache of 1024 targets, then in the address table (`AC_DISPATCH_CACHE=0` leaves the cache empty). On Windows (a Core Ultra 9 285H, standing in a scene at 60 fps) the dispatch takes 2.1-2.2% of the samples inside the executable with the cache and 3.5% without it; the frame time is the same. An import stub (`adrp; ldr; add; br` on a GOT slot) whose slot the generator resolves to a lifted function compares the slot with that function's address and calls it directly when they match (`rt_stub_hit` in `cpu.h`), which they do unless the runtime bound a host function to the name; in the town 15 to 22% of the guest threads' indirect branches were such calls.
 - Testing: LAS Recomp's differential harness, every lifted instruction class checked against Unicorn (test-only, never linked into the game).
 
 ### 3. Host
 
 - Portable C from MacNativeGames: threads and synchronisation, IPC, memory services, fs/RomFS, time, account, applet, audio renderer and effects. The Apple pieces (mach VM, CommonCrypto, AudioToolbox, GameController) are replaced with Win32 and SDL3.
 - SDK boundary at the `nn::*` function level, matching MacNativeGames. Only `audren:u` and `sm:` are real IPC services.
-- Window, keyboard and mouse: Win32 (`gfx_window.c`, `input_win.c`). Gamepad and audio output: SDL3. Voice: libopus (BSD). Movies: the SDK's `movie::Decoder` is replaced by a host VP9 decoder over libvpx (BSD, static; `runtime/ov_movie.c`), because FFmpeg from MSYS2 is a GPL build.
+- Window, keyboard and mouse: Win32 (`gfx_window.c`, `input_win.c`). Gamepad: SDL3. Audio output: WASAPI on Windows (`audio_out_win.c`), SDL3 elsewhere (`audio_out_sdl.c`). Voice: libopus (BSD). Movies: the SDK's `movie::Decoder` is replaced by a host VP9 decoder over libvpx (BSD, static; `runtime/ov_movie.c`), because FFmpeg from MSYS2 is a GPL build.
+- Sound and 5.1: the game plays everything through `audout:u` (`ov_audout.c`); its Wwise 2019.1 sink asks for stereo,
+  then mixes for the channel count `OpenAudioOut` answered, so `audio_output = 5.1` makes the game mix 5.1 itself
+  (FL FR FC LFE SL SR). The effects, voices and reverbs follow the output; the music is authored stereo and stays in
+  front; the LFE gets nothing. Measured on the new game's opening (radio dialogue over traffic, 2 s RMS, 2026-11-21):
+  fronts 0.069-0.082 in stereo; in 5.1 fronts 0.049-0.059, centre 0.054-0.079, surrounds 0.005-0.026, LFE 0. The
+  voices came out about 3.4 dB louder than in stereo (the mono 2D sounds go to the centre at full level instead of
+  -3 dB per side) and a phone beep too loud on headphones, hence the centre's default of -2 dB. The player's mix runs
+  on the output thread (`mix_frame`): a gain per speaker, presets that write them, the bass of the five other speakers
+  to the LFE (120 Hz low-pass, 10 dB down), a speaker test (pink noise per speaker, as a receiver does) and the meters
+  of the menu's speaker diagram. A device without a 5.1 path gets an ITU-R BS.775 fold-down. WASAPI rather than SDL on
+  Windows: a headset with a spatial sound format on (Windows Sonic, Dolby Atmos, DTS Headphone:X) keeps a stereo mix
+  format, and SDL3 opens the endpoint at that count (asked for 6 channels on a PRO X Wireless with Sonic on, it opened
+  2), folding the 5.1 before the virtualiser sees it; WASAPI takes the 6 channel stream as it is. 7.1 ran without a
+  fault in one test (the sink's table goes to 8 channels) and is left out for now.
 - zstd: most RomFS files of 1.4.3 are zstd frames. The patch set `zstd` sends the game's two decoder entry points to
   libzstd on the host (`ov_zstd.c`, `AC_ZSTD_NATIVE`); the lifted decoder took almost three times as long.
 - Settings and menu: every key with its default is in one table (`cfg.c`), read from `astralchain.ini` and `AC_*`
@@ -81,7 +102,8 @@ Every guest thread is a host thread. Astral Chain assumes Horizon's scheduler: t
 - Preemption. When a waiting thread has a better priority than a holder on a core it may use, exactly one holder is flagged. The holder checks the flag at its next SVC and at every indirect call (`rt_dispatch`: two loads when nobody waits), checks again under the kernel lock that a better thread still waits, and only then hands its core over. The indirect-call check comes from SavageWindRecomp's BotW port; checking only at SVCs left a better thread waiting up to 26 ms.
 - Asynchronous preemption (from MacNativeGames 8bf0893, on unless `AC_ASYNC_PREEMPT=0`). Game code can run for
   milliseconds with neither (`AC_CORE_DIAG=1` measures it): a waiter that has spun 250 us suspends the holder and,
-  if its host rip is in lifted code at host depth 0 (not inside a host call or SVC), moves it to `kern_ap_stub`, which
+  if its host rip is in lifted code (not inside a host call or SVC) at host depth 0 (not in guest code that a host
+  function runs through `rt_call` or `rt_original`, the only ways host code may enter guest code), moves it to `kern_ap_stub`, which
   saves the volatile registers and gives the core up there. A holder of a guest mutex counts at the priority of its
   best waiter, and one inside an SDK spin lock (TLR+0x100 `disable_count`) is not preempted: its interrupt flag is set
   and the switch happens at SVC 0x36. `AC_ASYNC_PREEMPT=2` keeps those two without interrupting. The interruption is
@@ -120,6 +142,11 @@ Every guest thread is a host thread. Astral Chain assumes Horizon's scheduler: t
   that reads them, while the replay still records it. At the start of a submission's replay every uniform range it
   binds from CPU-written pools is copied, and the draws bind the copy (`vk_usnap.c`, after MacNativeGames'
   `AC_UBO_SNAPSHOT`); without it, late draws read another object's matrix.
+- Repeated uniform binds. The game binds all 14 uniform slots of a stage before nearly every draw (54,560 bindings
+  a frame in the town, 87% of them the range the recording already holds at that stage and slot). The recorder
+  leaves those out (`nvn_api_cmd.c` `ubo_table`; `AC_UBO_DEDUPE=0` records them all): they were 1.7 of the 2.6 MiB of
+  records a frame, copied at EndRecording and walked at the submit and by the replay, which sets its binding at such
+  a record and nowhere else. The command memory reported to the game counts them as before.
 - Driver data. The NVN driver keeps a per-stage constant bank (c0) that shaders read for things like point size, dispatch size and base instance. The back end fills it the way the driver does.
 - Shaders: the Ryujinx translator 1.3.2 with MacNativeGames' patches and ours (`tools/xlate/patches/`), built with .NET 10 NativeAOT as `ac_xlate.exe` and run as a separate process. Its SPIR-V goes to Vulkan directly. `tools/prepare_shaders.py` and `astralchain.exe --prepare-shaders` translate and compile the variants of MacNativeGames' shared list ahead of play (29,587 for 1.4.3); the rest are translated on first use and cached on disk.
 - Pipelines: `VK_EXT_graphics_pipeline_library` where the driver has it. Shader stages are compiled ahead into libraries; a draw that meets a new state links them at once (fast link), and an optimised pipeline replaces the linked one when a background thread finishes it. Pipeline keys seen in play are saved and built at boot. A draw whose pipeline is not ready is skipped when one of its pass's targets was rendered in the previous frame, and waits otherwise, so one-shot passes are never lost; a full-screen draw is skipped as well rather than waiting (`AC_PIPE_SKIP`); the stage libraries a waiting draw needs are built on idle workers in parallel (`AC_PIPE_WAIT`). Without the extension, a missing pipeline is built on a worker and the draw waits or is skipped by the same rule.
@@ -217,16 +244,48 @@ Every guest thread is a host thread. Astral Chain assumes Horizon's scheduler: t
   (Windows with "Use HDR" off, a compositor without colour management) the swapchain stays SDR and the tonemap writes
   the game's own result. `AC_SHOTS` reads the window texture, so its pictures clip highlights in HDR.
 - Temporal upscaling (`vk_dlaa.c`, off by default): `upscaling` puts NVIDIA DLSS (`dlss`, through the driver's NGX core
-  loaded at run time, Windows only), Intel XeSS (`xess`, `vk_xess.c`, `libxess.dll` loaded at run time, Windows only) or
-  AMD FSR 3 (`fsr3`, `vk_fsr3.c`, every OS; `auto` is DLSS where it can run, else FSR 3) in place of the game's SMAA
-  (`anti_aliasing = smaa | off`, for when none runs), in the mode `upscaling_quality` gives (`native`: DLAA, XeSS or FSR
-  3 Native AA at the scene's own size; `quality` ... `ultra_performance`: a smaller scene, below); no SDK header or
-  code of NVIDIA's
-  or Intel's is compiled in. FSR 3's passes are AMD's GLSL, unmodified and not in the repository: `tools/ffx_sdk.py`
+  loaded at run time, Windows only), Intel XeSS (`xess`, `vk_xess.c`, `libxess.dll` loaded at run time, Windows only),
+  AMD FSR 3 (`fsr3`, `vk_fsr3.c`, every OS; `auto` is DLSS where it can run, else FSR 3) or AMD FSR 4 (`fsr4`,
+  `vk_fsr4.c`, through AMD's FSR API, `ffxCreateContext` / `ffxDispatch`, loaded at run time: AMD's signed
+  `amd_fidelityfx_loader_vk.dll` and `amd_fidelityfx_upscaler_vk.dll` of the FSR SDK 2.4.0 on every OS, pinned by
+  `tools/fsr4_sdk.py` and shipped in the release's `bin/`; Linux, for which AMD publishes no library, runs the same
+  DLLs through ffx-vk-linux, a PE loader with the Windows services and calling-convention bridges they need, vendored
+  in `runtime/third_party/ffx-vk-linux/` and built into `libffx_vk_linux.so`, which exports the same entry points;
+  the menu offers it only on an AMD GPU with `VK_KHR_ray_query`, i.e. RDNA 2 or newer, which is what AMD's
+  FSR 4.1 supports; the API's structures are declared in `vk_fsr4.c`, no SDK header is compiled in) in place of the
+  game's SMAA (`anti_aliasing = smaa | off`, for when none runs), in the mode `upscaling_quality` gives (`native`:
+  DLAA, XeSS or FSR Native AA at the scene's own size; `quality` ... `ultra_performance`: a smaller scene, below); no
+  SDK header or code of NVIDIA's or Intel's is compiled in. FSR 3's passes are AMD's GLSL, unmodified and not in the
+  repository: `tools/ffx_sdk.py`
   fetches the pinned files of the FidelityFX SDK (commit and per-file SHA-256) into `toolchain/ffx-sdk/` and compiles
   them into `fsr3_spv.h` in the build directory, and `vk_fsr3.c` is our own host for them (internal images, constant
-  blocks, the seven passes in AMD's order). Astral Chain renders forward: a depth-only prepass writes the scene
-  depth (D32F_S8), the opaque draws and the transparents go into an R11G11B10F light target with it (two images,
+  blocks, the seven passes in AMD's order). FSR 4 takes the same inputs as FSR 3; its library reads the colour, depth
+  and motion vectors in SHADER_READ_ONLY_OPTIMAL (the API's COMPUTE_READ state), so `vk_fsr4.c` moves them out of
+  GENERAL around the dispatch and back (the recorder thread makes the barrier before the library records into the
+  command buffer itself, as for XeSS), and passes a 1x1 R32F exposure image holding 1. AMD's library is also given
+  the API version, which its documentation requires since SDK 2.1,
+  the stencil usage of the D32F_S8 depth (its back end otherwise makes a D32F view of it, which is not valid) and, for
+  the tonemapped composite, which is sRGB-encoded, the non-linear colour flags. AMD's loader makes its newest
+  upscaler that takes the GPU, FSR 3.1 where FSR 4 does not run (provider 3.1.6 on an Arc 140T), without an error:
+  `vk_fsr4.c` asks the context for its version and, when it is not FSR 4, destroys it and turns FSR 4 off for the
+  run (`AC_FSR4_ANY_VERSION=1`, a test switch, keeps the context). The library picks FSR 4's model from the GPU
+  family: the full network on the Radeon RX 7000 and 9000 series, a version of it for the RX 6000, FSR 4 Lite on its
+  integrated GPUs. The SDK 2.4.0 DLL lists no family for the integrated RDNA 3 GPUs before the Radeon 890M (a Ryzen
+  Z1 Extreme's 780M got FSR 3.1.6), so on Linux, where ffx-vk-linux answers the library's question about the family,
+  an AMD integrated GPU that got FSR 3.1 is asked again for FSR 4 Lite, which the Z1 Extreme then runs (4.1.2).
+  Wherever FSR 4 cannot run (one of its files is not beside the executable, the library cannot be loaded, it does not
+  take the GPU, a call fails), the log says why, the menu's row names the missing file and what runs, and FSR 3 runs
+  in its place, at the scene's own size too (`vk_dlaa.c` `pick`). One context is kept per scene size, output size
+  and colour kind, four at most (AMD gives a working set of 81 MB at 1920x1080 and 318 MB at 3840x2160): the least
+  recently used goes for a new one and all go after 600 presents without FSR 4, each destroyed once no frame in
+  flight uses it. The library compiles its shaders when it makes a context (0.2 to 1 s for 1920x1080, 2.6 s for
+  3840x2160 on the Z1 Extreme), so the context of the game's sizes is made while the game starts (`vk_dlaa_warm`,
+  `boot.c`) and not at the first frame with a 3D scene, where it stalled the frame after a load and left a cutscene's
+  audio ahead of its picture. With `upscaling = fsr4` at start the device also enables
+  `VK_KHR_compute_shader_derivatives`, which the shaders of AMD's library declare, and `VK_KHR_cooperative_matrix`
+  and `VK_EXT_shader_float8`, which its FP8 model for the RX 9000 names (not run here: no such GPU at hand), when the
+  GPU has them. Astral Chain renders forward: a depth-only prepass
+  writes the scene depth (D32F_S8), the opaque draws and the transparents go into an R11G11B10F light target with it (two images,
   alternating per frame), the bloom chain reads it at half size and down, a composite tonemaps, SMAA anti-aliases and
   the HUD is drawn over the result. The AA arms on the first light-target pass after a prepass and runs, in place on
   the light target, at the first pass a quarter as wide (the bloom's third level), so the bloom, the composite and the
@@ -367,7 +426,9 @@ Every guest thread is a host thread. Astral Chain assumes Horizon's scheduler: t
   texture cache's default bound grows to half the device budget for them. Below 6 GB and on integrated GPUs
   (`bc1`) they are re-encoded on the GPU: the alpha scan of the raw storage (`tex_astc.c`, sound, the swizzle only
   permutes 16-byte sectors) picks BC1 for the provably opaque textures — the same colour quality as BC3 at half its
-  size — and BC3 for the rest. Both lose against RGBA8 (blockier gradients, less precise normal maps), which shows
+  size — and BC3 for the rest. The scan reads each block's header once per distinct header and only the two
+  endpoint alphas of alpha-carrying modes; a thread that waits on it (the replay making an image the background scan
+  has not reached) spreads it over the ASTC worker pool (`tex_astc_mt.c`). Both lose against RGBA8 (blockier gradients, less precise normal maps), which shows
   most on the environments' large tiled surfaces. `1` forces BC3 everywhere.
   Video memory can still run short: the RGBA8 textures outgrow a 6 GB card, or another program takes memory after the
   game started (a recorder) and the system lowers the game's budget. Two guards, both for the rest of the session.
@@ -388,6 +449,12 @@ Every guest thread is a host thread. Astral Chain assumes Horizon's scheduler: t
   1800 logs the process and system commit and, per heap, VMA's blocks beside the driver's usage; crash reports print
   the commit too.
   --probe-astc holds both encoders and the scan to PSNR and exactness bounds. The CPU decoder (`tex_astc*.c`) is the fallback and the test oracle.
+- Colour render targets are made `MUTABLE_FORMAT`, for the game's views in another format. Below GFX11 RADV turns
+  colour compression off for such an image unless it carries a format list, so under RADV on an RDNA 2 GPU (the
+  Steam Deck, RX 6000 cards, Ryzen 6000/7000 integrated GPUs) each one gets a list of its own format and its sRGB or
+  UNORM twin (`AC_TARGET_COMPRESSION`, `vk_texture.c` `target_compression`): -3 to -4% GPU time per frame in Harmony
+  Square in the Steam Deck profile, measured on a Z1 Extreme whose Mesa applies the GFX10.3 rule (`tools/deck_power.sh`
+  loads it). A view in a format outside the list makes the target again without one, with its content (`unlist`).
 - Draw state. A draw whose program, bound state and textures repeat reuses the previous draw's shaders and skips rebuilding its descriptor sets; descriptor sets are written through update templates (`vk_exec_draw.c`, `vk_pipeline.c`).
 - Allocation: Vulkan Memory Allocator. Debugging: Vulkan validation layers, per-pass frame dumps (`AC_DUMP`, or F12 with `AC_DUMP_KEY=1`; `vk_dump.c`) and a flight recorder (`AC_FLIGHT`). RenderDoc cannot capture, because it hides `VK_EXT_external_memory_host` from the application.
 
