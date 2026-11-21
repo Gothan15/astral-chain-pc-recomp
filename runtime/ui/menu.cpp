@@ -598,10 +598,12 @@ static void rows_upscaling(void) {
                         off ? nullptr : note_q);
     }
     {
-        static const char *const av[] = {"off", "smaa"};
-        const char *an[] = {menu_text(UI_MENU_AA_OFF), "SMAA"};
+        static const char *const av[] = {"off", "smaa", "cmaa2"};
+        const char *an[] = {menu_text(UI_MENU_AA_OFF), "SMAA", "CMAA 2"};
         if (vk_dlaa_running()) opt_disable_next(UI_MENU_AA_BY_UPSCALER);
-        opt_choice_list("AC_ANTI_ALIASING", UI_MENU_AA, av, an, 2, UI_MENU_AA_DESC, cfg_smaa() ? 1 : 0);
+        const char *aa = cfg_value("AC_ANTI_ALIASING");
+        opt_choice_list("AC_ANTI_ALIASING", UI_MENU_AA, av, an, 3, UI_MENU_AA_DESC,
+                        !strcmp(aa, "smaa") ? 1 : !strcmp(aa, "cmaa2") ? 2 : 0);
     }
 }
 
@@ -718,6 +720,8 @@ static void rows_color(void) {
         cfg_set("AC_COLOR_PRESET", "custom");
         cfg_save();
     }
+    static const UiTextId postnames[] = {UI_MENU_POST_PRESET_OFF, UI_MENU_POST_PRESET_ELZELDAPA};
+    opt_choice("AC_POST_PRESET", UI_MENU_POST_PRESET, postnames, 2, UI_MENU_POST_PRESET_DESC);
 }
 
 static void tab_screen(float scale) {
@@ -742,6 +746,9 @@ static void tab_screen(float scale) {
     static const UiTextId up[] = {UI_MENU_UPSCALER_FSR, UI_MENU_UPSCALER_BILINEAR};
     opt_choice("AC_UPSCALER", UI_MENU_UPSCALER, up, 2, UI_MENU_UPSCALER_DESC);
     opt_slider("AC_SHARPNESS", UI_MENU_SHARPNESS, 0, 100, UI_MENU_SHARPNESS_DESC, 5, "%.0f %%");
+    static const char *const shv[] = {"rcas", "smart"};
+    static const char *const shn[] = {"RCAS", "Smart Sharp"};
+    opt_choice_list("AC_SHARPENER", UI_MENU_SHARPENER, shv, shn, 2, UI_MENU_SHARPENER_DESC);
     opt_slider("AC_FOV", UI_MENU_FOV, 70, 140, UI_MENU_FOV_DESC, 5, "%.0f %%");
     opt_slider("AC_DRAW_DISTANCE", UI_MENU_DRAW_DISTANCE, 100, 400, UI_MENU_DRAW_DISTANCE_DESC, 25, "%.0f %%");
     static const char *const aniso[] = {"auto", "game", "2", "4", "8", "16"};

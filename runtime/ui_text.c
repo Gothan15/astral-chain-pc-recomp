@@ -80,6 +80,10 @@ static const char *const text_en[UI_TEXT_COUNT] = {
     [UI_MENU_ANISO_AUTO] = "Auto",
     [UI_MENU_SHARPNESS] = "FSR sharpness",
     [UI_MENU_SHARPNESS_DESC] = "Sharpening after FSR scaling; 0 turns it off.",
+    [UI_MENU_SHARPENER] = "Sharpener",
+    [UI_MENU_SHARPENER_DESC] = "Which sharpener the slider above drives. RCAS: AMD's, the one the port has always "
+                               "used. Smart Sharp: a bilateral contrast-adaptive sharpener (the ELZELDAPA preset's), "
+                               "gentler on noise.",
     [UI_MENU_COLOR] = "Colour",
     [UI_MENU_COLOR_PRESET] = "Colour profile",
     [UI_MENU_COLOR_PRESET_DESC] = "Sets the four values below. Vivid: more contrast and saturation, shadows opened a "
@@ -95,6 +99,11 @@ static const char *const text_en[UI_TEXT_COUNT] = {
     [UI_MENU_COLOR_SATURATION_DESC] = "Colour strength against grey; 100 % leaves it.",
     [UI_MENU_COLOR_GAMMA] = "Gamma",
     [UI_MENU_COLOR_GAMMA_DESC] = "Below 1 brightens dark and middle tones, above 1 darkens them; 1 leaves them.",
+    [UI_MENU_POST_PRESET] = "Image preset",
+    [UI_MENU_POST_PRESET_DESC] = "ELZELDAPA: that ReShade preset, built in — Colourfulness at -0.30 and Marty's "
+                                 "Exposure Fusion local tonemapping, in that order, after the colour adjustment "
+                                 "above. Applies to the whole picture, HUD included.",
+    [UI_MENU_POST_PRESET_OFF] = "Off", [UI_MENU_POST_PRESET_ELZELDAPA] = "ELZELDAPA",
     [UI_MENU_HDR_GROUP] = "HDR",
     [UI_MENU_HDR] = "HDR output",
     [UI_MENU_HDR_DESC] = "Bright highlights on an HDR display. Needs HDR turned on in Windows (\"Use HDR\") or in a "
@@ -196,8 +205,10 @@ static const char *const text_en[UI_TEXT_COUNT] = {
     [UI_MENU_UPSCALING_NATIVE] = "Native", [UI_MENU_DLSS_QUALITY] = "Quality", [UI_MENU_DLSS_BALANCED] = "Balanced",
     [UI_MENU_DLSS_PERFORMANCE] = "Performance", [UI_MENU_UPSCALING_ULTRA] = "Ultra performance",
     [UI_MENU_UPSCALING_MODE_OFF] = "no upscaler",
-    [UI_MENU_AA] = "Game anti-aliasing",
-    [UI_MENU_AA_DESC] = "The game's own anti-aliasing, SMAA, for when no upscaler runs. Off leaves the edges jagged.",
+    [UI_MENU_AA] = "Anti-aliasing",
+    [UI_MENU_AA_DESC] = "Anti-aliasing for when no upscaler runs. SMAA: the game's own. CMAA 2: Intel's "
+                        "morphological anti-aliasing, run by the port on the finished picture, HUD included. Off "
+                        "leaves the edges jagged.",
     [UI_MENU_AA_OFF] = "Off",
     [UI_MENU_AA_BY_UPSCALER] = "the upscaler smooths the edges",
     [UI_MENU_OUTPUT_RES_AUTO] = "Automatic",
@@ -538,6 +549,10 @@ static const char *const text_ru[UI_TEXT_COUNT] = {
     [UI_MENU_ANISO_AUTO] = "Авто",
     [UI_MENU_SHARPNESS] = "Резкость FSR",
     [UI_MENU_SHARPNESS_DESC] = "Повышение резкости после масштабирования FSR; 0 выключает его.",
+    [UI_MENU_SHARPENER] = "Метод резкости",
+    [UI_MENU_SHARPENER_DESC] = "Какой фильтр управляется ползунком выше. RCAS: фильтр AMD, который порт "
+                               "использовал всегда. Smart Sharp: билатеральный контрастно-адаптивный фильтр "
+                               "(из пресета ELZELDAPA), мягче относится к шуму.",
     [UI_MENU_COLOR] = "Цвет",
     [UI_MENU_COLOR_PRESET] = "Цветовой профиль",
     [UI_MENU_COLOR_PRESET_DESC] = "Задаёт четыре значения ниже. «Яркий»: больше контраста и насыщенности, тени немного "
@@ -554,6 +569,11 @@ static const char *const text_ru[UI_TEXT_COUNT] = {
     [UI_MENU_COLOR_SATURATION_DESC] = "Сила цвета относительно серого; 100 % — без изменений.",
     [UI_MENU_COLOR_GAMMA] = "Гамма",
     [UI_MENU_COLOR_GAMMA_DESC] = "Ниже 1 осветляет тёмные и средние тона, выше 1 затемняет их; 1 — без изменений.",
+    [UI_MENU_POST_PRESET] = "Пресет изображения",
+    [UI_MENU_POST_PRESET_DESC] = "ELZELDAPA: одноимённый пресет ReShade, встроенный в игру: Colourfulness −0,30 "
+                                 "и локальное тональное отображение Exposure Fusion (Marty), в этом порядке, "
+                                 "после настройки цвета выше. Действует на всю картинку, включая интерфейс.",
+    [UI_MENU_POST_PRESET_OFF] = "Выкл.", [UI_MENU_POST_PRESET_ELZELDAPA] = "ELZELDAPA",
     [UI_MENU_HDR_GROUP] = "HDR",
     [UI_MENU_HDR] = "Вывод HDR",
     [UI_MENU_HDR_DESC] = "Яркие блики на HDR-дисплее. Нужен включённый HDR в Windows («Использовать HDR») или "
@@ -656,9 +676,10 @@ static const char *const text_ru[UI_TEXT_COUNT] = {
     [UI_MENU_UPSCALING_NATIVE] = "Родной", [UI_MENU_DLSS_QUALITY] = "Качество", [UI_MENU_DLSS_BALANCED] = "Баланс",
     [UI_MENU_DLSS_PERFORMANCE] = "Производительность", [UI_MENU_UPSCALING_ULTRA] = "Ультрапроизводительность",
     [UI_MENU_UPSCALING_MODE_OFF] = "апскейлер выключен",
-    [UI_MENU_AA] = "Сглаживание игры",
-    [UI_MENU_AA_DESC] = "Собственное сглаживание игры, SMAA, когда апскейлер не работает. «Выкл.» оставляет края "
-                        "зубчатыми.",
+    [UI_MENU_AA] = "Сглаживание",
+    [UI_MENU_AA_DESC] = "Сглаживание на случай, когда апскейлер не работает. SMAA: собственное, игры. CMAA 2: "
+                        "морфологическое сглаживание Intel, которое порт применяет к готовой картинке, включая "
+                        "интерфейс. «Выкл.» оставляет края зубчатыми.",
     [UI_MENU_AA_OFF] = "Выкл.",
     [UI_MENU_AA_BY_UPSCALER] = "края сглаживает апскейлер",
     [UI_MENU_OUTPUT_RES_AUTO] = "Автоматически",
@@ -1019,6 +1040,10 @@ static const char *const text_pt_br[UI_TEXT_COUNT] = {
     [UI_MENU_UPSCALER_FSR] = "AMD FSR 1", [UI_MENU_UPSCALER_BILINEAR] = "Bilinear",
     [UI_MENU_SHARPNESS] = "Nitidez do FSR",
     [UI_MENU_SHARPNESS_DESC] = "Aumento de nitidez após a ampliação do FSR; 0 desliga.",
+    [UI_MENU_SHARPENER] = "Método de nitidez",
+    [UI_MENU_SHARPENER_DESC] = "Qual filtro o controle acima ajusta. RCAS: o da AMD, o que o port sempre usou. "
+                               "Smart Sharp: um filtro bilateral adaptativo ao contraste (do preset ELZELDAPA), "
+                               "mais suave com o ruído.",
 
     [UI_MENU_FPS_LIMIT] = "Taxa de quadros",
     [UI_MENU_FPS_LIMIT_DESC] = "60 FPS usa o patch de 60 fps do jogo; 30 FPS o desliga. Lido na hora.",
@@ -1273,6 +1298,11 @@ static const char *const text_pt_br[UI_TEXT_COUNT] = {
     [UI_MENU_COLOR_GAMMA] = "Gama",
     [UI_MENU_COLOR_GAMMA_DESC] = "Abaixo de 1 clareia os tons escuros e médios, acima de 1 os escurece; 1 não muda "
                                  "nada.",
+    [UI_MENU_POST_PRESET] = "Predefinição de imagem",
+    [UI_MENU_POST_PRESET_DESC] = "ELZELDAPA: o preset de ReShade de mesmo nome, integrado: Colourfulness em "
+                                 "-0,30 e o mapeamento tonal local Exposure Fusion, do Marty, nessa ordem, "
+                                 "depois do ajuste de cor acima. Vale para a imagem inteira, HUD incluído.",
+    [UI_MENU_POST_PRESET_OFF] = "Desligado", [UI_MENU_POST_PRESET_ELZELDAPA] = "ELZELDAPA",
     [UI_MENU_HDR_GROUP] = "HDR",
     [UI_MENU_HDR] = "Saída HDR",
     [UI_MENU_HDR_DESC] = "Realces brilhantes em uma tela HDR. Precisa do HDR ligado no Windows (\"Usar HDR\") ou num "
@@ -1401,9 +1431,10 @@ static const char *const text_pt_br[UI_TEXT_COUNT] = {
     [UI_MENU_DLSS_PERFORMANCE] = "Desempenho",
     [UI_MENU_UPSCALING_ULTRA] = "Ultradesempenho",
     [UI_MENU_UPSCALING_MODE_OFF] = "sem upscaler",
-    [UI_MENU_AA] = "Antisserrilhado do jogo",
-    [UI_MENU_AA_DESC] = "O antisserrilhado do próprio jogo, SMAA, para quando nenhum upscaler roda. Desligado deixa as "
-                        "bordas serrilhadas.",
+    [UI_MENU_AA] = "Antisserrilhado",
+    [UI_MENU_AA_DESC] = "Antisserrilhado para quando nenhum upscaler roda. SMAA: o do próprio jogo. CMAA 2: o "
+                        "antisserrilhado morfológico da Intel, aplicado pelo port sobre a imagem pronta, HUD "
+                        "incluído. Desligado deixa as bordas serrilhadas.",
     [UI_MENU_AA_OFF] = "Desligado",
     [UI_MENU_AA_BY_UPSCALER] = "o upscaler suaviza as bordas",
     [UI_MENU_OUTPUT_RES_AUTO] = "Automático",
@@ -1530,6 +1561,9 @@ static const char *const text_zh_hans[UI_TEXT_COUNT] = {
     [UI_MENU_DRAW_DISTANCE_DESC] = "物体在多远处仍保持精细模型、小物体在多远处仍然可见，以游戏自身数值的百分比表示。数值越高，物体突然出现的情况越少，绘制量也越大。对更改之后游戏加载的内容生效，即从下一次加载画面开始。",
     [UI_MENU_SHARPNESS] = "FSR 锐度",
     [UI_MENU_SHARPNESS_DESC] = "FSR 缩放后的锐化强度；0 为关闭。",
+    [UI_MENU_SHARPENER] = "锐化方式",
+    [UI_MENU_SHARPENER_DESC] = "上方滑块驱动哪种锐化滤镜。RCAS：AMD 的滤镜，本移植一直使用。Smart Sharp：双边"
+                               "对比度自适应锐化（ELZELDAPA 预设所用），对噪点更温和。",
     [UI_MENU_COLOR] = "色彩",
     [UI_MENU_COLOR_PRESET] = "色彩配置",
     [UI_MENU_COLOR_PRESET_DESC] = "同时设置下面四项。鲜艳：对比度和饱和度更高，暗部略微提亮（为 OLED 屏幕调校）。"
@@ -1546,6 +1580,10 @@ static const char *const text_zh_hans[UI_TEXT_COUNT] = {
     [UI_MENU_COLOR_SATURATION_DESC] = "颜色相对灰色的强度；100% 表示不调整。",
     [UI_MENU_COLOR_GAMMA] = "伽马",
     [UI_MENU_COLOR_GAMMA_DESC] = "小于 1 提亮暗部与中间调，大于 1 压暗；1 表示不调整。",
+    [UI_MENU_POST_PRESET] = "图像预设",
+    [UI_MENU_POST_PRESET_DESC] = "ELZELDAPA：将同名 ReShade 预设内置：Colourfulness −0.30 与 Marty 的 Exposure "
+                                 "Fusion 局部色调映射，按此顺序，在上方颜色调整之后应用。作用于整个画面，包括 HUD。",
+    [UI_MENU_POST_PRESET_OFF] = "关闭", [UI_MENU_POST_PRESET_ELZELDAPA] = "ELZELDAPA",
     [UI_MENU_FPS_LIMIT] = "帧率",
     [UI_MENU_FPS_LIMIT_DESC] = "60 FPS 启用游戏的 60 帧补丁；30 FPS 关闭它。即时生效。",
     [UI_MENU_FPS_30] = "30 FPS",
@@ -1978,8 +2016,9 @@ static const char *const text_zh_hans[UI_TEXT_COUNT] = {
     [UI_MENU_DLSS_PERFORMANCE] = "性能",
     [UI_MENU_UPSCALING_ULTRA] = "超级性能",
     [UI_MENU_UPSCALING_MODE_OFF] = "未使用超分辨率",
-    [UI_MENU_AA] = "游戏抗锯齿",
-    [UI_MENU_AA_DESC] = "游戏自带的抗锯齿 SMAA，用于未运行超分辨率时。关闭会使边缘出现锯齿。",
+    [UI_MENU_AA] = "抗锯齿",
+    [UI_MENU_AA_DESC] = "未运行超分辨率时使用的抗锯齿。SMAA：游戏自带。CMAA 2：Intel 的形态学抗锯齿，由本移植"
+                        "作用于最终画面，包括 HUD。关闭会使边缘出现锯齿。",
     [UI_MENU_AA_OFF] = "关闭",
     [UI_MENU_AA_BY_UPSCALER] = "边缘由超分辨率平滑",
     [UI_MENU_OUTPUT_RES_AUTO] = "自动",

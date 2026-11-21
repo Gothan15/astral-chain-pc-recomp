@@ -1,0 +1,51 @@
+#version 450
+// ExposureFusion (preset ELZELDAPA, runtime/vk_preset.c): porte de MartysMods_EXPOSUREFUSION.fx de Pascal
+// Gilcher (propietario, solo para el fork privado de Gothan; ver vk_preset.c). Paso DownsamplePS*H/V del
+// original: bajada separable por 2 con un Kuwahara de 23 muestras — cada mitad (izquierda/derecha o
+// arriba/abajo) vota con su media y su varianza, y gana la de menor varianza, así la pirámide de (sesgo,
+// log-luma) no sangra a través de los bordes fuertes. Un mismo shader hace H y V según la constante.
+layout(local_size_x = 8, local_size_y = 8) in;
+layout(binding = 0) uniform sampler2D src;
+layout(binding = 1, rg16f) uniform writeonly image2D dst;
+layout(push_constant) uniform P {
+    ivec2 srcSize;   // el tamaño del nivel que se lee
+    ivec2 dstSize;   // el tamaño del nivel que se escribe
+    ivec2 dir;       // x=1: pasada horizontal; y=1: vertical
+} pc;
+
+// Math::inside_screen del original: 1 dentro de [0,1]², 0 fuera (las muestras fuera no votan)
+float inside_screen(vec2 uv) {
+    return (all(greaterThanEqual(uv, vec2(0.0))) && all(lessThanEqual(uv, vec2(1.0)))) ? 1.0 : 0.0;
+}
+
+vec2 downsample_kuwahara(vec2 uv, bool horizontal) {
+    vec2 texelsize = 1.0 / vec2(pc.srcSize);
+    vec2 axis = horizontal ? vec2(texelsize.x, 0.0) : vec2(0.0, texelsize.y);
+    vec4 mL = vec4(0.0);
+    vec4 mR = vec4(0.0);
+    vec2 wsum = vec2(0.0);
+    for (int j = -11; j <= 11; j++) {
+        vec2 tuv = uv + float(j) * axis;
+        float w = exp(-float(j * j) / 121.0 * 3.0) * inside_screen(tuv);
+        vec2 t = textureLod(src, tuv, 0.0).xy;
+        w *= (j == 0) ? 0.5 : 1.0;   // el centro vota la mitad en cada mitad
+        float wl = w * ((j <= 0) ? 1.0 : 0.0);
+        float wr = w * ((j >= 0) ? 1.0 : 0.0);
+        mL += vec4(t, t * t) * wl;
+        mR += vec4(t, t * t) * wr;
+        wsum += vec2(wl, wr);
+    }
+    mL /= wsum.x;
+    mR /= wsum.y;
+    float vL = max(0.0, mL.w - mL.y * mL.y);   // varianza de cada mitad (sobre .y, el log-luma)
+    float vR = max(0.0, mR.w - mR.y * mR.y);
+    vec2 w = 1.0 / (0.25 + sqrt(vec2(vL, vR)));
+    return (mL.xy * w.x + mR.xy * w.y) / (w.x + w.y);
+}
+
+void main() {
+    ivec2 p = ivec2(gl_GlobalInvocationID.xy);
+    if (any(greaterThanEqual(p, pc.dstSize))) return;
+    vec2 uv = (vec2(p) + 0.5) / vec2(pc.dstSize);
+    imageStore(dst, p, vec4(downsample_kuwahara(uv, pc.dir.x != 0), 0.0, 0.0));
+}

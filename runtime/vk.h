@@ -128,6 +128,12 @@ void vk_fsr_release(void);   // before the device goes away
 // scales that one instead, crop {0, 0, w, h}); VK_NULL_HANDLE = nothing recorded. src is in GENERAL, fmt its format.
 VkImage vk_color_record(VkCommandBuffer cb, unsigned slot, VkImage src, VkFormat fmt, const int crop[4]);
 void vk_color_release(void);   // before the device goes away
+// The ELZELDAPA image preset (AC_POST_PRESET, vk_preset.c) and CMAA 2 (AC_ANTI_ALIASING=cmaa2): like
+// vk_color_record, each writes src's crop rectangle, processed, into an RGBA16F image of that size in GENERAL
+// and returns it; VK_NULL_HANDLE = nothing recorded (the setting is off, an upscaler owns the AA, or it failed).
+VkImage vk_preset_record(VkCommandBuffer cb, unsigned slot, VkImage src, VkFormat fmt, const int crop[4]);
+VkImage vk_cmaa_record(VkCommandBuffer cb, unsigned slot, VkImage src, VkFormat fmt, const int crop[4]);
+void vk_preset_release(void);   // before the device goes away
 // HDR output (vk_hdr.c). vk_hdr_wanted: AC_HDR, read once. vk_hdr_surface_format: the HDR10 surface format when wanted
 // and offered (1). vk_hdr_set_active: gfx_present.c says whether the swapchain is HDR10 (vk_hdr_active). vk_hdr_encode:
 // like vk_color_record, src's crop as PQ code values (RGBA16F, crop {0, 0, w, h}), the scene set by vk_hdr_set_scene

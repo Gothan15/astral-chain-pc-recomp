@@ -4,6 +4,10 @@
 // reduced by an area average (runtime/shaders/downscale.comp) in EASU's place, then sharpened by RCAS: EASU and the
 // bilinear blit read only the texels around each pixel's centre and would throw part of the supersampling away.
 // AC_UPSCALER=fsr|bilinear picks it, AC_SHARPNESS (0..100, 0 = no RCAS pass) sets RCAS; both apply at the next frame.
+// AC_SHARPENER=smart swaps RCAS for Smart Sharp (runtime/shaders/preset_smart.comp: the ELZELDAPA preset's
+// bilateral contrast-adaptive sharpener, CC BY-ND — private fork only) at the same two places in the present,
+// with AC_SHARPNESS mapped onto its 0..2 strength scale (80 = the preset's own 0.625); the scene sharpening
+// below (vk_fsr_rcas) stays RCAS.
 // A scene an upscaler (DLSS, XeSS, FSR 3) scaled is sharpened by vk_dlaa.c before the game draws its HUD, with RCAS
 // from here (vk_fsr_rcas), when the window copies the picture 1:1: the present then copies it without RCAS
 // (vk_fsr_presharp_set), so the HUD stays as the game drew it and the scene is not sharpened twice. Where the window
@@ -28,6 +32,7 @@
 #include "downscale_spv.h"
 #include "fsr_easu_spv.h"
 #include "fsr_rcas_spv.h"
+#include "preset_smart_spv.h"
 #include "host.h"
 
 #define SLOTS 8
@@ -39,6 +44,7 @@ static struct {
     VkDescriptorSetLayout dsl;
     VkPipelineLayout layout;
     VkPipeline easu, rcas, down;   // down: the area downscale
+    VkPipeline smart;              // Smart Sharp, the AC_SHARPENER alternative to RCAS
     VkSampler sampler;
     VkImage img[2];                // EASU output, RCAS output
     VmaAllocation alloc[2];
@@ -90,6 +96,7 @@ static int init(VkCtx *c) {
         vkCreateSampler(c->device, &si, NULL, &F.sampler) != VK_SUCCESS ||
         !(F.easu = make_pipeline(c, fsr_easu_spv, sizeof fsr_easu_spv)) ||
         !(F.rcas = make_pipeline(c, fsr_rcas_spv, sizeof fsr_rcas_spv)) ||
+        !(F.smart = make_pipeline(c, preset_smart_spv, sizeof preset_smart_spv)) ||
         !(F.down = make_pipeline(c, downscale_spv, sizeof downscale_spv))) {
         rt_log("vk: FSR off: its pipelines could not be created; the present scales bilinearly");
         return 0;
@@ -170,6 +177,9 @@ static int sharpness(void) {
     return s < 0 ? 0 : s > 100 ? 100 : s;
 }
 
+static int smart_on(void) { return !strcmp(cfg_value("AC_SHARPENER"), "smart"); }
+static const char *sharp_name(void) { return smart_on() ? "Smart Sharp" : "RCAS"; }
+
 static void bind_pass(VkCommandBuffer cb, VkPipeline p, VkImageView in, VkImageView out, const float pc[8]);
 
 int vk_fsr_rcas_on(void) { return sharpness() > 0 && !strcmp(cfg_value("AC_UPSCALER"), "fsr") && ready(vk_ctx()); }
@@ -239,11 +249,11 @@ int vk_fsr_record(VkCommandBuffer cb, unsigned slot, VkImage src, VkFormat fmt, 
     if (F.lcw != cw || F.lch != ch || F.ldw != dw || F.ldh != dh) {
         F.lcw = cw, F.lch = ch, F.ldw = dw, F.ldh = dh;
         if (same)
-            rt_log("vk: FSR sharpens %dx%d in place (RCAS %d), crop %d,%d %dx%d", cw, ch, sharp, crop[0], crop[1],
-                   crop[2], crop[3]);
-        else if (down)
-            rt_log("vk: area downscale %dx%d to %ux%u, then RCAS %d, crop %d,%d %dx%d", cw, ch, dw, dh, sharp, crop[0],
+            rt_log("vk: FSR sharpens %dx%d in place (%s %d), crop %d,%d %dx%d", cw, ch, sharp_name(), sharp, crop[0],
                    crop[1], crop[2], crop[3]);
+        else if (down)
+            rt_log("vk: area downscale %dx%d to %ux%u, then %s %d, crop %d,%d %dx%d", cw, ch, dw, dh, sharp_name(),
+                   sharp, crop[0], crop[1], crop[2], crop[3]);
         else
             rt_log("vk: FSR scales %dx%d to %ux%u (sharpness %d), crop %d,%d %dx%d", cw, ch, dw, dh, sharp, crop[0],
                    crop[1], crop[2], crop[3]);
@@ -259,11 +269,19 @@ int vk_fsr_record(VkCommandBuffer cb, unsigned slot, VkImage src, VkFormat fmt, 
         // FSR sharpening does, and the picture keeps the detail the larger render targets produced.
         barrier(cb, F.img[1], VK_IMAGE_LAYOUT_UNDEFINED, VK_IMAGE_LAYOUT_GENERAL, CS | XF, 0, CS,
                 VK_ACCESS_2_SHADER_STORAGE_WRITE_BIT);
-        // RCAS reads the crop rectangle where it lies in the source (crop[0], crop[1]), not from the image's corner
-        float rcas[8] = {(float)dw, (float)dh, (float)(100 - sharp) / 50.0f, 0,
-                         (float)crop[0], (float)crop[1], (float)cw, (float)ch};
-        bind_pass(cb, F.rcas, F.src_view[slot], F.view[1], rcas);
-        vkCmdDispatch(cb, gx, gy, 1);
+        // The sharpening reads the crop rectangle where it lies in the source (crop[0], crop[1]), not from the
+        // image's corner. AC_SHARPENER picks the filter; Smart Sharp takes AC_SHARPNESS on its own scale.
+        if (smart_on()) {
+            float smart[8] = {(float)dw, (float)dh, sharp / 128.0f, 0,
+                              (float)crop[0], (float)crop[1], (float)cw, (float)ch};
+            bind_pass(cb, F.smart, F.src_view[slot], F.view[1], smart);
+            vkCmdDispatch(cb, (dw + 7) / 8, (dh + 7) / 8, 1);
+        } else {
+            float rcas[8] = {(float)dw, (float)dh, (float)(100 - sharp) / 50.0f, 0,
+                             (float)crop[0], (float)crop[1], (float)cw, (float)ch};
+            bind_pass(cb, F.rcas, F.src_view[slot], F.view[1], rcas);
+            vkCmdDispatch(cb, gx, gy, 1);
+        }
         barrier(cb, F.img[1], VK_IMAGE_LAYOUT_GENERAL, VK_IMAGE_LAYOUT_GENERAL, CS,
                 VK_ACCESS_2_SHADER_STORAGE_WRITE_BIT, XF, VK_ACCESS_2_TRANSFER_READ_BIT);
         barrier(cb, src, VK_IMAGE_LAYOUT_GENERAL, VK_IMAGE_LAYOUT_GENERAL, CS, 0,
@@ -286,9 +304,15 @@ int vk_fsr_record(VkCommandBuffer cb, unsigned slot, VkImage src, VkFormat fmt, 
     if (sharp > 0) {
         barrier(cb, F.img[0], VK_IMAGE_LAYOUT_GENERAL, VK_IMAGE_LAYOUT_GENERAL, CS, VK_ACCESS_2_SHADER_STORAGE_WRITE_BIT,
                 CS, VK_ACCESS_2_SHADER_SAMPLED_READ_BIT);
-        float rcas[8] = {(float)dw, (float)dh, (float)(100 - sharp) / 50.0f, 0, 0, 0, (float)dw, (float)dh};
-        bind_pass(cb, F.rcas, F.view[0], F.view[1], rcas);
-        vkCmdDispatch(cb, gx, gy, 1);
+        if (smart_on()) {
+            float smart[8] = {(float)dw, (float)dh, sharp / 128.0f, 0, 0, 0, (float)dw, (float)dh};
+            bind_pass(cb, F.smart, F.view[0], F.view[1], smart);
+            vkCmdDispatch(cb, (dw + 7) / 8, (dh + 7) / 8, 1);
+        } else {
+            float rcas[8] = {(float)dw, (float)dh, (float)(100 - sharp) / 50.0f, 0, 0, 0, (float)dw, (float)dh};
+            bind_pass(cb, F.rcas, F.view[0], F.view[1], rcas);
+            vkCmdDispatch(cb, gx, gy, 1);
+        }
         last = 1;
     }
     barrier(cb, F.img[last], VK_IMAGE_LAYOUT_GENERAL, VK_IMAGE_LAYOUT_GENERAL, CS, VK_ACCESS_2_SHADER_STORAGE_WRITE_BIT,
@@ -312,6 +336,7 @@ void vk_fsr_release(void) {
         if (F.src_view[i]) vkDestroyImageView(c->device, F.src_view[i], NULL);
     if (F.easu) vkDestroyPipeline(c->device, F.easu, NULL);
     if (F.rcas) vkDestroyPipeline(c->device, F.rcas, NULL);
+    if (F.smart) vkDestroyPipeline(c->device, F.smart, NULL);
     if (F.down) vkDestroyPipeline(c->device, F.down, NULL);
     if (F.sampler) vkDestroySampler(c->device, F.sampler, NULL);
     if (F.layout) vkDestroyPipelineLayout(c->device, F.layout, NULL);

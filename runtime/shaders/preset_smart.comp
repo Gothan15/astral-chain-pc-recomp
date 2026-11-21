@@ -1,0 +1,79 @@
+#version 450
+// Smart Sharp (runtime/vk_fsr.c): porte del Smart_Sharp.fx de BlueSkyDefender (CC BY-ND 4.0; solo para el
+// fork privado de Gothan, ver vk_fsr.c) como alternativa al RCAS en el present, con los ajustes del preset
+// ELZELDAPA y la ruta que ese preset usa: calidad 2 (bilateral 5×5), sin mapa de profundidad (en el present
+// no hay profundidad: el enmascarado por distancia del original no se aplica), sin motion sharpen y sin
+// denoiser. El bilateral suaviza el ruido, la máscara CAS limita el afilado cerca de los extremos y el
+// delta va en YCbCr con la luminancia escalada, como en el original.
+layout(local_size_x = 8, local_size_y = 8) in;
+layout(binding = 0) uniform sampler2D src;
+layout(binding = 1, rgba16f) uniform writeonly image2D dst;
+layout(push_constant) uniform P {
+    vec4 size;   // ancho y alto de salida, fuerza (0..2, la escala del original), sin uso
+    vec4 rect;   // el rectángulo de entrada: x, y, ancho, alto
+} pc;
+
+float LI(vec3 c) { return dot(c, vec3(0.2126, 0.7152, 0.0722)); }   // la luminancia del original
+
+float normpdf3(vec3 v, float sigma) { return 0.39894 * exp(-0.5 * dot(v, v) / (sigma * sigma)) / sigma; }
+
+vec3 RGBtoYCbCr(vec3 rgb) {
+    float Y = 0.299 * rgb.x + 0.587 * rgb.y + 0.114 * rgb.z;
+    float Cb = -0.169 * rgb.x - 0.331 * rgb.y + 0.500 * rgb.z;
+    float Cr = 0.500 * rgb.x - 0.419 * rgb.y - 0.081 * rgb.z;
+    return vec3(Y, Cb + 128.0 / 255.0, Cr + 128.0 / 255.0);
+}
+
+vec3 YCbCrtoRGB(vec3 ycc) {
+    vec3 c = ycc - vec3(0.0, 128.0 / 255.0, 128.0 / 255.0);
+    return vec3(c.x + 1.400 * c.z, c.x - 0.343 * c.y - 0.711 * c.z, c.x + 1.765 * c.y);
+}
+
+void main() {
+    ivec2 p = ivec2(gl_GlobalInvocationID.xy);
+    if (p.x >= int(pc.size.x) || p.y >= int(pc.size.y)) return;
+    ivec2 rlo = ivec2(pc.rect.xy);
+    ivec2 rhi = rlo + ivec2(pc.rect.zw) - 1;
+    ivec2 sp = rlo + p;   // el téxel de entrada (1:1, como el RCAS de esta misma ruta)
+    vec2 srcDim = vec2(textureSize(src, 0));
+
+    // fetch exacto acotado al rectángulo (fuera de él se repite el borde, como hace FsrRcasLoadF)
+    #define FETCH(dx, dy) texelFetch(src, clamp(sp + ivec2(dx, dy), rlo, rhi), 0).rgb
+    vec3 c = FETCH(0, 0);
+
+    // el gradiente a ±2 téxeles: la máscara de borde del original
+    float t = LI(FETCH(0, -2)), s = LI(FETCH(0, 2)), l = LI(FETCH(-2, 0)), r = LI(FETCH(2, 0));
+    float edge = length(vec2(t - s, -(r - l)));
+
+    // el bilateral 5×5 (calidad 2): muestras bilineales a medio téxel (los offsets (i,j)/kSize del
+    // original con kSize=2), peso gaussiano por diferencia de color con BSIGMA=0.25 (ruta B_Accuracy=0)
+    vec3 final_color = vec3(0.0);
+    float Z = 0.0;
+    vec3 cc = vec3(0.0);
+    for (int i = -2; i <= 2; i++)
+        for (int j = -2; j <= 2; j++) {
+            vec2 spos = clamp(vec2(sp) + 0.5 + vec2(float(i), float(j)) * 0.5, vec2(rlo) + 0.5, vec2(rhi) + 0.5);
+            cc = textureLod(src, spos / srcDim, 0.0).rgb;
+            float factor = normpdf3(cc - c, 0.25);
+            Z += factor;
+            final_color += factor * cc;
+        }
+    final_color = clamp(final_color / Z, 0.0, 1.0);   // el LVB (low variance blur) del original
+
+    // la máscara CAS: distancia mínima a los extremos de brillo, dividida por el máximo
+    float mnRGB = min(min(LI(c), LI(final_color)), LI(cc));   // cc: la última muestra del bilateral, como en el original
+    float mxRGB = max(max(LI(c), LI(final_color)), LI(cc));
+    float cam = (mxRGB > 0.0) ? clamp(min(mnRGB, 1.0 - mxRGB) / mxRGB, 0.0, 1.0) : 0.0;
+
+    float power = pc.size.z * 3.1;   // Sharpen_Power del original (Sharpness × 3.1)
+    vec3 delta = YCbCrtoRGB(RGBtoYCbCr(c - final_color) * vec3(power, 1.0, 1.0));
+    delta = clamp(delta, 0.0, 1.0);   // ClampSharp del preset
+    // el factor de ruido: con el denoiser apagado (F_DeNoise=0) la variable Noise del original queda a 0
+    // y su reasignación posterior (lerp(1, Noise, Denoise_Power=0.5)) la deja en 0.5; se reproduce tal cual
+    float noise = 0.5;
+    float edge01 = (edge > 0.125) ? 1.0 : 0.0;
+    delta = mix(max(vec3(0.0), mix(vec3(0.0), delta, noise)), delta, edge01);
+
+    vec3 outc = mix(c, c + delta, cam * clamp(power, 0.0, 1.0));
+    imageStore(dst, p, vec4(outc, 1.0));
+}
