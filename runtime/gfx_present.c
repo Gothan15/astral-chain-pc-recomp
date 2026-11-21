@@ -685,6 +685,17 @@ static void present_image(VkImage src, VkImageLayout layout, VkFormat fmt, int w
     VkImage graded = !general ? VK_NULL_HANDLE : g_sc_hdr ? vk_hdr_encode(cb, slot, src, fmt, rect)
                                                          : vk_color_record(cb, slot, src, fmt, rect);
     const int grect[4] = {0, 0, cw, ch};
+    // CMAA 2 (AC_ANTI_ALIASING=cmaa2, vk_preset.c) on the picture as the game drew it, then the ELZELDAPA image
+    // preset (AC_POST_PRESET, vk_preset.c) after the colour adjustment: each stage's copy takes the picture's
+    // place below, the way the colour adjustment's does. SDR only: the HDR path encodes straight to PQ.
+    if (general && !g_sc_hdr) {
+        VkImage stage = vk_cmaa_record(cb, slot, graded ? graded : src,
+                                       graded ? VK_FORMAT_R16G16B16A16_SFLOAT : fmt, graded ? grect : rect);
+        if (stage) graded = stage;
+        stage = vk_preset_record(cb, slot, graded ? graded : src, graded ? VK_FORMAT_R16G16B16A16_SFLOAT : fmt,
+                                 graded ? grect : rect);
+        if (stage) graded = stage;
+    }
     VkImage psrc = graded ? graded : src;
     VkFormat pfmt = graded ? VK_FORMAT_R16G16B16A16_SFLOAT : fmt;
     const int *prect = graded ? grect : rect;
@@ -837,6 +848,7 @@ void gfx_window_release_vk(void) {
         menu_vk_release();
         vk_fsr_release();
         vk_color_release();
+        vk_preset_release();
         vk_hdr_release();
         vk_contact_release();
         vk_ao_release();

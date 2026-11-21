@@ -34,6 +34,10 @@ static struct {
     int paired;                        // la profundidad lineal de la escena recordada ya se escribió en su pase
     int pending;                       // the composite into scene ran; the march waits for the next pass
     uint64_t c4;
+    // Diagnóstico de una sola vez por puerta (2026-11-20: en la sesión de Gothan la marcha no disparó y
+    // ninguna puerta escribía nada): cada línea marca hasta dónde llegó la cadena en una corrida suya.
+    int d_scene, d_storage, d_pair, d_comp, d_inpass, d_sanity, d_views;
+    uint64_t c4_size;                  // el último tamaño visto en el ubo[1][1] de fragmento
 } C;
 
 int vk_contact_strength(void) {
@@ -116,8 +120,15 @@ static const VkTexImage *scene_target(const VkExec *ex) {
     for (uint32_t i = 0; i < ex->pass_ncolor && i < 8; i++) {
         const VkExecTarget *t = &ex->color[i];
         if (!t->image || t->level || t->width != ex->pass_w || t->height != ex->pass_h) continue;
-        if (t->format == VK_FORMAT_B10G11R11_UFLOAT_PACK32 && (t->img->usage & VK_IMAGE_USAGE_STORAGE_BIT))
-            return t->img;
+        if (t->format == VK_FORMAT_B10G11R11_UFLOAT_PACK32) {
+            if (t->img->usage & VK_IMAGE_USAGE_STORAGE_BIT) return t->img;
+            if (!C.d_storage) {
+                C.d_storage = 1;
+                rt_log("vk: contact diag: the %ux%u B10G11R11 scene colour has no STORAGE usage; the march "
+                       "cannot write it",
+                       t->width, t->height);
+            }
+        }
     }
     return NULL;
 }
@@ -144,16 +155,36 @@ static void mem_barrier(VkCommandBuffer cb) {
 void vk_contact_flush(VkExec *ex) {
     if (!C.pending) return;
     C.pending = 0;
-    if (ex->in_pass) return;
+    if (ex->in_pass) {
+        if (!C.d_inpass) {
+            C.d_inpass = 1;
+            rt_log("vk: contact diag: the march was dropped: a pass was still open at the flush point");
+        }
+        return;
+    }
     const float *u = (const float *)(uintptr_t)C.c4;
     float lx = -u[44 * 4 + 0], ly = -u[44 * 4 + 1], lz = -u[44 * 4 + 2], ll = sqrtf(lx * lx + ly * ly + lz * lz);
     float px = u[7 * 4 + 0], py = u[8 * 4 + 1], zfar = u[14 * 4 + 1];
-    if (!(ll > 1e-6f) || !(px > 0) || !(py > 0) || !(zfar > 1)) return;
+    if (!(ll > 1e-6f) || !(px > 0) || !(py > 0) || !(zfar > 1)) {
+        if (!C.d_sanity) {
+            C.d_sanity = 1;
+            rt_log("vk: contact diag: the march is skipped: the camera block reads sun length %g, projection "
+                   "%g/%g, far %g",
+                   (double)ll, (double)px, (double)py, (double)zfar);
+        }
+        return;
+    }
     VkImageView in = vk_exec_target_view(C.depth, VK_FORMAT_R32_SFLOAT, VK_IMAGE_VIEW_TYPE_2D, VK_IMAGE_ASPECT_COLOR_BIT,
                                          0, 0, 1, 0);
     VkImageView out = vk_exec_target_view(C.scene, VK_FORMAT_B10G11R11_UFLOAT_PACK32, VK_IMAGE_VIEW_TYPE_2D,
                                           VK_IMAGE_ASPECT_COLOR_BIT, 0, 0, 1, 0);
-    if (!in || !out) return;
+    if (!in || !out) {
+        if (!C.d_views) {
+            C.d_views = 1;
+            rt_log("vk: contact diag: the march is skipped: a target view could not be made");
+        }
+        return;
+    }
     VkCommandBuffer cb = ex->cb;
     float pcv[16] = {px, py, zfar, (float)C.strength / 100.0f,
                      lx / ll, ly / ll, lz / ll, 0.6f,
@@ -194,9 +225,16 @@ void vk_contact_pass_begin(VkExec *ex) {
     // The camera block: c4 of the fragment stage, 0x940 bytes. The composite binds it only after its pass begins, so
     // the newest one seen at any pass start serves.
     const p_bind_buf *b = &ex->ubo[1][1];
-    if (b->addr && b->size == 0x940) C.c4 = b->addr;
+    if (b->addr) {
+        C.c4_size = b->size;
+        if (b->size == 0x940) C.c4 = b->addr;
+    }
     const VkTexImage *sc = scene_target(ex);
     if (sc && !(C.paired && sc == C.scene)) {
+        if (!C.d_scene) {
+            C.d_scene = 1;
+            rt_log("vk: contact diag: scene pass recognized (%ux%u)", ex->pass_w, ex->pass_h);
+        }
         // Pase de escena (su profundidad lineal de este frame aún no se escribió, o es una escena nueva):
         // empieza la pareja. La marca paired es la que distingue este pase del composite: ambos escriben
         // el mismo color con la misma profundidad adjunta, y solo el orden (la R32F llega entre los dos)
@@ -208,6 +246,15 @@ void vk_contact_pass_begin(VkExec *ex) {
     }
     if (is_composite(ex)) {
         C.pending = C.c4 != 0;
+        if (!C.d_comp) {
+            C.d_comp = 1;
+            if (C.c4)
+                rt_log("vk: contact diag: composite seen; the march is pending");
+            else
+                rt_log("vk: contact diag: composite seen but no 0x940 camera block at the fragment ubo[1][1] "
+                       "(last size there 0x%llx); the march stays off",
+                       (unsigned long long)C.c4_size);
+        }
         C.paired = 0;   // consumida: la próxima escritura de la escena ya es el pase de escena de otro frame
         return;
     }
@@ -215,6 +262,10 @@ void vk_contact_pass_begin(VkExec *ex) {
     if (ld) {
         C.depth = ld;   // la profundidad lineal de esta escena, escrita en su propio pase
         C.paired = 1;
+        if (!C.d_pair) {
+            C.d_pair = 1;
+            rt_log("vk: contact diag: linear depth paired (%ux%u)", C.w, C.h);
+        }
         return;
     }
     vk_contact_flush(ex);

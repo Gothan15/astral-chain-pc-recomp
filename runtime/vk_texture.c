@@ -706,6 +706,15 @@ static Tex *create_tex(const tex_t *t, const TexKey *k, int defer_init) {
     if (f.vk == VK_FORMAT_B10G11R11_UFLOAT_PACK32 && (usage & VK_IMAGE_USAGE_COLOR_ATTACHMENT_BIT) && samples == 1 &&
         (ff & VK_FORMAT_FEATURE_STORAGE_IMAGE_BIT) && w >= 640 && vk_contact_strength())
         usage |= VK_IMAGE_USAGE_STORAGE_BIT;
+    // Diagnóstico de una sola vez: con todo lo demás cumplido, lo único que puede dejar la escena sin
+    // STORAGE es que el dispositivo no ofrezca la característica de almacenamiento para este formato.
+    if (f.vk == VK_FORMAT_B10G11R11_UFLOAT_PACK32 && (usage & VK_IMAGE_USAGE_COLOR_ATTACHMENT_BIT) && samples == 1 &&
+        w >= 640 && vk_contact_strength() && !(usage & VK_IMAGE_USAGE_STORAGE_BIT)) {
+        static int logged;
+        if (!logged)
+            logged = 1, rt_log("vk: contact diag: the device gives B10G11R11 no STORAGE image feature; contact "
+                               "shadows cannot write the scene colour");
+    }
     VkImageCreateFlags flags = ds ? 0 : VK_IMAGE_CREATE_MUTABLE_FORMAT_BIT;   // format-reinterpreting views
     // Cube compatible only for cube targets: the replay makes cube views of nothing else (vk_exec_draw.c get_view checks
     // the image's own view type). The flag on every square array of 6+ layers changed how AMD's Windows driver lays such

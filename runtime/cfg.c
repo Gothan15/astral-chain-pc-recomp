@@ -47,12 +47,12 @@ static const char *const known[] = {
     "LIB_PREBUILD_KEEP", "LIB_PREBUILD_THREADS", "LOCALE", "LOD_GUARD", "LOW_LATENCY", "LOW_LATENCY_BACKEND", "LSTICK_DEADZONE", "MEMORY", "MENU_LANG", "MENU_TEST",
     "MENU_TEST_DIR", "MENU_TEST_FOCUS", "MENU_TEST_SET", "MINIMAL_LAYOUT", "MIRROR_CHUNKS", "MIRROR_GAP", "MIRROR_LAZY", "MODS_DIR", "MODS_DISABLED", "MODS_ORDER", "MODS_REBUILD", "MOTION", "MOTION_BLUR", "MOUSE_CAMERA", "MOUSE_SENS", "MOVIE_HOST", "MOVIE_PACE", "MOVIE_TRACK",
     "NOHUD_PATCH", "ONE_PER_CORE", "OPERATION_MODE", "OUTPUT_RES", "PAD_LAYOUT", "PATCH_OUTPUT", "PATCH_SCENE", "PCSS", "PCSS_K", "PERF_OVERLAY", "PERF_SLOW_MS", "PIPELINE_CACHE", "PIPE_MEMO", "PIPE_PREBUILD", "PIPE_SKIP", "PIPE_SYNC", "PIPE_WAIT",
-    "POST_DEBUG", "PRESENT_SHOT", "PREWARM_XLATE", "PROFILE", "PROFILE_CHAINS", "PROFILE_DIR", "PROFILE_FRAMES",
+    "POST_DEBUG", "POST_PRESET", "PRESENT_SHOT", "PREWARM_XLATE", "PROFILE", "PROFILE_CHAINS", "PROFILE_DIR", "PROFILE_FRAMES",
     "PROFILE_MAIN", "PROFILE_RENDER", "PROMPTS", "PUSH_SKIP", "PUSH_STAGE", "RC_APPLY", "RC_DEBUG", "RC_DEBUG_CASCADE", "RC_LIGHT", "RC_TEMPORAL", "RDOC", "RDOC_DIR", "RDOC_DLL", "REALTIME", "REC_END", "REEXEC",
     "RENDER_SCALE", "REPLAY_ASYNC",
     "REPLAY_CHECK", "RES", "RES1062", "RESOLVE_CHECK", "RESTART_WAIT", "ROMFS", "ROMFS_DUMP", "ROMFS_INDEX", "ROMFS_MMAP", "ROMFS_MODS", "ROMFS_PATCHES",
     "ROMFS_PROOF_DIR", "ROMFS_VERIFY", "RSTICK_DEADZONE", "RUMBLE", "RUMBLE_CURVE", "RUMBLE_STRENGTH", "RUMBLE_TRIGGERS", "SHADER_CACHE",
-    "SHADER_MEMO", "SHADOW", "SHADOW_RANGE", "SHADOW_RES", "SHADOW_SCALE", "SHADOW_SNAP", "SHARED_FONTS", "SHARPNESS", "SHOTS", "SHOTS_DIR",
+    "SHADER_MEMO", "SHADOW", "SHADOW_RANGE", "SHADOW_RES", "SHADOW_SCALE", "SHADOW_SNAP", "SHARED_FONTS", "SHARPENER", "SHARPNESS", "SHOTS", "SHOTS_DIR",
     "SHOTS_FULL", "SKIP_FS", "SKIP_VS", "SPEED_PROBE", "SPIN", "SPIN_HANDOFF_US", "SPIN_SLEEP_US", "SPLIT_DRAWS", "SPLIT_US", "STICK_DEADZONE", "STICK_SENS",
     "SWKBD_ANSWER",
     "SWKBD_TEST", "TEST_AUDIO_STALL", "TEST_FREEZE", "TEST_HITCH", "TEST_PAD", "TEST_PREPARE_SHADERS", "TEX_ALIAS", "TEX_CACHE_MB", "TEX_MEMO", "TEX_MIP_SKIP", "TEX_PREFETCH", "TEX_VRAM_PRESSURE", "TIMER_1MS", "TRACE", "UBO_SNAPSHOT", "UPSCALER", "UPSCALING", "UPSCALING_FAIL",
@@ -71,8 +71,9 @@ static const struct { const char *key, *section; } sections[] = {
     {"FULLSCREEN", "display"}, {"WINDOW_SIZE", "display"}, {"PERF_OVERLAY", "display"}, {"VK_PRESENT", "display"},
     {"LOW_LATENCY", "display"},
     {"GPU_INDEX", "display"}, {"OUTPUT_RES", "display"}, {"RENDER_SCALE", "display"}, {"UPSCALER", "display"},
-    {"SHARPNESS", "display"}, {"ASPECT", "display"}, {"FOV", "display"}, {"DRAW_DISTANCE", "display"},
+    {"SHARPNESS", "display"}, {"SHARPENER", "display"}, {"ASPECT", "display"}, {"FOV", "display"}, {"DRAW_DISTANCE", "display"},
     {"ANISO", "display"},
+    {"POST_PRESET", "display"},
     {"COLOR_PRESET", "display"},
     {"COLOR_BRIGHTNESS", "display"}, {"COLOR_CONTRAST", "display"}, {"COLOR_SATURATION", "display"},
     {"COLOR_GAMMA", "display"}, {"HDR", "display"}, {"HDR_PEAK_NITS", "display"}, {"HDR_GAME_NITS", "display"},
@@ -124,16 +125,19 @@ static const CfgMeta metas[] = {
     // the size the game renders itself (resolution.c: TotK's output set, or on 1.0.1 the res set, res_pick)
     {"OUTPUT_RES", "1920x1080", NULL, RESTART}, {"RENDER_SCALE", "game", "game|50|67|75|100|125|150|200", RESTART},
     {"UPSCALER", "fsr", "fsr|bilinear", LIVE}, {"SHARPNESS", "80", "0..100", LIVE},
+    {"SHARPENER", "rcas", "rcas|smart", LIVE},   // vk_fsr.c: which sharpener AC_SHARPNESS drives
     // the scene's temporal upscaler and its mode (vk_dlaa.c taa_pick, resolution.c scene_init), native (DLAA, XeSS or
     // FSR 3 Native AA) first, and the game's anti-aliasing for when none runs. The upscaler is live between what can run
     // in this run: NGX (dlss, auto) and libxess.dll (xess) are loaded at start for the choice made then; FSR 3 is built
     // in. The mode sets the size the game makes its scene targets at, once, at start. The values are in the menu's order.
     {"UPSCALING", "off", "off|auto|dlss|xess|fsr3", LIVE},
     {"UPSCALING_QUALITY", "native", "native|quality|balanced|performance|ultra_performance", RESTART},
-    {"ANTI_ALIASING", "smaa", "off|smaa", LIVE},
+    {"ANTI_ALIASING", "smaa", "off|smaa|cmaa2", LIVE},
     {"ASPECT", "wide", "fit|stretch|wide", LIVE}, {"FOV", "100", "70..140", LIVE},
     {"DRAW_DISTANCE", "100", "100..400", LIVE},   // resolution.c res_drawdist_live: on what loads after a change
     {"ANISO", "auto", "auto|game|2|4|8|16", RESTART},   // vk_texture.c sampler_features
+    // the ELZELDAPA image preset (vk_preset.c): Colourfulness + ExposureFusion after the colour adjustment
+    {"POST_PRESET", "off", "off|elzeldapa", LIVE},
     // colour adjustment (vk_color.c); the preset is the menu's, the four values are what the present uses
     {"COLOR_PRESET", "default", "default|vivid|clarity|custom", LIVE}, {"COLOR_BRIGHTNESS", "0", "-30..30", LIVE},
     {"COLOR_CONTRAST", "100", "70..150", LIVE}, {"COLOR_SATURATION", "100", "50..200", LIVE},
@@ -946,7 +950,7 @@ int cfg_smaa(void) {
     static uint64_t cache = UINT64_MAX;   // version << 1 | answer
     uint64_t c = __atomic_load_n(&cache, __ATOMIC_RELAXED), v = cfg_version();
     if (c >> 1 == v) return (int)(c & 1);
-    int on = strcmp(cfg_value(PREFIX "ANTI_ALIASING"), "off") != 0;
+    int on = !strcmp(cfg_value(PREFIX "ANTI_ALIASING"), "smaa");   // cmaa2 is the port's AA (vk_preset.c), not the game's
     __atomic_store_n(&cache, v << 1 | (uint64_t)on, __ATOMIC_RELAXED);
     return on;
 }
