@@ -379,6 +379,10 @@ static const char *const text_en[UI_TEXT_COUNT] = {
     [UI_MENU_GPL] = "Graphics pipeline library",
     [UI_MENU_GPL_DESC] = "Uses the Vulkan pipeline library extension; turn off if your driver misbehaves with it.",
     [UI_MENU_ASTC] = "ASTC texture decoding", [UI_MENU_ASTC_DESC] = "Where compressed ASTC textures are decoded.",
+    [UI_MENU_TEX_LOD_BIAS] = "Texture sharpness (LOD bias)",
+    [UI_MENU_TEX_LOD_BIAS_DESC] = "Shifts every texture toward its finer mip levels: negative values make "
+                                  "surfaces sharper at a distance, at the cost of some shimmer. Pair it with "
+                                  "16x anisotropy. Takes effect at the next start.",
     [UI_MENU_TEX_COMPRESSION] = "Texture compression",
     [UI_MENU_TEX_COMPRESSION_DESC] = "How the game's ASTC textures are stored in video memory. BC1 is the lightest, "
                                      "BC3 keeps the alpha channel, BC7 is the sharpest and the heaviest to encode. Off "
@@ -851,6 +855,10 @@ static const char *const text_ru[UI_TEXT_COUNT] = {
     [UI_MENU_GPL] = "Библиотека графических конвейеров",
     [UI_MENU_GPL_DESC] = "Использует расширение Vulkan для библиотек конвейеров; выключите, если драйвер с ним сбоит.",
     [UI_MENU_ASTC] = "Распаковка текстур ASTC", [UI_MENU_ASTC_DESC] = "Где распаковываются сжатые текстуры ASTC.",
+    [UI_MENU_TEX_LOD_BIAS] = "Резкость текстур (смещение LOD)",
+    [UI_MENU_TEX_LOD_BIAS_DESC] = "Сдвигает каждую текстуру к более мелким уровням мип-карт: отрицательные "
+                                  "значения делают поверхности резче на расстоянии ценой небольшого мерцания. "
+                                  "Сочетайте с анизотропией 16x. Действует со следующего запуска.",
     [UI_MENU_TEX_COMPRESSION] = "Сжатие текстур",
     [UI_MENU_TEX_COMPRESSION_DESC] = "Как текстуры ASTC игры хранятся в видеопамяти. BC1 — самое лёгкое, BC3 "
                                      "сохраняет альфа-канал, BC7 — самое чёткое и самое тяжёлое для кодирования. "
@@ -1232,6 +1240,11 @@ static const char *const text_pt_br[UI_TEXT_COUNT] = {
     [UI_MENU_GPL_DESC] = "Usa a extensão de biblioteca de pipelines do Vulkan; desligue se o seu driver tiver problemas com ela.",
     [UI_MENU_ASTC] = "Decodificação de texturas ASTC",
     [UI_MENU_ASTC_DESC] = "Onde as texturas comprimidas em ASTC são decodificadas.",
+    [UI_MENU_TEX_LOD_BIAS] = "Nitidez das texturas (viés de LOD)",
+    [UI_MENU_TEX_LOD_BIAS_DESC] = "Desloca cada textura para os níveis de mip mais finos: valores negativos "
+                                  "deixam as superfícies mais nítidas à distância, ao custo de um pouco de "
+                                  "cintilação. Combine com anisotropia 16x. Vale a partir da próxima "
+                                  "inicialização.",
     [UI_MENU_TEX_COMPRESSION] = "Compressão de texturas",
     [UI_MENU_TEX_COMPRESSION_DESC] = "Como as texturas ASTC do jogo ficam na memória de vídeo. BC1 é a mais leve, "
                                      "BC3 mantém o canal alfa, BC7 é a mais nítida e a mais pesada de codificar. "
@@ -1830,6 +1843,9 @@ static const char *const text_zh_hans[UI_TEXT_COUNT] = {
     [UI_MENU_GPL_DESC] = "使用 Vulkan 管线库扩展；驱动对此有问题时请关闭。",
     [UI_MENU_ASTC] = "ASTC 纹理解码",
     [UI_MENU_ASTC_DESC] = "压缩的 ASTC 纹理在哪里解码。",
+    [UI_MENU_TEX_LOD_BIAS] = "纹理锐度（LOD 偏移）",
+    [UI_MENU_TEX_LOD_BIAS_DESC] = "把每张纹理推向更细的 mip 层级：负值让远处表面更锐利，代价是些许闪烁。"
+                                  "建议配合 16x 各向异性。下次启动生效。",
     [UI_MENU_TEX_COMPRESSION] = "纹理压缩",
     [UI_MENU_TEX_COMPRESSION_DESC] = "游戏的 ASTC 纹理在显存中的存放方式。BC1 最轻，BC3 保留 alpha 通道，BC7 "
                                      "最清晰、编码最重。关闭则不压缩（RGBA8），占用显存多得多。下次启动生效。",

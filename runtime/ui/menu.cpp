@@ -763,6 +763,8 @@ static void tab_screen(float scale) {
     static const char *const aniso[] = {"auto", "game", "2", "4", "8", "16"};
     const char *aniso_names[] = {menu_text(UI_MENU_ANISO_AUTO), menu_text(UI_MENU_ANISO_GAME), "2x", "4x", "8x", "16x"};
     opt_choice_list("AC_ANISO", UI_MENU_ANISO, aniso, aniso_names, 6, UI_MENU_ANISO_DESC);
+    // Sesgo de LOD de texturas (vk_texture.c): negativo = mips más finos, más nitidez con algo de shimmer.
+    opt_slider("AC_TEX_LOD_BIAS", UI_MENU_TEX_LOD_BIAS, -2, 0, UI_MENU_TEX_LOD_BIAS_DESC, 0.25f, "%.2f");
     // Compresión de texturas del fork (vk_astc.c): los valores que acepta la clave son auto, bc1, 1 (BC3
     // forzado), bc7 y 0 (sin compresión, RGBA8). La caché BC7 precómputada (bc7_cache.h) solo actúa con BC7.
     static const char *const astc_bc[] = {"auto", "bc1", "1", "bc7", "0"};

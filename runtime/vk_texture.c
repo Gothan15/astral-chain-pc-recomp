@@ -2748,7 +2748,9 @@ static VkCompareOp compare_op(uint32_t f) {
 }
 
 // aniso: AC_ANISO as a level, 0 = the game's; aniso_add: AC_ANISO=auto, the levels added to the game's (doublings)
-static struct { int init, mirror_clamp_edge, minmax, border_no_format, aniso_add; float aniso; } sf;
+// aniso: AC_ANISO as a level, 0 = the game's; aniso_add: AC_ANISO=auto, the levels added to the game's (doublings)
+// lod_bias: AC_TEX_LOD_BIAS, el desplazamiento global hacia los mips finos (0 = el del juego)
+static struct { int init, mirror_clamp_edge, minmax, border_no_format, aniso_add; float aniso, lod_bias; } sf;
 
 static void sampler_features(VkCtx *c) {
     if (sf.init) return;
@@ -2779,6 +2781,12 @@ static void sampler_features(VkCtx *c) {
     if (sf.aniso > 1) rt_log("vk: anisotropic filtering: %s", an);
     else if (sf.aniso_add) rt_log("vk: anisotropic filtering: the game's level times %d (AC_ANISO=auto, output_res)", 1 << sf.aniso_add);
     else rt_log("vk: anisotropic filtering: the game's");
+    // AC_TEX_LOD_BIAS: un desplazamiento negativo empuja el muestreo hacia los mips finos (más nitidez a
+    // costa de algo de shimmer); se acota a [-4, 0] para no poder empeorar el detalle desde el ini.
+    sf.lod_bias = (float)atof(cfg_value("AC_TEX_LOD_BIAS"));
+    if (sf.lod_bias > 0) sf.lod_bias = 0;
+    if (sf.lod_bias < -4) sf.lod_bias = -4;
+    if (sf.lod_bias) rt_log("vk: texture LOD bias: %.2f (AC_TEX_LOD_BIAS)", (double)sf.lod_bias);
     sf.init = 1;
 }
 
@@ -2812,6 +2820,9 @@ static VkSampler make_sampler(VkCtx *c, const samp_par *d) {
     if (mf <= NVN_MIN_FILTER_LINEAR) si.maxLod = si.minLod + 0.25f;   // not mipmapped: stay on the base level
     if (si.maxLod < si.minLod) si.maxLod = si.minLod;
     float lim = c->props.limits.maxSamplerLodBias, bias = d->lod_bias;   // with the upscaling bias (sampler_for)
+    // AC_TEX_LOD_BIAS solo en samplers con mipmaps (mf >= 2) y sin comparación de profundidad: las
+    // superficies. Los mapas de datos sin mipmaps y los samplers de sombras quedan con el sesgo del juego.
+    if (sf.lod_bias && !d->cmp_mode && mf >= 2) bias += sf.lod_bias;
     si.mipLodBias = fmaxf(-lim, fminf(lim, bias));
     // AC_ANISO raises the level for filtered, mipmapped colour samplers that repeat on U and V: the surface textures,
     // which tile, so ground and walls seen at a shallow angle stay sharp into the distance. Depth-compare (shadow)
