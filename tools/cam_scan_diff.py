@@ -48,6 +48,11 @@ def difieren(a, b):
     sitios = []
     for i in range(0, n, BLOQUE):
         trozo_a, trozo_b = a[i:i + BLOQUE], b[i:i + BLOQUE]
+        # Los dos trozos pueden no medir lo mismo (el mismo chunk cambia de tamaño entre
+        # volcados): se comparan solo los bytes que tienen ambos, o el XOR de enteros se
+        # sale del tamaño del más corto y to_bytes revienta con OverflowError.
+        m = min(len(trozo_a), len(trozo_b))
+        trozo_a, trozo_b = trozo_a[:m], trozo_b[:m]
         if trozo_a == trozo_b:
             continue
         x = int.from_bytes(trozo_a, 'little') ^ int.from_bytes(trozo_b, 'little')
