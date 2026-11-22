@@ -796,6 +796,8 @@ static void tab_game(float scale) {
     opt_choice("AC_OPERATION_MODE", UI_MENU_OPERATION_MODE, mode, 2, UI_MENU_OPERATION_MODE_DESC);
     opt_toggle("AC_ASSUME_FOCUS", UI_MENU_ASSUME_FOCUS, UI_MENU_ASSUME_FOCUS_DESC);
     opt_toggle("AC_HUD", UI_MENU_HUD, UI_MENU_HUD_DESC);
+    // the console window (main.c): decided at startup, so the change counts from the next start
+    opt_toggle("AC_CONSOLE", UI_MENU_CONSOLE, UI_MENU_CONSOLE_DESC);
     opt_end();
 }
 

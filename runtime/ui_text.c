@@ -178,6 +178,8 @@ static const char *const text_en[UI_TEXT_COUNT] = {
     [UI_MENU_MODE_DOCKED] = "Docked", [UI_MENU_MODE_HANDHELD] = "Handheld",
     [UI_MENU_HUD] = "HUD",
     [UI_MENU_HUD_DESC] = "Off, the game's HUD is not drawn during play; the menus stay. F12 toggles it.",
+    [UI_MENU_CONSOLE] = "Console window",
+    [UI_MENU_CONSOLE_DESC] = "Show the console window when the game starts. The log is written to its file either way.",
     [UI_MENU_ASSUME_FOCUS] = "Keep running out of focus",
     [UI_MENU_ASSUME_FOCUS_DESC] = "On (the default), the game keeps running while you are in another window, and the "
                                   "keyboard stays quiet until the window is in front again. Off, it pauses when its "
@@ -650,6 +652,8 @@ static const char *const text_ru[UI_TEXT_COUNT] = {
     [UI_MENU_MODE_DOCKED] = "В док-станции", [UI_MENU_MODE_HANDHELD] = "Портативный",
     [UI_MENU_HUD] = "Интерфейс игры",
     [UI_MENU_HUD_DESC] = "Выключено: интерфейс игры во время игры не рисуется; меню остаются. F12 переключает.",
+    [UI_MENU_CONSOLE] = "Окно консоли",
+    [UI_MENU_CONSOLE_DESC] = "Показывать окно консоли при запуске игры. Журнал в любом случае пишется в файл.",
     [UI_MENU_ASSUME_FOCUS] = "Работать без фокуса",
     [UI_MENU_ASSUME_FOCUS_DESC] = "Включено (по умолчанию): игра идёт, пока вы в другом окне, а клавиатура не "
                                   "действует, пока окно не вернётся на передний план. Выключено: игра встаёт на паузу, "
@@ -1050,6 +1054,8 @@ static const char *const text_pt_br[UI_TEXT_COUNT] = {
     [UI_MENU_HUD] = "HUD",
     [UI_MENU_HUD_DESC] = "Desligado, o HUD do jogo não é desenhado durante a partida; os menus continuam. F12 "
                          "alterna.",
+    [UI_MENU_CONSOLE] = "Janela do console",
+    [UI_MENU_CONSOLE_DESC] = "Mostrar a janela do console ao iniciar o jogo. O registro é gravado no arquivo de qualquer forma.",
     [UI_MENU_ASSUME_FOCUS] = "Continuar rodando fora de foco",
     [UI_MENU_ASSUME_FOCUS_DESC] = "Ligado (o padrão), o jogo continua rodando enquanto você está em outra janela, e o "
                                   "teclado fica sem efeito até a janela voltar para a frente. Desligado, ele pausa quando "
@@ -1603,6 +1609,8 @@ static const char *const text_zh_hans[UI_TEXT_COUNT] = {
     [UI_MENU_MODE_HANDHELD] = "掌机模式",
     [UI_MENU_HUD] = "HUD",
     [UI_MENU_HUD_DESC] = "关闭时，游玩过程中不绘制游戏的 HUD；菜单仍会显示。按 F12 切换。",
+    [UI_MENU_CONSOLE] = "控制台窗口",
+    [UI_MENU_CONSOLE_DESC] = "游戏启动时显示控制台窗口。无论如何日志都会写入文件。",
     [UI_MENU_ASSUME_FOCUS] = "后台保持运行",
     [UI_MENU_ASSUME_FOCUS_DESC] = "开启（默认）时，切到其他窗口游戏仍会继续运行，"
                                   "但键盘要等窗口回到前台才会响应。关闭时，"

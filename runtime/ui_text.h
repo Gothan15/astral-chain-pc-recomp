@@ -77,6 +77,7 @@ typedef enum {
     UI_MENU_OPERATION_MODE, UI_MENU_OPERATION_MODE_DESC, UI_MENU_MODE_DOCKED, UI_MENU_MODE_HANDHELD,
     UI_MENU_ASSUME_FOCUS, UI_MENU_ASSUME_FOCUS_DESC,
     UI_MENU_HUD, UI_MENU_HUD_DESC,   // the hud setting (resolution.c res_hud_tick)
+    UI_MENU_CONSOLE, UI_MENU_CONSOLE_DESC,   // the console window (main.c, AC_CONSOLE)
 
     // Mods: the player's mods folder (mods.c)
     UI_MENU_MODS_INSTALLED,
