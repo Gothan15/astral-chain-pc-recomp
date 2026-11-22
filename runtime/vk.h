@@ -154,6 +154,9 @@ void vk_contact_release(void);   // before the device goes away
 // vk_ao.c: screen-space ambient occlusion on the game's light target (AC_AO; live)
 void vk_ao_frame(void);     // at each present: the setting read again when it changed, the frame's state reset
 void vk_ao_release(void);   // before the device goes away
+// vk_preset.c: el preset ELZELDAPA antes del HUD (AC_POST_PRESET; en directo)
+void vk_preset_present(void);   // at each present: lo pendiente queda cubierto y los juegos retirados envejecen
+void vk_preset_release(void);   // before the device goes away
 void vk_present_flip(void);
 // The present lock, for calls that need the swapchain synchronised with the acquire and the present (vk_lowlat.c's
 // Reflex sleep): returns the swapchain, VK_NULL_HANDLE when there is none; vk_present_unlock in either case.

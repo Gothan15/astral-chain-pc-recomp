@@ -1,0 +1,70 @@
+#version 450
+// ExposureFusion (preset ELZELDAPA, runtime/vk_preset.c): porte de MartysMods_EXPOSUREFUSION.fx de Pascal
+// Gilcher (propietario, solo para el fork privado de Gothan; ver vk_preset.c). Paso FusePS del original:
+// funde la pirámide Retinex de abajo arriba — el sesgo del nivel más grueso se acerca al de cada nivel más
+// fino en proporción a cuánto difieren sus log-lumas (func), así las zonas con detalle conservan su
+// exposición local y las planas heredan la del entorno. Escribe (sesgo fundido, guía) a tamaño del nivel 0.
+// Los niveles 0-3 se muestrean lineal y los ≥4 con el b-spline cúbico de Texture::sample2D_bspline
+// (mmx_texture.fxh del repo público de Marty, martymcmodding/iMMERSE), portado tal cual debajo.
+layout(local_size_x = 8, local_size_y = 8) in;
+layout(binding = 0) uniform sampler2D lv[8];   // los niveles 0..7 de la pirámide (RG16F)
+layout(binding = 1) uniform sampler2D src;     // el color de entrada (para la guía .y)
+layout(binding = 2, rg16f) uniform writeonly image2D dst;
+layout(push_constant) uniform P {
+    ivec2 dstSize;   // el tamaño del nivel 0
+    ivec2 offset;    // la esquina del rectángulo de recorte en src
+    ivec2 srcSize;   // el tamaño del recorte (la resolución completa)
+    float eq;        // EQUALIZATION_STRENGTH del preset (0.5)
+    int levels;      // el nivel más grueso (LOWEST_LEVEL del original)
+} pc;
+
+// func del original: cuánto tira el nivel fino del sesgo, según la diferencia de log-lumas
+float func(float a, float b) {
+    float res = abs(a - b) / max(a, max(b, 1.0));
+    res *= mix(0.02, 0.3, pc.eq);
+    return clamp(res / (1.0 + res), 0.0, 1.0);
+}
+
+// Texture::sample2D_bspline del original: interpolación cúbica B-spline con cuatro muestras
+// bilineales — los pesos y los desplazamientos salen de la fracción de téxel, con las constantes
+// aproximadas del propio Marty (su comentario: error ×255 < 0,2, por debajo de la precisión bilineal).
+vec4 sample_bspline(sampler2D s, vec2 iuv, ivec2 size) {
+    vec4 uv;
+    uv.xy = iuv * vec2(size);
+    vec2 center = floor(uv.xy - 0.5) + 0.5;
+    vec4 d = vec4(uv.xy - center, 1.0 + center - uv.xy);
+    vec4 d2 = d * d;
+    vec4 d3 = d2 * d;
+    vec4 o = d2 * 0.12812 + d3 * 0.07188;
+    uv.xy = center - o.zw;
+    uv.zw = center + 1.0 + o.xy;
+    uv /= vec2(size).xyxy;
+    vec4 w = 0.16666666 + d * 0.5 + 0.5 * d2 - d3 * 0.3333333;
+    w = w.wwyy * w.zxzx;
+    return w.x * textureLod(s, uv.xy, 0.0)
+         + w.y * textureLod(s, uv.zy, 0.0)
+         + w.z * textureLod(s, uv.xw, 0.0)
+         + w.w * textureLod(s, uv.zw, 0.0);
+}
+
+void main() {
+    ivec2 p = ivec2(gl_GlobalInvocationID.xy);
+    if (any(greaterThanEqual(p, pc.dstSize))) return;
+    vec2 uv = (vec2(p) + 0.5) / vec2(pc.dstSize);
+    vec2 G[8];
+    G[0] = textureLod(lv[0], uv, 0.0).xy;
+    G[1] = textureLod(lv[1], uv, 0.0).xy;
+    G[2] = textureLod(lv[2], uv, 0.0).xy;
+    G[3] = textureLod(lv[3], uv, 0.0).xy;
+    G[4] = sample_bspline(lv[4], uv, textureSize(lv[4], 0)).xy;
+    G[5] = sample_bspline(lv[5], uv, textureSize(lv[5], 0)).xy;
+    G[6] = sample_bspline(lv[6], uv, textureSize(lv[6], 0)).xy;
+    G[7] = sample_bspline(lv[7], uv, textureSize(lv[7], 0)).xy;
+    int k = pc.levels;
+    vec2 bias = G[k];
+    for (int j = k - 1; j >= 0; j--) bias = mix(bias, G[j], func(G[j].y, bias.y));
+    // .x: el sesgo fundido; .y: la guía, la media de canales del color de entrada
+    vec2 uvsrc = (vec2(pc.offset) + uv * vec2(pc.srcSize)) / vec2(textureSize(src, 0));
+    float guide = dot(vec3(0.3333), textureLod(src, uvsrc, 0.0).rgb);
+    imageStore(dst, p, vec4(bias.x, guide, 0.0, 0.0));
+}

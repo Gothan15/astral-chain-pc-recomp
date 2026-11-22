@@ -1,0 +1,42 @@
+#version 450
+// ExposureFusion (preset ELZELDAPA, runtime/vk_preset.c): porte de MartysMods_EXPOSUREFUSION.fx de Pascal
+// Gilcher (propietario, solo para el fork privado de Gothan; ver vk_preset.c). Paso InitRetinexPyramidPS:
+// siembra el nivel 0 de la pirámide Retinex a mitad de resolución con (sesgo, log-luma) del color expandido
+// a HDR por la curva del propio shader. Las funciones sdr_to_hdr/cone_overlap se repiten en preset_ef_main.comp.
+layout(local_size_x = 8, local_size_y = 8) in;
+layout(binding = 0) uniform sampler2D src;
+layout(binding = 1, rg16f) uniform writeonly image2D dst;
+layout(push_constant) uniform P {
+    ivec2 offset;    // la esquina del rectángulo de recorte en src
+    ivec2 srcSize;   // el tamaño del recorte (la resolución completa)
+    ivec2 dstSize;   // el tamaño del nivel 0 (la mitad)
+    float intensity; // INTENSITY del preset (0.5)
+    float pad;
+} pc;
+
+// Solape de conos del original: mezcla cada canal con los otros dos (matriz simétrica)
+vec3 cone_overlap(vec3 c) {
+    float k = 0.4 * 0.33;
+    vec2 f = vec2(1.0 - 2.0 * k, k);
+    mat3 m = mat3(f.x, f.y, f.y, f.y, f.x, f.y, f.y, f.y, f.x);
+    return c * m;
+}
+
+vec3 sdr_to_hdr(vec3 c) {
+    c = cone_overlap(c);
+    c = c * sqrt(1e-6 + dot(c, c)) / 1.733;
+    float a = 1.0 + exp2(-12.0);   // WHITEPOINT = 12 del original
+    c = c / (a - c);
+    return c;
+}
+
+void main() {
+    ivec2 p = ivec2(gl_GlobalInvocationID.xy);
+    if (any(greaterThanEqual(p, pc.dstSize))) return;
+    // uv del centro del píxel destino, llevado al rectángulo de recorte de src
+    vec2 uv = (vec2(pc.offset) + (vec2(p) + 0.5) / vec2(pc.dstSize) * vec2(pc.srcSize)) / vec2(textureSize(src, 0));
+    vec3 hdr = sdr_to_hdr(textureLod(src, uv, 0.0).rgb);
+    float loglum = dot(vec3(0.3333), log2(max(vec3(1e-3), hdr)));
+    // .x: el sesgo inicial (-loglum * INTENSITY * 0.5); .y: el log-luma que guía la fusión
+    imageStore(dst, p, vec4(-loglum * pc.intensity * 0.5, loglum, 0.0, 0.0));
+}
