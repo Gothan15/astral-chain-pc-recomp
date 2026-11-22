@@ -5,8 +5,7 @@ fue grabando en esa carpeta mientras se jugaba: el Setup solo preparó las varia
 release, y las que el jugador encontró después quedan registradas pero sin preparar, así que el
 juego las compila en mitad de la partida. Esta ventana corre las mismas herramientas que el paso
 prepare del Setup (tools/prepare_shaders.py y tools/pack_shader_cache.py) contra la instalación
-elegida, y, si se marca la casilla, construye además la caché de texturas BC7
-(tools/bc7_precompute.py) y pone astc_bc = bc7 en el astralchain.ini de la instalación.
+elegida.
 
 Los textos viven en installer/text/<idioma>.json bajo "prepare.*" (Catalog de guilogic.py, con el
 inglés de reserva), igual que la ventana del Setup.
@@ -26,7 +25,6 @@ import tkinter as tk
 from pathlib import Path
 from tkinter import filedialog, ttk
 
-from . import ini
 from . import layout as layouts
 from .guilogic import (Catalog, UI_LANGUAGE_LABELS, UI_LANGUAGES, inspect_folder,
                        windows_ui_language)
@@ -48,14 +46,9 @@ TRANSLATED = re.compile(r'gfx_shader: prepare: (\d+) of (\d+) pairs')
 SKIPPED = re.compile(r'prepare-shaders: (\d+) variants skipped: the graphics driver crashed')
 SEED = re.compile(r'(\d+) recorded variants and (\d+) default ones: (\d+) variants of (\d+) shaders')
 PACKED = re.compile(r': (\d+) files, ([\d.]+) MiB')
-BC7_DONE = re.compile(r'(\d+) texturas, ([\d.]+) GB, (\d+) no convertidas')
-BC7_CURRENT = 'ya está al día (sello)'          # bc7_precompute.py: la caché ya tiene el sello
-BC7_NOSPACE = 'menos de ~20 GB libres; se salta'  # bc7_precompute.py: se salta sin fallar
 
-# Espacio libre mínimo que la ventana exige antes de empezar (la herramienta de texturas vuelve a
-# comprobar el suyo: ~20 GB).
+# Espacio libre mínimo que la ventana exige antes de empezar.
 FREE_SHADERS_GB = 2
-FREE_TEXTURES_GB = 21
 
 
 def game_running():
@@ -89,11 +82,10 @@ class App:
         self.cat = Catalog(ui_lang)
         self.bound = []                  # (widget, opción, id, params) que se retraducen al cambiar de idioma
         self.dest_var = tk.StringVar()
-        self.tex_var = tk.BooleanVar(value=False)
         self.events = queue.Queue()      # lo que el hilo de trabajo cuenta a la ventana
         self.proc = None                 # la herramienta en curso
         self.cancelled = False
-        self.phase = None                # la fase en curso ('shaders', 'pack', 'textures')
+        self.phase = None                # la fase en curso ('shaders', 'pack')
         self.result = None               # el resumen que deja el hilo al terminar
         self.log_tail = []               # las últimas líneas del registro, para la pantalla final si algo falla
         self.log_open = False
@@ -215,10 +207,6 @@ class App:
         self.button(row, 'ui.browse', self.browse).pack(side='left', padx=(self.px(8), 0))
         self.dest_status = ttk.Label(f, wraplength=self.px(WRAP), justify='left')
         self.dest_status.pack(anchor='w', pady=(self.px(6), 0))
-        self.tex_box = ttk.Checkbutton(f, variable=self.tex_var, command=self.refresh_form)
-        self.bind_text(self.tex_box, 'text', 'prepare.textures')
-        self.tex_box.pack(anchor='w', pady=(self.px(10), 0))
-        self.wrapped(f, 'prepare.textures_hint', style='Muted.TLabel').pack(anchor='w', pady=(self.px(2), 0))
         self.form_problem = ttk.Label(f, wraplength=self.px(WRAP), justify='left', style='Err.TLabel')
         self.form_problem.pack(anchor='w', pady=(self.px(10), 0))
         return f
@@ -309,7 +297,7 @@ class App:
         if game_running():
             self.form_problem.configure(text=self.cat('prepare.game_running'))
             return
-        need = FREE_TEXTURES_GB if self.tex_var.get() else FREE_SHADERS_GB
+        need = FREE_SHADERS_GB
         free = shutil.disk_usage(dest).free / 2**30
         if free < need:
             self.form_problem.configure(text=self.cat('prepare.low_space', free=f'{free:.1f}', need=need))
@@ -317,7 +305,7 @@ class App:
         self.form_problem.configure(text='')
         self.cancelled = False
         self.result = None
-        steps = ['shaders', 'pack'] + (['textures', 'ini'] if self.tex_var.get() else [])
+        steps = ['shaders', 'pack']
         for child in self.steps_box.winfo_children():
             child.destroy()
         self.step_rows = {}
@@ -335,7 +323,7 @@ class App:
         self.log.configure(state='disabled')
         self.show('run')
         self.set_step('shaders', 'running')
-        threading.Thread(target=self.work, args=(dest, version, self.tex_var.get()), daemon=True).start()
+        threading.Thread(target=self.work, args=(dest, version), daemon=True).start()
 
     def set_step(self, step, state):
         glyph = self.step_rows.get(step)
@@ -367,9 +355,9 @@ class App:
         self.proc = None
         return code
 
-    def work(self, dest, version, textures):
-        """El hilo de trabajo: shaders, empaquetado, texturas si se pidieron, y el ini tras ellas."""
-        out = {'shaders': None, 'skipped': 0, 'pack': None, 'textures': None, 'ini': False}
+    def work(self, dest, version):
+        """El hilo de trabajo: shaders y empaquetado."""
+        out = {'shaders': None, 'skipped': 0, 'pack': None}
         try:
             self.phase = 'shaders'
             self.events.put(('phase', 'prepare.phase_seed', {}))
@@ -412,38 +400,6 @@ class App:
             if code != 0:
                 return self.finish_thread('failed', out)
             self.events.put(('step', 'pack', 'done'))
-            if textures:
-                self.phase = 'textures'
-                self.set_step_event('textures', 'running')
-                self.events.put(('phase', 'prepare.phase_textures', {}))
-
-                def watch_bc7(line):
-                    if BC7_CURRENT in line:
-                        out['textures'] = ('current',)
-                    elif BC7_NOSPACE in line:
-                        out['textures'] = ('skipped',)
-                    else:
-                        m = BC7_DONE.search(line)
-                        if m:
-                            out['textures'] = ('done', int(m.group(1)), m.group(2), int(m.group(3)))
-
-                code = self.run_tool([self.layout.tools / 'bc7_precompute.py', '--romfs', dest / 'romfs',
-                                      '--out', dest / 'cache' / 'bc7', '--exe', dest / 'astralchain.exe'],
-                                     watch_bc7)
-                if self.cancelled:
-                    return self.finish_thread('cancelled', out)
-                if code != 0:
-                    return self.finish_thread('failed', out)
-                state = 'skipped' if out['textures'] and out['textures'][0] == 'skipped' else 'done'
-                self.events.put(('step', 'textures', state))
-                if state == 'done':
-                    self.phase = 'ini'
-                    self.set_step_event('ini', 'running')
-                    ini.write_astc_bc(dest)
-                    out['ini'] = True
-                    self.events.put(('step', 'ini', 'done'))
-                else:
-                    self.events.put(('step', 'ini', 'skipped'))
             self.finish_thread('done', out)
         except Exception as e:   # la ventana lo cuenta como un fallo con el detalle en el registro
             self.events.put(('line', f'{type(e).__name__}: {e}'))
@@ -478,13 +434,6 @@ class App:
                     self.show('finish')
         except queue.Empty:
             pass
-        if self.phase == 'textures' and self.proc is not None:
-            partial = Path(self.dest_var.get().strip()) / 'cache' / 'bc7' / 'data.bin.partial'
-            try:
-                gb = partial.stat().st_size / 2**30
-                self.set_phase('prepare.phase_textures_size', gb=f'{gb:.1f}')
-            except OSError:
-                pass
         self.root.after(POLL_MS, self.poll)
 
     def on_line(self, line):
@@ -546,16 +495,6 @@ class App:
         pack = out.get('pack')
         if result == 'done' and pack:
             lines.append(self.cat('prepare.sum_pack', files=pack[0], mb=pack[1]))
-        bc7 = out.get('textures')
-        if bc7:
-            if bc7[0] == 'done':
-                lines.append(self.cat('prepare.sum_textures', count=bc7[1], gb=bc7[2]))
-            elif bc7[0] == 'current':
-                lines.append(self.cat('prepare.sum_textures_current'))
-            elif bc7[0] == 'skipped':
-                lines.append(self.cat('prepare.sum_textures_skipped'))
-        if out.get('ini'):
-            lines.append(self.cat('prepare.sum_ini'))
         if result == 'failed':
             lines.append(self.cat('prepare.failed_text'))
         elif result == 'cancelled':

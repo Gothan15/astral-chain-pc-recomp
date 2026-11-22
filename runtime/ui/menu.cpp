@@ -768,13 +768,11 @@ static void tab_screen(float scale) {
     opt_choice_list("AC_ANISO", UI_MENU_ANISO, aniso, aniso_names, 6, UI_MENU_ANISO_DESC);
     // Sesgo de LOD de texturas (vk_texture.c): negativo = mips más finos, más nitidez con algo de shimmer.
     opt_slider("AC_TEX_LOD_BIAS", UI_MENU_TEX_LOD_BIAS, -2, 0, UI_MENU_TEX_LOD_BIAS_DESC, 0.25f, "%.2f");
-    // Compresión de texturas del fork (vk_astc.c): los valores que acepta la clave son auto, bc1, 1 (BC3
-    // forzado), bc7 y 0 (sin compresión, RGBA8). La caché BC7 precómputada (bc7_cache.h) solo actúa con BC7.
-    static const char *const astc_bc[] = {"auto", "bc1", "1", "bc7", "0"};
-    static const char *const astc_bc_names[] = {"Auto", "BC1", "BC3", "BC7", "Off (RGBA8)"};
-    opt_choice_list("AC_ASTC_BC", UI_MENU_TEX_COMPRESSION, astc_bc, astc_bc_names, 5, UI_MENU_TEX_COMPRESSION_DESC);
-    opt_toggle("AC_BC7_CACHE", UI_MENU_BC7_CACHE, UI_MENU_BC7_CACHE_DESC);
-    opt_toggle("AC_BC7_CACHE_LOG", UI_MENU_BC7_CACHE_LOG, UI_MENU_BC7_CACHE_LOG_DESC);
+    // Compresión de texturas (vk_astc.c): los valores que acepta la clave son auto, bc1, 1 (BC3
+    // forzado) y 0 (sin compresión, RGBA8).
+    static const char *const astc_bc[] = {"auto", "bc1", "1", "0"};
+    static const char *const astc_bc_names[] = {"Auto", "BC1", "BC3", "Off (RGBA8)"};
+    opt_choice_list("AC_ASTC_BC", UI_MENU_TEX_COMPRESSION, astc_bc, astc_bc_names, 4, UI_MENU_TEX_COMPRESSION_DESC);
     row_shadow_scale();
     // off, low, high, gi: the names in the order of cfg.c's values for AO
     static const UiTextId ao[] = {UI_MENU_AO_OFF, UI_MENU_AO_LOW, UI_MENU_AO_HIGH, UI_MENU_AO_GI};

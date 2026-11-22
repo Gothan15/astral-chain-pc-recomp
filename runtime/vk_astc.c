@@ -11,12 +11,6 @@
 // of the video memory the RGBA8 decode takes. BC1 and BC3 give the same colour quality (the BC3 colour block is
 // a BC1 block), but both lose against RGBA8: blockier gradients, and data textures (normal maps) losing
 // precision, which shows most on the environments' large tiled surfaces. 1 forces BC3 for every texture.
-// bc7: como bc1 pero sin escaneo alfa ni mezcla de formatos: TODAS las texturas van a BC7
-// (runtime/shaders/bc7_encode.comp, modo 6), a los mismos 8 bits por texel que BC3 pero con extremos
-// RGBA de 7 bits, índices de 4 bits y alfa de verdad — más calidad que BC1/BC3 a igualdad de memoria
-// (un cuarto de la de RGBA8), que es lo que importa en tarjetas de 6-8 GB. Es un valor que se pide a
-// mano: auto nunca lo elige, porque su codificador es el más caro de los tres. Si el dispositivo no
-// muestrea BC7, la decisión cae a BC3, y sin BC3, a RGBA8 (create_bc7_pipeline).
 // Devices that sample ASTC themselves never decode, so they stay on native ASTC whatever the knob says.
 // --probe-astc holds both encoders to PSNR bounds (a correctness floor, not a quality bar).
 //
@@ -37,7 +31,6 @@
 #include "astc_decode_spv.h"
 #include "bc1_encode_spv.h"
 #include "bc3_encode_spv.h"
-#include "bc7_encode_spv.h"
 #include "cfg.h"
 #include "host.h"
 #include "tex.h"
@@ -123,8 +116,7 @@ static struct {
     VkPipeline pipe;
     VkPipeline bc_pipe;           // the BC3 encoder (AC_ASTC_BC): the decoder's layout, bindings 0 and 1
     VkPipeline bc1_pipe;          // the BC1 encoder (AC_ASTC_BC=bc1): the same layout, one uvec2 block out
-    VkPipeline bc7_pipe;          // el codificador BC7 (AC_ASTC_BC=bc7): el mismo layout, un uvec4 por bloque
-    int bc;                       // the recompression of decoded ASTC images: 0 none (RGBA8), 1 BC3, 3 BC7
+    int bc;                       // the recompression of decoded ASTC images: 0 none (RGBA8), 1 BC3
                                   // (AC_ASTC_BC=1), 2 BC1 for the textures the alpha scan (tex_astc.c)
                                   // proves opaque, BC3 for the rest (AC_ASTC_BC=bc1, the default)
     PFN_vkCmdPushDescriptorSetKHR push;
@@ -378,39 +370,6 @@ static int create_bc1_pipeline(VkCtx *c) {
     return 1;
 }
 
-// El codificador BC7 (AC_ASTC_BC=bc7): el mismo segundo paso que el de BC3 y su misma disposición — los
-// bloques salen a un uvec4, 16 bytes por bloque de 4x4 — pero al formato BC7 (runtime/shaders/
-// bc7_encode.comp, modo 6: extremos RGBA de 7 bits con bit p, índices de 4 bits y alfa de verdad), que a
-// los mismos 8 bits por texel de BC3 guarda más color y el alfa sin el compromiso de BC1. Sin escaneo
-// alfa: en este modo todas las texturas van a BC7. Un dispositivo que no muestree BC7 no puede usarlo y
-// el llamador cae a BC3; en la práctica toda GPU discreta con Vulkan muestrea BC7.
-static int create_bc7_pipeline(VkCtx *c) {
-    VkFormatProperties p;
-    vkGetPhysicalDeviceFormatProperties(c->phys, VK_FORMAT_BC7_SRGB_BLOCK, &p);
-    VkFormatFeatureFlags need = VK_FORMAT_FEATURE_SAMPLED_IMAGE_BIT | VK_FORMAT_FEATURE_TRANSFER_DST_BIT;
-    if ((p.optimalTilingFeatures & need) != need) {
-        rt_log("vk: AC_ASTC_BC=bc7: the device does not sample BC7");
-        return 0;
-    }
-    VkShaderModuleCreateInfo mi = {.sType = VK_STRUCTURE_TYPE_SHADER_MODULE_CREATE_INFO,
-                                   .codeSize = sizeof bc7_encode_spv, .pCode = bc7_encode_spv};
-    VkShaderModule m = VK_NULL_HANDLE;
-    if (vkCreateShaderModule(c->device, &mi, NULL, &m) != VK_SUCCESS) return 0;
-    VkComputePipelineCreateInfo ci = {.sType = VK_STRUCTURE_TYPE_COMPUTE_PIPELINE_CREATE_INFO,
-                                      .stage = {.sType = VK_STRUCTURE_TYPE_PIPELINE_SHADER_STAGE_CREATE_INFO,
-                                                .stage = VK_SHADER_STAGE_COMPUTE_BIT, .module = m, .pName = "main"},
-                                      .layout = G.layout};
-    VkResult r = vkCreateComputePipelines(c->device, VK_NULL_HANDLE, 1, &ci, NULL, &G.bc7_pipe);
-    vkDestroyShaderModule(c->device, m, NULL);
-    if (r != VK_SUCCESS) {
-        G.bc7_pipe = VK_NULL_HANDLE;
-        rt_log("vk: AC_ASTC_BC=bc7: the BC7 encoder pipeline failed (%d)", (int)r);
-        return 0;
-    }
-    rt_log("vk: ASTC textures are encoded to BC7 after the decode (AC_ASTC_BC=bc7)");
-    return 1;
-}
-
 static int native_device(VkCtx *c) { return c->has_astc_ldr; }
 
 // AC_ASTC_BC=auto (the default): a discrete GPU with 6 GB of video memory or more keeps the decoded textures as RGBA8,
@@ -468,17 +427,8 @@ int vk_astc_mode(void) {
             if (!strcmp(b, "auto")) b = auto_bc(c);
             if (!strcmp(b, "0")) G.bc = 0;
             else if (!strcmp(b, "1")) G.bc = create_bc_pipeline(c) ? 1 : 0;
-            else if (!strcmp(b, "bc7")) {
-                // BC7 para todas las texturas; si el dispositivo no lo muestrea, BC3 (el mismo tamaño
-                // por texel) es la caída natural, y sin BC3 tampoco, RGBA8.
-                if (create_bc7_pipeline(c)) G.bc = 3;
-                else if (create_bc_pipeline(c)) {
-                    G.bc = 1;
-                    rt_log("vk: AC_ASTC_BC=bc7: BC7 unavailable; ASTC textures are encoded to BC3 instead");
-                } else G.bc = 0;
-            }
             else {
-                if (strcmp(b, "bc1")) rt_log("vk: AC_ASTC_BC=%s is not auto, bc1, bc7, 1 or 0: bc1", b);
+                if (strcmp(b, "bc1")) rt_log("vk: AC_ASTC_BC=%s is not auto, bc1, 1 or 0: bc1", b);
                 G.bc = create_bc_pipeline(c) ? (create_bc1_pipeline(c) ? 2 : 1) : 0;
             }
         }
@@ -563,7 +513,7 @@ static VkDeviceSize region_out(const VkAstcRegion *r) { return (VkDeviceSize)r->
 static VkDeviceSize region_in(const VkAstcRegion *r, uint32_t bw, uint32_t bh) {
     return (VkDeviceSize)((r->w + bw - 1) / bw) * ((r->h + bh - 1) / bh) * r->slices * 16;
 }
-static VkDeviceSize region_bc(const VkAstcRegion *r, int bc) {   // bytes por bloque de 4x4: BC1 (bc 2) 8, BC3 (bc 1) y BC7 (bc 3) 16
+static VkDeviceSize region_bc(const VkAstcRegion *r, int bc) {   // BC1: 8, BC3: 16 bytes per 4x4 block
     return region_in(r, 4, 4) >> (bc == 2 ? 1 : 0);
 }
 
@@ -578,8 +528,7 @@ static int record(VkCommandBuffer cb, VkBuffer src, VkDeviceSize src_size, const
     if (!c || !vk_astc_gpu() || bw < 4 || bh < 4 || bw > 12 || bh > 12) return 0;
     plat_mutex_lock_shared(&g_lock);
     VkPipeline pipe = G.dev == c->device ? G.pipe : VK_NULL_HANDLE;
-    // El pipeline del segundo paso según el modo: bc 2 BC1, bc 3 BC7, bc 1 BC3.
-    VkPipeline bc_pipe = !bc || G.dev != c->device ? VK_NULL_HANDLE : bc == 2 ? G.bc1_pipe : bc == 3 ? G.bc7_pipe : G.bc_pipe;
+    VkPipeline bc_pipe = !bc || G.dev != c->device ? VK_NULL_HANDLE : bc == 2 ? G.bc1_pipe : G.bc_pipe;
     plat_mutex_unlock_shared(&g_lock);
     if (!pipe || (bc && !bc_pipe)) return 0;
     if (bc) {
@@ -804,7 +753,6 @@ void vk_astc_release(void) {
         if (G.pipe) vkDestroyPipeline(c->device, G.pipe, NULL);
         if (G.bc_pipe) vkDestroyPipeline(c->device, G.bc_pipe, NULL);
         if (G.bc1_pipe) vkDestroyPipeline(c->device, G.bc1_pipe, NULL);
-        if (G.bc7_pipe) vkDestroyPipeline(c->device, G.bc7_pipe, NULL);
         if (G.layout) vkDestroyPipelineLayout(c->device, G.layout, NULL);
         if (G.dsl) vkDestroyDescriptorSetLayout(c->device, G.dsl, NULL);
         if (G.tab) vmaDestroyBuffer(c->vma, G.tab, G.tab_alloc);
