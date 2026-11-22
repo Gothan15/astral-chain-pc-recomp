@@ -739,6 +739,9 @@ static void rows_color(void) {
         cfg_set("AC_COLOR_PRESET", "custom");
         cfg_save();
     }
+    // the ELZELDAPA preset (vk_preset.c): its chain runs on the scene before the HUD, not on the finished picture
+    static const UiTextId preset_names[] = {UI_MENU_COLOR_DEFAULT, UI_MENU_POST_PRESET_ELZELDAPA};
+    opt_choice("AC_POST_PRESET", UI_MENU_POST_PRESET, preset_names, 2, UI_MENU_POST_PRESET_DESC);
 }
 
 static void tab_screen(float scale) {

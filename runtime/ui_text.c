@@ -94,6 +94,11 @@ static const char *const text_en[UI_TEXT_COUNT] = {
     [UI_MENU_COLOR_SATURATION_DESC] = "Colour strength against grey; 100 % leaves it.",
     [UI_MENU_COLOR_GAMMA] = "Gamma",
     [UI_MENU_COLOR_GAMMA_DESC] = "Below 1 brightens dark and middle tones, above 1 darkens them; 1 leaves them.",
+    [UI_MENU_POST_PRESET] = "Image preset",
+    [UI_MENU_POST_PRESET_DESC] = "ELZELDAPA's Colourfulness and ExposureFusion on the scene, applied before the game "
+                                  "draws its HUD, so the HUD keeps the game's own colours (unlike the colour "
+                                  "adjustment above, which changes the HUD with the picture).",
+    [UI_MENU_POST_PRESET_ELZELDAPA] = "ELZELDAPA",
     [UI_MENU_HDR_GROUP] = "HDR",
     [UI_MENU_HDR] = "HDR output",
     [UI_MENU_HDR_DESC] = "Bright highlights on an HDR display. Needs HDR turned on in Windows (\"Use HDR\") or in a "
@@ -568,6 +573,10 @@ static const char *const text_ru[UI_TEXT_COUNT] = {
     [UI_MENU_COLOR_SATURATION_DESC] = "Сила цвета относительно серого; 100 % — без изменений.",
     [UI_MENU_COLOR_GAMMA] = "Гамма",
     [UI_MENU_COLOR_GAMMA_DESC] = "Ниже 1 осветляет тёмные и средние тона, выше 1 затемняет их; 1 — без изменений.",
+    [UI_MENU_POST_PRESET] = "Пресет изображения",
+    [UI_MENU_POST_PRESET_DESC] = "Colourfulness и ExposureFusion из пресета ELZELDAPA поверх сцены, до того как игра "
+                                  "нарисует HUD, поэтому HUD сохраняет собственные цвета игры.",
+    [UI_MENU_POST_PRESET_ELZELDAPA] = "ELZELDAPA",
     [UI_MENU_HDR_GROUP] = "HDR",
     [UI_MENU_HDR] = "Вывод HDR",
     [UI_MENU_HDR_DESC] = "Яркие блики на HDR-дисплее. Нужен включённый HDR в Windows («Использовать HDR») или "
@@ -1368,6 +1377,10 @@ static const char *const text_pt_br[UI_TEXT_COUNT] = {
     [UI_MENU_COLOR_GAMMA] = "Gama",
     [UI_MENU_COLOR_GAMMA_DESC] = "Abaixo de 1 clareia os tons escuros e médios, acima de 1 os escurece; 1 não muda "
                                  "nada.",
+    [UI_MENU_POST_PRESET] = "Predefinição de imagem",
+    [UI_MENU_POST_PRESET_DESC] = "Colourfulness e ExposureFusion do preset ELZELDAPA sobre a cena, aplicados antes de "
+                                  "o jogo desenhar o HUD, então o HUD mantém as cores do próprio jogo.",
+    [UI_MENU_POST_PRESET_ELZELDAPA] = "ELZELDAPA",
     [UI_MENU_HDR_GROUP] = "HDR",
     [UI_MENU_HDR] = "Saída HDR",
     [UI_MENU_HDR_DESC] = "Realces brilhantes em uma tela HDR. Precisa do HDR ligado no Windows (\"Usar HDR\") ou num "
@@ -1590,6 +1603,10 @@ static const char *const text_zh_hans[UI_TEXT_COUNT] = {
     [UI_MENU_COLOR_SATURATION_DESC] = "颜色相对灰色的强度；100% 表示不调整。",
     [UI_MENU_COLOR_GAMMA] = "伽马",
     [UI_MENU_COLOR_GAMMA_DESC] = "小于 1 提亮暗部与中间调，大于 1 压暗；1 表示不调整。",
+    [UI_MENU_POST_PRESET] = "图像预设",
+    [UI_MENU_POST_PRESET_DESC] = "将 ELZELDAPA 的 Colourfulness 与 ExposureFusion 应用于场景，且在游戏绘制 HUD 之前，"
+                                  "因此 HUD 保持游戏本身的颜色。",
+    [UI_MENU_POST_PRESET_ELZELDAPA] = "ELZELDAPA",
     [UI_MENU_FPS_LIMIT] = "帧率",
     [UI_MENU_FPS_LIMIT_DESC] = "60 FPS 启用游戏的 60 帧补丁；30 FPS 关闭它。即时生效。",
     [UI_MENU_FPS_30] = "30 FPS",
