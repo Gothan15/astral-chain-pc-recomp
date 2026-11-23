@@ -17,7 +17,7 @@
 
 [performance]
 # The keys of this section and of [diagnostics] are for testing and troubleshooting, and take effect at the next start.
-# The Advanced tab of the settings menu (F1) shows all of them except zstd_native and zstd_check.
+# The Advanced tab of the settings menu (F1) shows all of them except zstd_native, zstd_check, host_libc and hostfn_direct.
 
 # Scheduling.
 # A thread waiting for a virtual core interrupts the owner when it runs game code: 1 = on, 2 = priority inheritance
@@ -38,6 +38,10 @@
 # 1 = poll whatever the governor, 0 = all of it off (lower CPU use and power; lower and uneven frame rate where the
 # cores then stay at a low frequency). Off by default on the Steam Deck, whose CPU and GPU share one power limit.
 # cpu_boost = auto
+# The game's memset, memmove, memcmp, strlen, strcmp and strncmp run as host code (0 = as the game's own code).
+# host_libc = 1
+# The game's calls into host functions jump straight to the function (0 = through a common entry first, as before).
+# hostfn_direct = 1
 
 # Shaders and pipelines.
 # Draws whose pipeline is still building: default waits on a reserved worker; draw is the previous scheduling.
@@ -152,9 +156,20 @@
 # window_size = 1920x1080
 # fullscreen = 1
 # 1, the default: the game keeps running while you are in another window; the keyboard stays quiet until the window is
-# in front again. 0: it pauses when its window loses focus, as it does on the Switch when Home is pressed; a load
-# interrupted that way can stop for good. Read at each focus change.
+# in front again. 0: it pauses while its window is out of focus, as it does on the Switch when Home is pressed:
+# picture, sound, vibration and game time stand still and go on when the window is back. The pause waits for a save
+# being written.
+# Takes effect at once.
 # assume_focus = 1
+# Written by the game, not a setting: up to 1.21.0 assume_focus = 0 paused nothing, and the first start of a later
+# version removes such a line here once, so the default, 1, applies. assume_focus_migrated = 1 records that this ran,
+# so a 0 picked afterwards (here or in the menu) is kept.
+# assume_focus_migrated = 1
+# 1, the default: the game pauses while its settings menu (F1, or Minus + Plus) is open: picture, sound and game time
+# stand still and go on when it closes. The pause waits for a save being written. A setting whose effect the game
+# draws (upscaling, ambient occlusion, the HUD) then shows when the menu closes. 0: the game keeps running behind the
+# menu. Takes effect at once.
+# menu_pause = 1
 # 1, the default: the game draws its HUD. 0: the HUD of play (the gauges, the map, the prompts, the markers) is not
 # drawn; the menus stay. F12 switches it in game and saves it here, as does the menu's Game tab.
 # hud = 1

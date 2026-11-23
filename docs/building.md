@@ -143,7 +143,8 @@ From the repository root, in PowerShell. Every step that depends on the game ver
    file.
 
 7. Run. The game keeps running when its window loses the focus (`assume_focus = 1` in `astralchain.ini`, the default; the
-   Game tab switches it). With 0 it pauses, as it does on the Switch when Home is pressed.
+   Game tab switches it). With 0 it pauses, as it does on the Switch when Home is pressed (`runtime/pause.c`). A 0
+   stored before that worked is removed once (`assume_focus_migrated = 1`).
 
    ```powershell
    build\<ver>\astralchain.exe
@@ -299,7 +300,11 @@ A `--cpu v2` build passes the same differential tests with `--cflags=-march=x86-
 too, so they check the software fma the v2 build links rather than the C runtime's.
 
 Runtime probes, each a mode of `astralchain.exe` (the list is at the top of `runtime/main.c`): `--probe-kernel`,
-`--probe-vkexec`, `--probe-nvn-tex` and `--probe-shader` cover most runtime changes. `--probe-shader` and the draw
+`--probe-vkexec`, `--probe-nvn-tex` and `--probe-shader` cover most runtime changes. `--probe-kernel` also checks the
+pause (`runtime/pause.c`). A change to the service overrides passes `--probe-services`, which wants a test for every
+linked override and knows which ones 1.0.1 does not import (`tools/import_census.py` lists the same); one to nn::fs
+passes `--probe-fs` and one to the NVN front end `--probe-nvn`. `make_release.py --prove` and the Linux one run these
+three too (`PROBES`). `--probe-shader` and the draw
 part of `--probe-vkexec` translate shaders of the census below: they look for `build/<ver>/shaders/jobs.json` of the
 exe's own version first, then of the other one. `--probe-xess` runs Intel XeSS once on synthetic images (it passes,
 saying so, without `libxess.dll` or on a GPU XeSS cannot use); a change to `runtime/vk_dlaa.c` or `runtime/vk_xess.c`
@@ -308,6 +313,9 @@ upscaled path), whose log counts the frames resolved, with the scene and output 
 `AC_ANTI_ALIASING=dlaa|xess|fsr3` in the environment still runs that upscaler in its native mode. A change to
 `recomp/patches-v101.txt`'s `scene` set or to `resolution.c`'s scene sizes wants such a run per mode, in handheld
 (`AC_OPERATION_MODE=handheld`) too.
+A change to `runtime/ov_libc.c` (the host memcpy, memset, memmove, memcmp, strlen, strcmp, strncmp) passes
+`--probe-libc` (game files): each host function against the sdk's lifted one on the same inputs, which must report 0
+mismatches, then a timing table of both per size.
 A change to the per-object motion code (`runtime/vk_mvprev.c`, the "per-object motion" section of
 `runtime/vk_exec_draw.c`) wants the same run with `AC_UPSCALING=xess` to show the `mv_prev:` and `per-object motion:` log lines
 with draws drawn again; `AC_DLAA_MVDEBUG=1` with `--shot` shows the vectors (x red, y green) in place of the picture.
@@ -324,7 +332,12 @@ same two DLLs: AMD publishes no Linux library, so they are loaded by ffx-vk-linu
 `libffx_vk_linux.so` next to `astralchain` (`tools/ffx_vk_linux.py`) and then fetches the DLLs itself. The library
 needs the development files of OpenSSL 3 or later, libdrm, SPIRV-Tools and the SPIR-V headers, and the Vulkan
 registry (Fedora: `openssl-devel libdrm-devel spirv-tools-devel spirv-headers-devel vulkan-headers`); without them
-the build says which header is missing and goes on without FSR 4. `AC_FSR4_LIB` names another file to load. A change
+the build says which header is missing and goes on without FSR 4. The SPIRV-Tools must know the capability
+`Float8CooperativeMatrixEXT`, which AMD's FP8 model for the RX 9000 declares: a library that does not rejects its
+shader at the first dispatch (`shader normalization failed: Invalid capability operand: 4213`) and the replay thread
+then crashes in the driver. The Linux release therefore builds a pinned Khronos release (`tools/make_release_linux.py`,
+which needs CMake 3.22.1 or newer; Vulkan SDK 1.4.363.0's accepts it), and a developer build uses the system's, which
+must be as recent. `AC_FSR4_LIB` names another file to load. A change
 to `runtime/vk_fsr4.c` wants a run with `AC_UPSCALING=fsr4`, native and upscaled, on an AMD RDNA 2 or newer GPU: its
 log names the library, the upscaler the library made (`fsr4: context ... provider ...`), at start, and the first
 dispatch. Which model AMD's library runs is its own choice from the GPU family; on Linux an AMD integrated GPU it
