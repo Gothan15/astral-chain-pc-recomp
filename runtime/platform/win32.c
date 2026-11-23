@@ -334,7 +334,15 @@ uint64_t plat_counter_hz(void) { return qpc_freq(); }
 
 // The default timer tick is 15.6 ms; a 1 ms wait would cost a full tick.
 void plat_timer_1ms(void) { timeBeginPeriod(1); }
-void plat_console_hide(void) { FreeConsole(); }   // el registro sigue en el archivo de logs
+void plat_console_hide(void) {   // el registro sigue en el archivo de logs
+    // La ventana es de la sesión de consola, no de este proceso: si el arranque se re-ejecutó
+    // (plat_reexec), el padre sigue vivo esperando al hijo y enganchado a la misma consola, así
+    // que FreeConsole de este proceso no la cierra y quedaba visible toda la partida. Se oculta
+    // la ventana misma antes de desengancharse.
+    HWND w = GetConsoleWindow();
+    if (w) ShowWindow(w, SW_HIDE);
+    FreeConsole();
+}
 
 // Windows 11 puts a process it deems in the background under EcoQoS (the E-cores of a hybrid Intel CPU, low clocks)
 // and stops honouring its timer resolution while its window is hidden or minimised. The game keeps running out of
