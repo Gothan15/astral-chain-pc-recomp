@@ -46,7 +46,7 @@ static const char *const known[] = {
     "HDR_HUE", "HDR_PEAK_NITS", "HDR_UI_NITS", "HIGHFPS_FIX", "HOSTFN_DIRECT", "HOST_LIBC", "HOST_LIBC_AB", "HUD", "INPUT", "INPUT_RECORD", "INPUT_SCRIPT", "LANG", "LIB_PREBUILD",
     "LIB_PREBUILD_KEEP", "LIB_PREBUILD_THREADS", "LOCALE", "LOD_GUARD", "LOW_LATENCY", "LOW_LATENCY_BACKEND", "LSTICK_DEADZONE", "MEMORY", "MENU_LANG", "MENU_PAUSE", "MENU_TEST",
     "MENU_TEST_DIR", "MENU_TEST_FOCUS", "MENU_TEST_SET", "MINIMAL_LAYOUT", "MIRROR_CHUNKS", "MIRROR_GAP", "MIRROR_LAZY", "MODS_DIR", "MODS_DISABLED", "MODS_ORDER", "MODS_REBUILD", "MOTION", "MOUSE_CAMERA", "MOUSE_SENS", "MOVIE_HOST", "MOVIE_PACE", "MOVIE_TRACK",
-    "NOHUD_PATCH", "ONE_PER_CORE", "OPERATION_MODE", "OUTPUT_RES", "PAD_LAYOUT", "PATCH_OUTPUT", "PATCH_SCENE", "PCSS", "PCSS_K", "PERF_OVERLAY", "PERF_SLOW_MS", "PIPELINE_CACHE", "PIPE_MEMO", "PIPE_PREBUILD", "PIPE_SKIP", "PIPE_SYNC", "PIPE_WAIT", "POST_PRESET",
+    "NOHUD_PATCH", "ONE_PER_CORE", "OPERATION_MODE", "OUTPUT_RES", "PAD_LAYOUT", "PATCH_OUTPUT", "PATCH_SCENE", "PCSS", "PCSS_K", "PERF_OVERLAY", "PERF_SLOW_MS", "PHOTO_PATCH", "PIPELINE_CACHE", "PIPE_MEMO", "PIPE_PREBUILD", "PIPE_SKIP", "PIPE_SYNC", "PIPE_WAIT", "POST_PRESET",
     "PRESENT_SHOT", "PREWARM_XLATE", "PROFILE", "PROFILE_CHAINS", "PROFILE_DIR", "PROFILE_FRAMES",
     "PROFILE_MAIN", "PROFILE_RENDER", "PROMPTS", "PUSH_SKIP", "PUSH_STAGE", "RC_APPLY", "RC_DEBUG", "RC_DEBUG_CASCADE", "RC_LIGHT", "RC_TEMPORAL", "RDOC", "RDOC_DIR", "RDOC_DLL", "REALTIME", "REC_END", "REEXEC",
     "RENDER_SCALE", "REPLAY_ASYNC",
@@ -169,7 +169,7 @@ static const CfgMeta metas[] = {
     // what the game mixes (ov_audout.c out_open: fixed when the game opens its output, at start); the 5.1 mix of the
     // output thread (mix_frame): a gain per speaker in dB, the bass of the other five to the subwoofer, and the menu's
     // preset that writes them (custom once one is moved)
-    {"AUDIO_OUTPUT", "stereo", "stereo|5.1", RESTART},
+    {"AUDIO_OUTPUT", "auto", "auto|stereo|5.1", RESTART},   // auto: 5.1 when the output takes it (audio_out.h)
     {"AUDIO_MIX_PRESET", "balanced", "balanced|voices|immersive|custom", LIVE},
     {"AUDIO_FRONT_LEFT", "0", "-12..6", LIVE}, {"AUDIO_FRONT_RIGHT", "0", "-12..6", LIVE},
     {"AUDIO_CENTER", "-2", "-12..6", LIVE}, {"AUDIO_SURROUND_LEFT", "0", "-12..6", LIVE},
