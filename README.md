@@ -27,7 +27,8 @@ Report problems as issues, following [CONTRIBUTING.md](CONTRIBUTING.md).
 - [Flat 60FPS on Steam Deck](https://steamdeckhq.com/news/astral-chains-pc-port-60-fps-on-steam-deck/)
 - HDR output (HDR10), with separate brightness for the game and the HUD
 - Temporal upscaling and anti-aliasing for the 3D scene up to 4K, from native (DLAA / Native AA) to Ultra Performance: NVIDIA
-  DLSS on RTX cards (with `nvngx_dlss.dll` next to `astralchain.exe`), Intel XeSS on most recent GPUs, AMD FSR 3 on any
+  DLSS on RTX cards (with `nvngx_dlss.dll` next to `astralchain.exe`, on Linux `libnvidia-ngx-dlss.so.<version>` next
+  to `astralchain`), Intel XeSS on most recent GPUs, AMD FSR 3 on any
   GPU, AMD FSR 4 on AMD Radeon RX 6000 series or newer (Windows and Linux);
 - Anisotropic texture filtering up to 16x, for sharp ground into the distance
 - Low latency mode: NVIDIA Reflex or AMD Anti-Lag 2 where the driver offers them, the port's own frame timing on any
@@ -36,7 +37,9 @@ Report problems as issues, following [CONTRIBUTING.md](CONTRIBUTING.md).
 - Optional pause while the game's window is out of focus (the menu's Game tab, "Keep running out of focus")
 - No-HUD mode for screenshots and videos: F12 (or the menu's Game tab) hides the gauges, map, prompts and markers
   during play and shows them again; the menus stay
-- Setup and in-game menu in English, Russian, Brazilian Portuguese and Simplified Chinese
+- In-game menu, overlay and setup installer in English, Italian, Russian, Brazilian Portuguese and Simplified Chinese;
+  the menu's translations are plain gettext files in `lang/` that anyone can add to (docs/building.md, "Texts and
+  translations")
 - Keyboard, mouse and gamepad, with remapping, rumble and gyro
 - Xbox and PlayStation button prompts, each with its matching button layout (PlayStation mod from https://gamebanana.com/mods/604666)
 - Shaders prepared at install instead of during play
@@ -87,3 +90,9 @@ Astral Chain Recomp is an independent, non-commercial fan project, not affiliate
 
 [docs/building.md](docs/building.md) lists the toolchain and the steps. Everything the build writes stays under
 `build\` and `generated\`, which git ignores; run `tools/check_content.py` before a commit.
+
+The menu, overlay and keyboard texts are English in `runtime/ui_text.c` plus one gettext catalog per language,
+`lang/<tag>.po`. `tools/build_game.py` updates the catalogs against the English, compiles them into `lang/*.mo`
+(ignored by git) and copies those beside the executable, which reads them at start: a new string is an id in
+`runtime/ui_text.h` and its English in `runtime/ui_text.c`, and a translation is an edit of a `.po` file. The details
+are in [docs/building.md](docs/building.md), "Texts and translations".

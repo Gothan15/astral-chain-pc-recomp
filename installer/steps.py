@@ -110,6 +110,36 @@ def replace_file(src, dst):
     os.replace(tmp, dst)
 
 
+def catalog_files(layout):
+    return sorted(layout.lang.glob('*.mo')) if layout.lang.is_dir() else []
+
+
+def catalogs_current(ctx):
+    """1 when the install folder's lang/ holds every compiled text catalog of the release, byte for byte."""
+    dst = ctx.dest / 'lang'
+    for src in catalog_files(ctx.layout):
+        target = dst / src.name
+        if not target.is_file() or file_sha256(target) != file_sha256(src):
+            return False
+    return True
+
+
+def copy_catalogs(ctx):
+    """The release's compiled text catalogs (lang/*.mo, tools/ui_text_catalogs.py) into the install folder's lang/,
+    where astralchain.exe reads them at start (runtime/ui_text.c). Files the player added there stay. Cleanup runs it
+    on every install and update: a few hundred KiB, so a release that only fixes a translation costs no step of its
+    own (tying it to Prepare would rerun the shader preparation for it)."""
+    files = catalog_files(ctx.layout)
+    if not files:
+        return
+    dst = ctx.dest / 'lang'
+    dst.mkdir(exist_ok=True)
+    for src in files:
+        target = dst / src.name
+        if not target.is_file() or file_sha256(target) != file_sha256(src):
+            replace_file(src, target)
+
+
 def install_dlcs(src, dst):
     """The release's DLC sources (dlc/, docs/dlc.md) into the install folder's dlc/, where astralchain.exe reads them
     with the setting dlc = 1. Each DLC folder of the release replaces the folder of its name whole, so a file an
@@ -997,6 +1027,11 @@ class Cleanup(Step):
             install_dlcs(ctx.layout.root / 'dlc', dest / 'dlc')
         except OSError as e:
             rep.warning('warn.dlc_failed', detail=str(e))
+        # The menu's and the keyboard's languages (runtime/ui_text.c). A failure only warns: the game runs in English.
+        try:
+            copy_catalogs(ctx)
+        except OSError as e:
+            rep.warning('warn.lang_failed', detail=str(e))
         rep.progress('cleanup', 'temp', force=True)
         for stale in dest.glob('update-merge-*'):
             remove(stale)
