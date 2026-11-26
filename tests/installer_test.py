@@ -107,6 +107,42 @@ class Bed:
 ALL = ['check', 'extract', 'lift', 'compile', 'prepare', 'cleanup']
 
 
+class UiCatalogTest(unittest.TestCase):
+    def setUp(self):
+        self.tmp = tempfile.TemporaryDirectory()
+        root = Path(self.tmp.name)
+        self.lang = root / 'lang'
+        self.lang.mkdir()
+        (self.lang / 'pt-BR.mo').write_bytes(b'pt-BR')
+        (self.lang / 'xx.mo').write_bytes(b'xx')
+        dest = root / 'dest'
+        dest.mkdir()
+        (dest / 'lang').mkdir()
+        (dest / 'lang' / 'user.mo').write_bytes(b'user')
+        (dest / 'lang' / 'user.po').write_text('msgid ""\nmsgstr "user"\n', encoding='utf-8')
+        layout = Layout(root=root, dev=True, release='1.0', python=Path('python'), tools=Path('tools'),
+                        recomp=Path('recomp'), llvm=Path('llvm'), deps=Path('deps'), runtime=Path('rt'),
+                        runtime_lib=Path('lib'), ninja=Path('ninja'), hactool=Path('hactool'), xlate=Path('xlate'),
+                        lang=self.lang)
+        self.ctx = SimpleNamespace(layout=layout, dest=dest)
+
+    def tearDown(self):
+        self.tmp.cleanup()
+
+    def test_cleanup_copies_catalogs_and_keeps_player_files(self):
+        self.assertFalse(steps.catalogs_current(self.ctx))
+        steps.copy_catalogs(self.ctx)
+        self.assertTrue(steps.catalogs_current(self.ctx))
+        self.assertEqual((self.ctx.dest / 'lang' / 'user.mo').read_bytes(), b'user')
+        self.assertEqual((self.ctx.dest / 'lang' / 'user.po').read_text(encoding='utf-8'),
+                         'msgid ""\nmsgstr "user"\n')
+        (self.lang / 'xx.mo').write_bytes(b'changed')
+        self.assertFalse(steps.catalogs_current(self.ctx))
+        steps.copy_catalogs(self.ctx)
+        self.assertEqual((self.ctx.dest / 'lang' / 'xx.mo').read_bytes(), b'changed')
+        self.assertTrue(steps.catalogs_current(self.ctx))
+
+
 class RunnerTest(unittest.TestCase):
     def setUp(self):
         self.tmp = tempfile.TemporaryDirectory()
@@ -323,7 +359,8 @@ class CleanupTest(unittest.TestCase):
         self.ctx = SimpleNamespace(reporter=Reporter(out=io.StringIO(), log_path=base / 'x.log'), dest=self.dest,
                                    temp=temp, cache=self.dest / 'build-cache', lang='en-US', state={},
                                    layout=SimpleNamespace(ini_example=ROOT / 'astralchain.ini.example', dev=False,
-                                                          python=base / 'python' / 'python.exe', root=base / 'release'))
+                                                          python=base / 'python' / 'python.exe', root=base / 'release',
+                                                          lang=base / 'release' / 'lang'))
         self.saved = steps.expected_game
         steps.expected_game = lambda ctx: self.expected
 
@@ -350,6 +387,13 @@ class CleanupTest(unittest.TestCase):
         lines = (self.dest / 'build-cache' / 'rebuild.txt').read_text(encoding='utf-8').splitlines()
         self.assertEqual(lines[1:], ['-c', steps.REBUILD_BOOT, str(self.ctx.layout.root), '--root',
                                      str(self.ctx.layout.root), '--rebuild', str(self.dest)])
+
+    def test_copies_the_release_catalogs(self):
+        rel = self.ctx.layout.lang
+        rel.mkdir(parents=True)
+        (rel / 'it.mo').write_bytes(b'it')
+        self.assertEqual(self.run_cleanup(), 'ok')
+        self.assertEqual((self.dest / 'lang' / 'it.mo').read_bytes(), b'it')
 
     def test_installs_the_release_dlcs_and_keeps_the_players(self):
         rel = self.ctx.layout.root / 'dlc'

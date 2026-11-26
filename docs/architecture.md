@@ -1,6 +1,6 @@
 # Architecture
 
-How the Switch build of *Tears of the Kingdom* becomes a native Windows x86-64 program. The upstream projects it builds on are listed under Credits in the [README](../README.md).
+How the Switch build of *Astral Chain* 1.0.1 becomes a native Windows x86-64 program. The upstream projects it builds on are listed under Credits in the [README](../README.md).
 
 ## Starting points
 
@@ -143,9 +143,19 @@ MacNativeGames cannot run on x86-64 as is: its CPU path executes ARM64 code nati
   built: the pieced frames on the host, which would need a host stream per guest stream.
 - Settings and menu: every key with its default is in one table (`cfg.c`), read from `astralchain.ini` and `AC_*`
   variables and written back when the in-game menu changes it. The menu and the performance overlay are Dear ImGui,
-  drawn into the swapchain image (`runtime/ui/`); their text is in `ui_text.c` (English, Russian, Brazilian Portuguese,
-  Simplified Chinese). The Chinese glyphs come from a system font (Microsoft YaHei, `plat_font_path`) merged into the
-  font atlas.
+  drawn into the swapchain image (`runtime/ui/`). Their English text is compiled in (`ui_text.c`, the fallback of
+  every id); every other language is a gettext catalog, `lang/<tag>.po` in the repository and `lang/<tag>.mo` beside
+  the executable, read once at start (`msgctxt` the id, `msgid` the English source, `msgstr` the translation). Menu
+  catalogs (Italian, Russian, Brazilian Portuguese, Simplified Chinese) hold every id; keyboard catalogs (Japanese,
+  French, German, Spanish, Dutch, Portugal's Portuguese, Traditional Chinese, Korean) hold the game's name-entry
+  keyboard only. An entry counts only when its `msgid` is the build's English and the runtime's checks pass (UTF-8,
+  the English printf conversions, the keyboard's and the description pane's lengths), so a catalog made for older
+  English or a player's own file cannot show a stale or unsafe string. `tools/ui_text_catalogs.py`, which
+  `build_game.py` and the release builders run, merges the catalogs with the English as gettext's msgmerge does (a
+  changed source goes fuzzy, a new id comes in untranslated) and compiles the `.mo` files; docs/building.md "Texts and
+  translations" has the workflow. The Japanese, Korean and Chinese glyphs come from a system font (Microsoft YaHei and
+  the like, `plat_font_path`) merged into the font atlas, for the language names and for each catalog that names one
+  in its `X-Astral-Font-Lang` header.
 - OS calls the host makes go through `runtime/platform/` (`platform.h`, `win32.c`), so a Linux or macOS host adds one file instead of touching the rest. The split is not finished: `tools/check_platform.py` lists the Win32 uses left in the other files.
 
 #### Threads and cores
@@ -158,7 +168,22 @@ Every guest thread is a host thread. Astral Chain assumes Horizon's scheduler: t
   milliseconds with neither (`AC_CORE_DIAG=1` measures it): a waiter that has spun 250 us suspends the holder and,
   if its host rip is in lifted code (not inside a host call or SVC) at host depth 0 (not in guest code that a host
   function runs through `rt_call` or `rt_original`, the only ways host code may enter guest code), moves it to `kern_ap_stub`, which
-  saves the volatile registers and gives the core up there. A holder of a guest mutex counts at the priority of its
+  saves the volatile registers and gives the core up there. Which host addresses are game code comes from the lifted
+  function starts and the gaps between them (`ap_in_lifted`), not from the lowest and highest start: the installer and
+  the release compile the generated code with PGO and ThinLTO (`--release-opt`), which splits it into per-function hot
+  and cold sections that the linker sorts around the runtime's plain `.text`, so the runtime and its static libraries
+  fall *between* two runs of lifted code (the 1.0.1 release link map: starts in `exe+0x1000-exe+0x1208790` and
+  `exe+0x1551e60-exe+0x3851f90`, 3.29 MiB of runtime between them) and a lowest-to-highest range reads all of that
+  runtime as game code. In the same map the widest gap that is still one lifted function is 290 KiB, the 1 MiB margin
+  `ap_in_lifted` uses is 3.6 times it, and every one of the map's 1966 non-lifted code symbols falls in the runtime
+  run, so the test names the runtime's own code (`kern_ap_stub`, `kern_checkpoint`, `rt_svc`, `rt_dispatch`,
+  `rt_call`) host code on both layouts. A lowest-to-highest range decided it before, which turned asynchronous
+  preemption off in every build the installer and the release made and left it on in the development builds - and
+  "off" there switched off only the inheritance, the preemption disable and the range, not the interruption: those
+  builds' waiters still suspended and resumed the owner every millisecond and then declined every one (a player's log:
+  `virtual cores on ... lifted code exe+0-exe+0`). Off now switches off all of it, the interruption included, and the
+  log line names what it found (`lifted code: 2 ranges of 61454 starts` on the release link, 1 range on the plain
+  one). A holder of a guest mutex counts at the priority of its
   best waiter, and one inside an SDK spin lock (TLR+0x100 `disable_count`) is not preempted: its interrupt flag is set
   and the switch happens at SVC 0x36. `AC_ASYNC_PREEMPT=2` keeps those two without interrupting. The interruption is
   Win32 (SuspendThread, SetThreadContext); another host needs a signal handler there, as MacNativeGames has.
@@ -297,7 +322,8 @@ Every guest thread is a host thread. Astral Chain assumes Horizon's scheduler: t
 - Wide pictures on 1.0.1 (`aspect = wide`, the default; `resolution.c` `res_wide_tick`, set `wide` of
   `recomp/patches-v101.txt`, switched on the first time the window's shape is more than 1 % off 16:9;
   `cfg_migrate_aspect` removes, once, an ini `aspect = fit` or `stretch` from before the option and marks the file
-  with `aspect_migrated = 1`). The game's targets stay 16:9, since sizes off the 32n x 18n grid lose the device; a
+  with `aspect_migrated = 1`; the menu's Picture shape row switches it live between wide and `fit` (`stretch` is an ini value only), and
+  leaving wide sends the lenses back to 16:9 through the same sites, since the set stays on). The game's targets stay 16:9, since sizes off the 32n x 18n grid lose the device; a
   window wider than 16:9 (up to 48:9) gets them drawn with a wider camera instead, and a taller one (16:10, the Steam
   Deck's 1280x800, down to 4:3) with a taller camera that keeps the 16:9 view's width: where the projection is built
   from the lens's vertical angle, `rt_wide_angle24_s0` (or the fov set's helper on the same site) widens that angle
@@ -574,7 +600,19 @@ Every guest thread is a host thread. Astral Chain assumes Horizon's scheduler: t
   (`vk_texture.c` `shadow_scale_of`; 1 by default, the game's size): its depth-only pass draws at that
   size and the screen-space sun mask that reads it samples in UV, so edges get finer at the same softness. At x2 it
   takes 85 MiB of its own on an Arc 140T (the pool storage it no longer aliases stays) and its pass about 0.5 ms more.
-- Occlusion queries never block the CPU; a result that is not ready counts as visible.
+- Occlusion queries never block the CPU; a result that is not ready counts as visible. The samples-passed counters come
+  from a 4096-slot ring (`vk_exec_xfer.c`): the completion thread reads a segment's slots once its submission's fence
+  passed and publishes how far the ring got, and the replay then resets everything behind that watermark on the GPU, one
+  `vkCmdResetQueryPool` per contiguous run, at the head of the next pass - outside the render pass instance, which does
+  not allow the command, and after the pass chain's barrier test, so it neither needs a CPU wait nor resets a pool a
+  command buffer of an earlier part of a submission is still running (the host reset the completion thread used to make
+  raced that way, and the driver then left one query unavailable after its fence). A slot is handed out again only once
+  that reset is recorded, not as soon as it is read, since a slot read during the open pass is reset only at the head
+  of the next one; the pool is host-reset once at creation, which frees the first lap. It costs one command per frame
+  of segments and nothing measurable: 3262 frames in 60 s of a Moreno walk at 16.7 ms mean and 33 passes per submission,
+  the same as the run before the change, with no validation error (Arc 140T, Steam Deck profile, 1280x720, upscaling
+  off, 6.4-6.9 of the machine's 63.6 GiB of system RAM free the whole time because another process holds the rest),
+  and no validation error either in 90 s at the desktop profile on that GPU and on an RTX 5060 Ti.
 - ASTC textures are uploaded as they are where the device reports `textureCompressionASTC_LDR`, and decoded by a
   compute shader everywhere else (`vk_astc.c`, `AC_ASTC`). A discrete GPU with 6 GB of video memory or more keeps
   the decoded textures as RGBA8, their full quality (`AC_ASTC_BC=auto`, the default, resolves to `0`), and the

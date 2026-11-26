@@ -287,12 +287,14 @@ static int vk_up(const MenuTarget *t) {
 }
 
 // Roboto Medium (Latin, Cyrillic, dashes and quotes) at 26 px per 1080 lines, with the glyphs of the Japanese, Korean
-// and Chinese language names merged in from a system font when there is one (each language is named in its own script).
-// A catalog row also holds menu text (Simplified Chinese), so every string of the row goes into the builder: the merged
-// font must cover the whole menu of that language, not only its name. Made again when the window height changes; the old
-// texture goes after the queue is idle (CreateFontsTexture).
+// and Chinese language names merged in from a system font when there is one (each language is named in its own script,
+// in the Game tab's language row and the Menu tab's), and the glyphs of every catalog whose X-Astral-Font-Lang names
+// that font (ui_text.c): every string such a catalog has goes into the builder, since the merged font must cover the
+// whole menu of that language, not only its name. The four names are merged even without a lang folder, as before the
+// catalogs moved out of the executable. Made again when the window height changes; the old texture goes after the queue
+// is idle (CreateFontsTexture).
 static const ImWchar kRanges[] = {0x0020, 0x00FF, 0x0400, 0x052F, 0x2010, 0x2027, 0};
-static const struct { const char *lang; UiTextId name; } kCjk[] = {
+static const struct { const char *font; UiTextId name; } kCjk[] = {
     {"ja", UI_MENU_LANGNAME_JA}, {"ko", UI_MENU_LANGNAME_KO}, {"zh-Hans", UI_MENU_LANGNAME_ZH_HANS},
     {"zh-Hant", UI_MENU_LANGNAME_ZH_HANT},
 };
@@ -347,7 +349,7 @@ static void add_row_glyphs(void *ctx, const char *text) {
 }
 
 static int fonts_up(float scale) {
-    enum { N = sizeof kCjk / sizeof *kCjk };
+    enum { N = 16 };
     ImFontAtlas *fa = ImGui::GetIO().Fonts;
     fa->Clear();
     ImFontConfig fc;
@@ -355,27 +357,43 @@ static int fonts_up(float scale) {
     fa->AddFontFromMemoryTTF((void *)roboto_ttf, (int)sizeof roboto_ttf, 26.0f * scale, &fc, kRanges);
     uint8_t *data[N] = {};
     ImVector<ImWchar> ranges[N];
-    int merged = 0;
-    for (int i = 0; i < N; i++) {
+    // The system fonts to merge: the four of the CJK language names, then any other a catalog names
+    const char *fonts[N];
+    int tried = 0, merged = 0;
+    for (const auto &c : kCjk) fonts[tried++] = c.font;
+    for (int i = 0; i < ui_text_lang_count() && tried < N; i++) {
+        const char *f = ui_text_font_lang(ui_text_lang_at(i));
+        int seen = !f || !*f;
+        for (int j = 0; j < tried && !seen; j++) seen = !strcmp(fonts[j], f);
+        if (!seen) fonts[tried++] = f;
+    }
+    for (int k = 0; k < tried; k++) {
+        const char *font_lang = fonts[k];
         char path[512];
         uint64_t size = 0;
-        if (!plat_font_path(kCjk[i].lang, path, sizeof path) || !(data[i] = plat_file_read(path, &size))) continue;
-        if (!font_usable(data[i], size)) {
+        if (!plat_font_path(font_lang, path, sizeof path) || !(data[merged] = plat_file_read(path, &size))) continue;
+        if (!font_usable(data[merged], size)) {
             rt_log("menu: system font %s left out: the font parser cannot read it (%llu bytes)", path,
                    (unsigned long long)size);
-            free(data[i]);
-            data[i] = NULL;
+            free(data[merged]);
+            data[merged] = NULL;
             continue;
         }
-        merged++;
         ImFontGlyphRangesBuilder b;
-        b.AddText(ui_text_in("en", kCjk[i].name));
-        ui_text_visit(kCjk[i].lang, add_row_glyphs, &b);
-        b.BuildRanges(&ranges[i]);
+        for (const auto &c : kCjk)
+            if (!strcmp(c.font, font_lang)) b.AddText(ui_text_in("en", c.name));
+        for (int i = 0; i < ui_text_lang_count(); i++) {
+            const char *lang = ui_text_lang_at(i);
+            if (strcmp(ui_text_font_lang(lang), font_lang)) continue;
+            b.AddText(ui_text_lang_name(lang));
+            ui_text_visit(lang, add_row_glyphs, &b);
+        }
+        b.BuildRanges(&ranges[merged]);
         ImFontConfig mc;
         mc.MergeMode = true;
         mc.FontDataOwnedByAtlas = false;
-        fa->AddFontFromMemoryTTF(data[i], (int)size, 26.0f * scale, &mc, ranges[i].Data);
+        fa->AddFontFromMemoryTTF(data[merged], (int)size, 26.0f * scale, &mc, ranges[merged].Data);
+        merged++;
     }
     vk_queue_lock();   // the upload submits on the queue and waits for it
     int ok = ImGui_ImplVulkan_CreateFontsTexture();
@@ -383,7 +401,8 @@ static int fonts_up(float scale) {
     fa->ClearInputData();   // the glyphs are in the texture: the font files and the pixels are not needed again
     fa->ClearTexData();
     for (uint8_t *d : data) free(d);
-    rt_log("menu: font atlas at %.1f px, language names from %d of %d system fonts", 26.0f * scale, merged, (int)N);
+    rt_log("menu: font atlas at %.1f px, %d of %d system fonts merged (language names and catalogs)", 26.0f * scale,
+           merged, tried);
     g_font_scale = ok ? scale : 0;
     return ok;
 }
@@ -568,10 +587,10 @@ static void rows_upscaling(void) {
     const char *names[] = {menu_text(UI_MENU_UPSCALING_OFF), menu_text(UI_MENU_UPSCALING_AUTO), "NVIDIA DLSS",
                            "Intel XeSS", "AMD FSR 3", "AMD FSR 4"};
     const UiTextId desc = UI_MENU_UPSCALING_DESC;
-#else
-    static const char *const vals[] = {"off", "auto", "fsr3", "fsr4"};
-    const char *names[] = {menu_text(UI_MENU_UPSCALING_OFF), menu_text(UI_MENU_UPSCALING_AUTO), "AMD FSR 3",
-                           "AMD FSR 4"};
+#else   // DLSS through the driver's libnvidia-ngx.so.1 (vk_dlaa.c); XeSS is Windows only
+    static const char *const vals[] = {"off", "auto", "dlss", "fsr3", "fsr4"};
+    const char *names[] = {menu_text(UI_MENU_UPSCALING_OFF), menu_text(UI_MENU_UPSCALING_AUTO), "NVIDIA DLSS",
+                           "AMD FSR 3", "AMD FSR 4"};
     const UiTextId desc = UI_MENU_UPSCALING_DESC_OTHER;
 #endif
     enum { N = sizeof vals / sizeof *vals };
@@ -762,6 +781,13 @@ static void tab_screen(float scale) {
     static const UiTextId up[] = {UI_MENU_UPSCALER_FSR, UI_MENU_UPSCALER_BILINEAR};
     opt_choice("AC_UPSCALER", UI_MENU_UPSCALER, up, 2, UI_MENU_UPSCALER_DESC);
     opt_slider("AC_SHARPNESS", UI_MENU_SHARPNESS, 0, 100, UI_MENU_SHARPNESS_DESC, 5, "%.0f %%");
+    // Wide (the default) or the game's 16:9 with bars; stretch stays an ini value only, and shows as it is here. Live:
+    // resolution.c rereads it at the next present (wide_settings) and gfx_present.c gfx_fit_rect at each one.
+    {
+        static const char *const av[] = {"wide", "fit"};
+        const char *an[] = {menu_text(UI_MENU_ASPECT_WIDE), menu_text(UI_MENU_ASPECT_FIT)};
+        opt_choice_list("AC_ASPECT", UI_MENU_ASPECT, av, an, 2, UI_MENU_ASPECT_DESC);
+    }
     opt_slider("AC_FOV", UI_MENU_FOV, 70, 140, UI_MENU_FOV_DESC, 5, "%.0f %%");
     opt_slider("AC_DRAW_DISTANCE", UI_MENU_DRAW_DISTANCE, 100, 400, UI_MENU_DRAW_DISTANCE_DESC, 25, "%.0f %%");
     static const char *const aniso[] = {"auto", "game", "2", "4", "8", "16"};
@@ -1161,9 +1187,19 @@ static void tab_controls(float scale) {
 
 static void tab_menu(float scale) {
     opt_begin("##menu", scale);
-    static const UiTextId langs[] = {UI_MENU_MENU_LANG_AUTO, UI_MENU_LANGNAME_EN, UI_MENU_LANGNAME_RU,
-                                     UI_MENU_LANGNAME_PT_BR, UI_MENU_LANGNAME_ZH_HANS};
-    opt_choice("AC_MENU_LANG", UI_MENU_MENU_LANG, langs, sizeof langs / sizeof *langs, UI_MENU_MENU_LANG_DESC);
+    enum { MAX_LANGS = 32 };
+    const char *values[MAX_LANGS + 1], *names[MAX_LANGS + 1];
+    values[0] = "";
+    names[0] = menu_text(UI_MENU_MENU_LANG_AUTO);
+    int n = 0;   // English and the catalogs with menu text; a keyboard catalog has none to show
+    for (int i = 0; i < ui_text_lang_count() && n < MAX_LANGS; i++) {
+        const char *lang = ui_text_lang_at(i);
+        if (!ui_text_is_menu_lang(lang)) continue;
+        values[n + 1] = lang;
+        names[n + 1] = ui_text_lang_name(lang);
+        n++;
+    }
+    opt_choice_list("AC_MENU_LANG", UI_MENU_MENU_LANG, values, names, n + 1, UI_MENU_MENU_LANG_DESC);
     opt_end();
 }
 
